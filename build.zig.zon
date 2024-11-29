@@ -1,0 +1,6 @@
+.{
+    .name = "iter",
+    .version = "0.0.0",
+    .dependencies = .{},
+    .paths = .{ "" },
+}
