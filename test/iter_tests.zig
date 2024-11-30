@@ -5,6 +5,7 @@ const testing = std.testing;
 const Iter = iter_z.Iter;
 const ComparerResult = iter_z.ComparerResult;
 const Allocator = std.mem.Allocator;
+const SplitIterator = std.mem.SplitIterator;
 
 fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
     return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{ num });
@@ -18,6 +19,25 @@ fn compare(a: u8, b: u8) ComparerResult {
     if (a < b) {
         return .less_than;
     } else if (a > b) {
+        return .greater_than;
+    } else {
+        return .equal_to;
+    }
+}
+
+fn stringCompare(a: []const u8, b: []const u8) ComparerResult {
+    // basically alphabetical
+    for (0..@min(a.len, b.len)) |i| {
+        if (a[i] > b[i]) {
+            return .greater_than;
+        } else if (a[i] < b[i]) {
+            return .less_than;
+        }
+    }
+    // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
+    if (a.len > b.len) {
+        return .less_than;
+    } else if (a.len < b.len) {
         return .greater_than;
     } else {
         return .equal_to;
@@ -524,4 +544,63 @@ test "owned slice iterator" {
 
     try testing.expectEqual(7, expected);
 }
-// TODO : Test count(), all(), contains(), multi-threaded cases
+test "from other" {
+    const str = "this,is,a,string,to,split";
+    var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");
+
+    var iter = try Iter([]const u8).fromOther(testing.allocator, &split_iter, split_iter.buffer.len);
+    defer iter.deinit();
+
+    try testing.expectEqual(6, iter.len());
+
+    var result: ?[]const u8 = iter.next();
+    try testing.expectEqualStrings("this", result.?);
+
+    result = iter.next();
+    try testing.expectEqualStrings("is", result.?);
+
+    result = iter.next();
+    try testing.expectEqualStrings("a", result.?);
+
+    result = iter.next();
+    try testing.expectEqualStrings("string", result.?);
+
+    result = iter.next();
+    try testing.expectEqualStrings("to", result.?);
+
+    result = iter.next();
+    try testing.expectEqualStrings("split", result.?);
+
+    result = iter.next();
+    try testing.expect(result == null);
+
+    iter.reset();
+
+    try testing.expect(iter.contains("a", stringCompare));
+    try testing.expect(!iter.contains("blarf", stringCompare));
+    try testing.expect(iter.contains("this", stringCompare));
+
+    const ctx = struct {
+        pub fn isOneCharLong(s: []const u8) bool {
+            return s.len == 1;
+        }
+
+        pub fn isTwoCharsLong(s: []const u8) bool {
+            return s.len == 2;
+        }
+
+        pub fn hasNoComma(s: []const u8) bool {
+            var inner_iter = Iter(u8).from(s);
+            return !inner_iter.contains(',', compare);
+        }
+    };
+
+    try testing.expectEqual(1, iter.count(ctx.isOneCharLong));
+    try testing.expectEqual(2, iter.count(ctx.isTwoCharsLong));
+    try testing.expectEqual(6, iter.count(null));
+
+    try testing.expect(iter.all(ctx.hasNoComma));
+    try testing.expect(!iter.all(ctx.isOneCharLong));
+    try testing.expect(!iter.all(ctx.isTwoCharsLong));
+}
+// TODO : multi-threaded cases

@@ -92,7 +92,7 @@ pub fn AnonymousIterable(comptime T: type) type {
 }
 
 /// Iter source from a slice
-pub fn SliceIterable(comptime T: type) type {
+fn SliceIterable(comptime T: type) type {
     return struct {
         elements: []const T,
         idx: usize = 0,
@@ -102,7 +102,7 @@ pub fn SliceIterable(comptime T: type) type {
     };
 }
 
-pub fn ConcatIterable(comptime T: type) type {
+fn ConcatIterable(comptime T: type) type {
     return struct {
         const Self = @This();
 
@@ -431,6 +431,78 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
+        /// Take any type, given that it has a method called `next()` that takes no params apart from the receiver and returns `?T`.
+        /// Can use this to transform other iterators into `Iter(T)`.
+        ///
+        /// Unfortunately, we can only rely on the existence of a `next()` method.
+        /// So to get all the functionality in `Iter(T)` from another iterator, we have to enumerate the results to a new slice that this `Iter(T)` will own.
+        /// Be sure to call `deinit()` after use.
+        pub fn fromOther(
+            allocator: Allocator,
+            other: anytype,
+            length: usize)
+        Allocator.Error!
+        Self {
+            comptime var OtherType = @TypeOf(other);
+            comptime var is_ptr: bool = false;
+            comptime {
+                switch (@typeInfo(OtherType)) {
+                    .Pointer => |ptr| {
+                        OtherType = ptr.child;
+                        is_ptr = true;
+                    },
+                    else => { }
+                }
+
+                if (!std.meta.hasMethod(OtherType, "next")) {
+                    @compileError(@typeName(OtherType) ++ " does not define a method called 'next'.");
+                }
+                const method = @field(OtherType, "next");
+                const methodInfo: std.builtin.Type = @typeInfo(@TypeOf(method));
+                switch (methodInfo) {
+                    .Fn => |next_fn| {
+                        if (next_fn.return_type != ?T) {
+                            @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
+                        }
+                        if (next_fn.params.len != 1
+                            and is_ptr
+                            and next_fn.params[0] != @TypeOf(*OtherType)
+                        ) {
+                            @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not take in 0 parameters after the method receiver.");
+                        } else if (
+                            next_fn.params.len != 1
+                            and !is_ptr
+                            and next_fn.params[0] != @TypeOf(OtherType)
+                        ) {
+                            @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not take in 0 parameters after the method receiver.");
+                        }
+                    },
+                    else => unreachable
+                }
+            }
+            if (length == 0) {
+                return empty;
+            }
+            const buf: []T = try allocator.alloc(T, length);
+            errdefer allocator.free(buf);
+
+            var i: usize = 0;
+            while (@as(?T, @call(.auto, @field(OtherType, "next"), .{ other }))) |x| {
+                defer i += 1;
+                buf[i] = x;
+            }
+
+            // on the off-chance that we over-estimated our length
+            if (i < length) {
+                const final: []T = try allocator.alloc(T, i);
+                defer allocator.free(buf);
+
+                @memcpy(final, buf[0..i]);
+                return fromSliceOwned(allocator, final, null);
+            }
+            return fromSliceOwned(allocator, buf, null);
+        }
+
         /// Transform an iterator of type `T` to type `TOther`.
         /// Each element returned from `next()` will go through the `transform` function.
         pub fn select(
@@ -556,7 +628,7 @@ pub fn Iter(comptime T: type) type {
                             _ = self_ptr.next();
                         }
                     } else if (offset < 0) {
-                        for (0..@bitCast(@abs(offset))) |_| {
+                        for (0..@abs(offset)) |_| {
                             _ = self_ptr.prev();
                         }
                     }
@@ -781,13 +853,16 @@ pub fn Iter(comptime T: type) type {
         /// Scrolls back in place.
         pub fn contains(self: *Self, item: T, comparer: fn (T, T) ComparerResult) bool {
             const ctx = struct {
+                var ctx_item: T = undefined;
+
                 pub fn filter(x: T) bool {
-                    switch (comparer(item, x)) {
+                    return switch (comparer(ctx_item, x)) {
                         .equal_to => true,
                         else => false
-                    }
+                    };
                 }
             };
+            ctx.ctx_item = item;
             return self.any(ctx.filter, true) != null;
         }
 
