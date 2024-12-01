@@ -444,8 +444,8 @@ pub fn Iter(comptime T: type) type {
         Allocator.Error!
         Self {
             comptime var OtherType = @TypeOf(other);
-            comptime var is_ptr: bool = false;
             comptime {
+                var is_ptr: bool = false;
                 switch (@typeInfo(OtherType)) {
                     .Pointer => |ptr| {
                         OtherType = ptr.child;
@@ -488,11 +488,14 @@ pub fn Iter(comptime T: type) type {
 
             var i: usize = 0;
             while (@as(?T, @call(.auto, @field(OtherType, "next"), .{ other }))) |x| {
-                defer i += 1;
+                if (i >= length) {
+                    break;
+                }
                 buf[i] = x;
+                i += 1;
             }
 
-            // on the off-chance that we over-estimated our length
+            // if we over-estimated our length
             if (i < length) {
                 const final: []T = try allocator.alloc(T, i);
                 defer allocator.free(buf);
@@ -853,7 +856,7 @@ pub fn Iter(comptime T: type) type {
         /// Scrolls back in place.
         pub fn contains(self: *Self, item: T, comparer: fn (T, T) ComparerResult) bool {
             const ctx = struct {
-                var ctx_item: T = undefined;
+                threadlocal var ctx_item: T = undefined;
 
                 pub fn filter(x: T) bool {
                     return switch (comparer(ctx_item, x)) {
@@ -927,8 +930,8 @@ Iter(TOther) {
 
     const ctx = struct {
         // WARN : See above comment for static locals on `select()`
-        var ctx_alloc: Allocator = undefined;
-        var ctx_args: @TypeOf(args) = undefined;
+        threadlocal var ctx_alloc: Allocator = undefined;
+        threadlocal var ctx_args: @TypeOf(args) = undefined;
 
         pub fn implNext(impl: *anyopaque) ?TOther {
             const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
@@ -1014,7 +1017,7 @@ Iter(T) {
 
     const ctx = struct {
         // TEST : Is a static local allocator okay to do?
-        var ctx_alloc: Allocator = undefined;
+        threadlocal var ctx_alloc: Allocator = undefined;
 
         pub fn implNext(impl: *anyopaque) ?T {
             const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
