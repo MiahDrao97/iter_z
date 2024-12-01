@@ -458,8 +458,7 @@ pub fn Iter(comptime T: type) type {
                     @compileError(@typeName(OtherType) ++ " does not define a method called 'next'.");
                 }
                 const method = @field(OtherType, "next");
-                const methodInfo: std.builtin.Type = @typeInfo(@TypeOf(method));
-                switch (methodInfo) {
+                switch (@typeInfo(@TypeOf(method))) {
                     .Fn => |next_fn| {
                         if (next_fn.return_type != ?T) {
                             @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
@@ -487,7 +486,7 @@ pub fn Iter(comptime T: type) type {
             errdefer allocator.free(buf);
 
             var i: usize = 0;
-            while (@as(?T, @call(.auto, @field(OtherType, "next"), .{ other }))) |x| {
+            while (@as(?T, other.next())) |x| {
                 if (i >= length) {
                     break;
                 }
