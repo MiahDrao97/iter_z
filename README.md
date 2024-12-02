@@ -10,7 +10,7 @@ It's currently not threadsafe, but that's a pending feature.
 
 ## Examples
 ### Where
-```
+```zig
 var iter = Iter(u32).from(&[_]u32 { 1, 2, 3, 4, 5 });
 
 const ctx = struct {
@@ -26,7 +26,7 @@ while (evens.next()) |x| {
 ```
 
 ### Select
-```
+```zig
 const Allocator = @import("std").mem.Allocator;
 // ...
 var iter = Iter(u32).from(&[_]u32 { 224, 7842, 12, 1837, 0924 });
