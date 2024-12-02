@@ -447,7 +447,7 @@ pub fn Iter(comptime T: type) type {
             comptime {
                 var is_ptr: bool = false;
                 switch (@typeInfo(OtherType)) {
-                    .Pointer => |ptr| {
+                    .pointer => |ptr| {
                         OtherType = ptr.child;
                         is_ptr = true;
                     },
@@ -459,7 +459,7 @@ pub fn Iter(comptime T: type) type {
                 }
                 const method = @field(OtherType, "next");
                 switch (@typeInfo(@TypeOf(method))) {
-                    .Fn => |next_fn| {
+                    .@"fn" => |next_fn| {
                         if (next_fn.return_type != ?T) {
                             @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
                         }

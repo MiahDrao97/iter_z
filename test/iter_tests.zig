@@ -49,7 +49,7 @@ fn doStackFrames() void {
 }
 
 test "from" {
-    var iter = Iter(u8).from(&[_]u8 { 1, 2, 3 });
+    var iter: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
 
     var i: usize = 0;
     while (iter.next()) |x| {
@@ -60,7 +60,7 @@ test "from" {
     try testing.expect(i == 3);
 }
 test "select" {
-    var inner = Iter(u8).from(&[_]u8 { 1, 2, 3 });
+    var inner: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
     var iter = inner.select(Allocator.Error![]u8, numToStr, testing.allocator);
 
     try testing.expect(iter.len() == 3);
@@ -99,7 +99,7 @@ test "select" {
     try testing.expect(i == 3);
 }
 test "cloneReset" {
-    var iter = Iter(u8).from(&[_]u8 { 1, 2, 3 });
+    var iter: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
     defer iter.deinit();
 
     try testing.expect(iter.next() == 1);
@@ -117,7 +117,7 @@ test "cloneReset" {
 }
 test "where" {
     {
-        var inner = Iter(u8).from(&[_]u8 { 1, 2, 3 });
+        var inner: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
         var iter: Iter(u8) = inner.where(isEven);
         defer iter.deinit();
 
@@ -133,10 +133,8 @@ test "where" {
     }
     {
         var odds = [_]u8 { 1, 3, 5 };
-        var inner = Iter(u8).from(&odds);
-
+        var inner: Iter(u8) = .from(&odds);
         var iter: Iter(u8) = inner.where(isEven);
-        defer iter.deinit();
 
         try testing.expect(iter.len() == 3);
 
@@ -147,6 +145,7 @@ test "where" {
         }
 
         try testing.expect(i == 0);
+        try testing.expect(iter.count(null) == 0);
 
         var clone: Iter(u8) = try iter.cloneReset(testing.allocator);
         defer clone.deinit();
@@ -164,9 +163,8 @@ test "where" {
     }
 }
 test "toOwnedSlice" {
-    var inner = Iter(u8).from(&try util.range(u8, 1, 3));
+    var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var iter: Iter(u8) = inner.where(isEven);
-    defer iter.deinit();
 
     try testing.expect(iter.len() == 3);
 
@@ -186,7 +184,7 @@ test "toOwnedSlice" {
     try testing.expect(slice[0] == 2);
 }
 test "empty" {
-    var iter = Iter(u8).empty;
+    var iter: Iter(u8) = .empty;
 
     try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
@@ -196,7 +194,7 @@ test "empty" {
     try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
 
-    var next_empty = Iter(u8).empty;
+    var next_empty: Iter(u8) = .empty;
 
     try testing.expect(next_empty.len() == 0);
     try testing.expect(next_empty.next() == null);
@@ -210,11 +208,11 @@ test "empty" {
 test "concat" {
     {
         var chain = [_]Iter(u8) {
-            Iter(u8).from(&[_]u8 { 1, 2, 3 }),
-            Iter(u8).from(&[_]u8 { 4, 5, 6 }),
-            Iter(u8).from(&[_]u8 { 7, 8, 9 })
+            .from(&[_]u8 { 1, 2, 3 }),
+            .from(&[_]u8 { 4, 5, 6 }),
+            .from(&[_]u8 { 7, 8, 9 }),
         };
-        var iter = Iter(u8).concat(&chain);
+        var iter: Iter(u8) = .concat(&chain);
 
         try testing.expectEqual(9, iter.len());
 
@@ -243,9 +241,9 @@ test "concat" {
         try testing.expect(i == 4);
     }
     {
-        const other = Iter(u8).from(&[_]u8 { 1, 2, 3 });
-        var chain = [_]Iter(u8) { other, Iter(u8).empty };
-        var iter = Iter(u8).concat(&chain);
+        const other: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
+        var chain = [_]Iter(u8) { other, .empty };
+        var iter: Iter(u8) = .concat(&chain);
 
         try testing.expect(iter.len() == 3);
 
@@ -259,8 +257,8 @@ test "concat" {
 
         // need to reset before concating...
         iter.reset();
-        var chain2 = [_]Iter(u8) { iter, Iter(u8).empty };
-        var iter2 = Iter(u8).concat(&chain2);
+        var chain2 = [_]Iter(u8) { iter, .empty };
+        var iter2: Iter(u8) = .concat(&chain2);
 
         try testing.expect(iter2.len() == 3);
 
@@ -275,13 +273,13 @@ test "concat" {
 }
 // edge cases
 test "concat empty to empty" {
-    var chain = [_]Iter(u8) { Iter(u8).empty, Iter(u8).empty };
-    var iter = Iter(u8).concat(&chain);
+    var chain = [_]Iter(u8) { .empty, .empty };
+    var iter: Iter(u8) = .concat(&chain);
 
     try testing.expect(iter.len() == 0);
 }
 test "double deinit" {
-    var iter = Iter(u8).from("blarf");
+    var iter: Iter(u8) = .from("blarf");
     defer iter.deinit();
 
     // whoopsie, did it twice
@@ -292,7 +290,7 @@ test "double deinit" {
 test "orderBy" {
     const nums = [_]u8 { 2, 5, 7, 1, 6, 4, 3 };
 
-    var inner = Iter(u8).from(&nums);
+    var inner: Iter(u8) = .from(&nums);
     var iter: Iter(u8) = try inner.orderBy(testing.allocator, compare, .asc, null);
     defer iter.deinit();
 
@@ -305,7 +303,7 @@ test "orderBy" {
 
     try testing.expect(i == 7);
 
-    var inner2 = Iter(u8).from(&nums);
+    var inner2: Iter(u8) = .from(&nums);
     var iter2 = try inner2.orderBy(testing.allocator, compare, .desc, null);
     defer iter2.deinit();
 
@@ -318,7 +316,7 @@ test "orderBy" {
     try testing.expect(i == 0);
 }
 test "any" {
-    var iter = Iter(u8).from(&[_]u8 { 1, 3, 5 });
+    var iter: Iter(u8) = .from(&[_]u8 { 1, 3, 5 });
     defer iter.deinit();
 
     var result: ?u8 = iter.any(isEven, true);
@@ -335,7 +333,7 @@ test "any" {
     try testing.expect(result.? == 3);
 }
 test "single/single or none" {
-    var iter = Iter(u8).from("racecar");
+    var iter: Iter(u8) = .from("racecar");
     defer iter.deinit();
 
     const ctx = struct {
@@ -370,7 +368,7 @@ test "single/single or none" {
     try testing.expectError(error.MultipleElementsFound, iter.single(null));
 
     iter.deinit();
-    iter = Iter(u8).from("");
+    iter = .from("");
 
     try testing.expectError(error.NoElementsFound, iter.single(null));
 
@@ -378,7 +376,7 @@ test "single/single or none" {
     try testing.expect(result == null);
 
     iter.deinit();
-    iter = Iter(u8).from("x");
+    iter = .from("x");
 
     result = try iter.singleOrNone(null);
     try testing.expect(result.? == 'x');
@@ -387,7 +385,7 @@ test "single/single or none" {
     try testing.expect(result.? == 'x');
 }
 test "clone" {
-    var iter = Iter(u8).from("asdf");
+    var iter: Iter(u8) = .from("asdf");
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
@@ -403,7 +401,7 @@ test "clone" {
     try testing.expectEqual('d', clone2.next());
 }
 test "clone with where" {
-    var iter = Iter(u8).from(&[_]u8 { 1, 2, 3, 4, 5, 6 });
+    var iter: Iter(u8) = .from(&[_]u8 { 1, 2, 3, 4, 5, 6 });
     var outer: Iter(u8) = iter.where(isEven);
 
     var result: ?u8 = outer.next();
@@ -442,7 +440,7 @@ test "clone with select" {
     };
     var buf: [4]u8 = undefined;
 
-    var iter = Iter(u8).from(&try util.range(u8, 1, 6));
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
     var outer: Iter([]const u8) = iter.select([]const u8, ctx.asString, &buf);
 
     try testing.expectEqualStrings("1", outer.next().?);
@@ -481,7 +479,7 @@ test "Overlapping select edge cases" {
             return in * @as(u8, multiplier);
         }
     };
-    var iter = Iter(u8).from(&try util.range(u8, 1, 3));
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
@@ -522,7 +520,7 @@ test "owned slice iterator" {
         slice[i] = @as(u8, @truncate(i + 1));
     }
 
-    var iter = Iter(u8).fromSliceOwned(testing.allocator, slice, null);
+    var iter: Iter(u8) = .fromSliceOwned(testing.allocator, slice, null);
     defer iter.deinit();
 
     try testing.expectEqual(6, iter.len());
@@ -548,7 +546,7 @@ test "from other" {
     const str = "this,is,a,string,to,split";
     var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");
 
-    var iter = try Iter([]const u8).fromOther(testing.allocator, &split_iter, split_iter.buffer.len);
+    var iter: Iter([]const u8) = try .fromOther(testing.allocator, &split_iter, split_iter.buffer.len);
     defer iter.deinit();
 
     try testing.expectEqual(6, iter.len());
@@ -590,7 +588,7 @@ test "from other" {
         }
 
         pub fn hasNoComma(s: []const u8) bool {
-            var inner_iter = Iter(u8).from(s);
+            var inner_iter: Iter(u8) = .from(s);
             return !inner_iter.contains(',', compare);
         }
     };

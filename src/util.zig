@@ -6,7 +6,7 @@ const ComparerResult = iter.ComparerResult;
 
 pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}![len]T {
     switch (@typeInfo(T)) {
-        .Int => { },
+        .int => { },
         else => @compileError("Integer type required.")
     }
     if (len < 0) {
