@@ -1,5 +1,5 @@
 # iter_z
-Generic Iterator for Zig
+Generic Iterator for Zig - Leveraging Zig 0.14.0
 
 Inspired by C#'s `IEnumerable<T>` and the various transformations and filters provided by System.Linq.
 Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful queries.
@@ -11,7 +11,7 @@ It's currently not threadsafe, but that's a pending feature.
 ## Examples
 ### Where
 ```zig
-var iter = Iter(u32).from(&[_]u32 { 1, 2, 3, 4, 5 });
+var iter: Iter(u32) = .from(&[_]u32 { 1, 2, 3, 4, 5 });
 
 const ctx = struct {
     pub fn isEven(item: u32) bool {
@@ -29,7 +29,7 @@ while (evens.next()) |x| {
 ```zig
 const Allocator = @import("std").mem.Allocator;
 // ...
-var iter = Iter(u32).from(&[_]u32 { 224, 7842, 12, 1837, 0924 });
+var iter: Iter(u32) = .from(&[_]u32 { 224, 7842, 12, 1837, 0924 });
 
 const ctx = struct {
     pub fn toString(item: u32, allocator: anytype) Allocator.Error![]const u8 {
@@ -90,6 +90,7 @@ Filter the elements in your iterator, creating a new iterator with only those el
 Concatenate any number of iterators into 1. It will iterate in the same order the iterators were passed in.
 
 ### Order By
+Pass in a comparer function to order your iterator in ascending or descending order. Keep in mind that this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
 
 ### Any
 Find the next element with or without a filter. You can scroll back in place if you pass in `true` for `peek`. This is preferred over `where()` when you simply need to iterate with a filter. Just make sure that you pass in `false` for `peek`.
@@ -112,10 +113,13 @@ Determine if exactly 1 or 0 elements fulfill a condition or are left in the iter
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
 
 ### Contains
+Pass in a comparer function. Returns true if any element returns `.equal_to`. Scrolls back in place.
 
 ### Enumerate To Buffer
+Enumerate all elements to a buffer passed in from the current. If you wish to start at the beginning, be sure to call `reset()`. Returns a slice of the buffer.
 
 ### To Owned Slice
+Allocate a slice and enumerate all elements to it from the current offset. Caller owns the slice. If you wish to start at the beginning, be sure to call `reset()`.
 
 ## Implementation Details
 If you have a transformed iterator, it holds a pointer to the original. The original and the transformed iterator move forward together unless you create a clone. If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source.
