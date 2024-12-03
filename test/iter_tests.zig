@@ -601,4 +601,22 @@ test "from other" {
     try testing.expect(!iter.all(ctx.isOneCharLong));
     try testing.expect(!iter.all(ctx.isTwoCharsLong));
 }
+test "concat owned" {
+    const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
+    chain[0] = .from(&try util.range(u8, 1, 3));
+    chain[1] = .from(&try util.range(u8, 4, 3));
+    chain[2] = .from(&try util.range(u8, 7, 3));
+
+    var iter: Iter(u8) = .concatOwned(testing.allocator, chain);
+    defer iter.deinit();
+
+    try testing.expectEqual(9, iter.len());
+
+    var i: u8 = 0;
+    while (iter.next()) |x| {
+        i += 1;
+        try testing.expectEqual(i, x);
+    }
+    try testing.expectEqual(9, i);
+}
 // TODO : multi-threaded cases

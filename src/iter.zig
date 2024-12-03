@@ -431,6 +431,21 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
+        /// Merge several sources into one, except this resulting iterator owns `sources`.
+        ///
+        /// Be sure to call `deinit()` to free.
+        pub fn concatOwned(allocator: Allocator, sources: []Self) Self {
+            return .{
+                .variant = .{
+                    .concatenated = .{
+                        .sources = sources,
+                        .owns_sources = true,
+                        .allocator = allocator
+                    }
+                }
+            };
+        }
+
         /// Take any type, given that it has a method called `next()` that takes no params apart from the receiver and returns `?T`.
         /// Can use this to transform other iterators into `Iter(T)`.
         ///
