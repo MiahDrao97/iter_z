@@ -309,27 +309,19 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |s| {
                     if (s.owns_slice) {
-                        if (s.allocator) |alloc| {
-                            const elem_cpy: []T = try alloc.alloc(T, s.elements.len);
-                            @memcpy(elem_cpy, s.elements);
-                            return .{
-                                .variant = .{
-                                    .slice = .{
-                                        .elements = elem_cpy,
-                                        .idx = s.idx,
-                                        .owns_slice = true,
-                                        .allocator = alloc,
-                                        .on_deinit = s.on_deinit,
-                                    }
+                        return .{
+                            .variant = .{
+                                .slice = .{
+                                    .elements = try allocator.dupe(T, s.elements),
+                                    .idx = s.idx,
+                                    .owns_slice = true,
+                                    .allocator = allocator,
+                                    .on_deinit = s.on_deinit,
                                 }
-                            };
-                        } else unreachable;
+                            }
+                        };
                     }
-                    return .{
-                        .variant = .{
-                            .slice = s,
-                        }
-                    };
+                    return self;
                 },
                 .concatenated => |c| return try c.cloneToIter(allocator),
                 .anonymous => |a| return try a.clone(allocator),
@@ -523,11 +515,8 @@ pub fn Iter(comptime T: type) type {
 
             // if we over-estimated our length
             if (i < length) {
-                const final: []T = try allocator.alloc(T, i);
                 defer allocator.free(buf);
-
-                @memcpy(final, buf[0..i]);
-                return fromSliceOwned(allocator, final, null);
+                return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
             }
             return fromSliceOwned(allocator, buf, null);
         }
@@ -738,10 +727,7 @@ pub fn Iter(comptime T: type) type {
             defer allocator.free(buf);
 
             // pair buf down to final slice
-            const final: []T = try allocator.alloc(T, i);
-            @memcpy(final, buf[0..i]);
-
-            return final;
+            return try allocator.dupe(T, buf[0..i]);
         }
 
         /// Enumerates into new sorted slice.
