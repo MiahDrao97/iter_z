@@ -446,6 +446,18 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
+        /// Append `self` to `other`, resulting in a new concatenated iterator.
+        ///
+        /// Simply creates a 2-length slice and calls `concatOwned()`.
+        /// Be sure to free said slice by calling `deinit()`.
+        pub fn append(self: Self, allocator: Allocator, other: Self) Allocator.Error!Self {
+            const chain: []Self = try allocator.alloc(Self, 2);
+            chain[0] = self;
+            chain[1] = other;
+
+            return concatOwned(allocator, chain);
+        }
+
         /// Take any type, given that it has a method called `next()` that takes no params apart from the receiver and returns `?T`.
         /// Can use this to transform other iterators into `Iter(T)`.
         ///

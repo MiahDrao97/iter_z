@@ -619,4 +619,28 @@ test "concat owned" {
     }
     try testing.expectEqual(9, i);
 }
+test "append" {
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 4));
+
+    var result: ?u8 = iter.next();
+    try testing.expectEqual(1, result);
+
+    result = iter.next();
+    try testing.expectEqual(2, result);
+
+    // we interrupt this iteration to abruptly append it to another
+    var appended: Iter(u8) = try iter.append(testing.allocator, .from(&try util.range(u8, 5, 4)));
+    defer appended.deinit();
+
+    try testing.expectEqual(8, appended.len());
+
+    // pick up where we left off
+    var i: u8 = 2;
+    while (appended.next()) |x| {
+        i += 1;
+        try testing.expectEqual(i, x);
+    }
+
+    try testing.expectEqual(8, i);
+}
 // TODO : multi-threaded cases
