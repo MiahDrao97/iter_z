@@ -11,11 +11,11 @@ It's currently not threadsafe, but that's a pending feature.
 ## Examples
 ### Where
 ```zig
-var iter: Iter(u32) = .from(&[_]u32 { 1, 2, 3, 4, 5 });
+var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
 const ctx = struct {
     pub fn isEven(item: u32) bool {
-        return item % 2 == 0;
+        return @mod(item, 2) == 0;
     }
 };
 
@@ -28,8 +28,6 @@ while (evens.next()) |x| {
 ### Select
 ```zig
 const Allocator = @import("std").mem.Allocator;
-// ...
-var iter: Iter(u32) = .from(&[_]u32 { 224, 7842, 12, 1837, 0924 });
 
 const ctx = struct {
     pub fn toString(item: u32, allocator: anytype) Allocator.Error![]const u8 {
@@ -39,6 +37,7 @@ const ctx = struct {
 
 const allocator = @import("std").testing.allocator;
 
+var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
 var strings = iter.select(Allocator.Error![]const u8, ctx.toString, allocator);
 while (strings.next()) |maybe_str| {
     const str: []const u8 = try maybe_str;
