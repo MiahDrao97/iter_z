@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const SplitIterator = std.mem.SplitIterator;
 
 fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
-    return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{ num });
+    return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{num});
 }
 
 fn isEven(num: u8) bool {
@@ -49,7 +49,7 @@ fn doStackFrames() void {
 }
 
 test "from" {
-    var iter: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 
     var i: usize = 0;
     while (iter.next()) |x| {
@@ -60,7 +60,7 @@ test "from" {
     try testing.expect(i == 3);
 }
 test "select" {
-    var inner: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
+    var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var iter = inner.select(Allocator.Error![]u8, numToStr, testing.allocator);
 
     try testing.expect(iter.len() == 3);
@@ -74,7 +74,7 @@ test "select" {
             x.* += 1;
 
             var buf: [1]u8 = undefined;
-            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{ x.* }) catch unreachable;
+            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{x.*}) catch unreachable;
 
             const allocator: std.mem.Allocator = args.@"2";
 
@@ -99,7 +99,7 @@ test "select" {
     try testing.expect(i == 3);
 }
 test "cloneReset" {
-    var iter: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     defer iter.deinit();
 
     try testing.expect(iter.next() == 1);
@@ -117,7 +117,7 @@ test "cloneReset" {
 }
 test "where" {
     {
-        var inner: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
+        var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
         var iter: Iter(u8) = inner.where(isEven);
         defer iter.deinit();
 
@@ -132,7 +132,7 @@ test "where" {
         try testing.expect(i == 1);
     }
     {
-        var odds = [_]u8 { 1, 3, 5 };
+        var odds = [_]u8{ 1, 3, 5 };
         var inner: Iter(u8) = .from(&odds);
         var iter: Iter(u8) = inner.where(isEven);
 
@@ -207,10 +207,10 @@ test "empty" {
 }
 test "concat" {
     {
-        var chain = [_]Iter(u8) {
-            .from(&[_]u8 { 1, 2, 3 }),
-            .from(&[_]u8 { 4, 5, 6 }),
-            .from(&[_]u8 { 7, 8, 9 }),
+        var chain = [_]Iter(u8){
+            .from(&[_]u8{ 1, 2, 3 }),
+            .from(&[_]u8{ 4, 5, 6 }),
+            .from(&[_]u8{ 7, 8, 9 }),
         };
         var iter: Iter(u8) = .concat(&chain);
 
@@ -241,8 +241,8 @@ test "concat" {
         try testing.expect(i == 4);
     }
     {
-        const other: Iter(u8) = .from(&[_]u8 { 1, 2, 3 });
-        var chain = [_]Iter(u8) { other, .empty };
+        const other: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+        var chain = [_]Iter(u8){ other, .empty };
         var iter: Iter(u8) = .concat(&chain);
 
         try testing.expect(iter.len() == 3);
@@ -257,7 +257,7 @@ test "concat" {
 
         // need to reset before concating...
         iter.reset();
-        var chain2 = [_]Iter(u8) { iter, .empty };
+        var chain2 = [_]Iter(u8){ iter, .empty };
         var iter2: Iter(u8) = .concat(&chain2);
 
         try testing.expect(iter2.len() == 3);
@@ -273,7 +273,7 @@ test "concat" {
 }
 // edge cases
 test "concat empty to empty" {
-    var chain = [_]Iter(u8) { .empty, .empty };
+    var chain = [_]Iter(u8){ .empty, .empty };
     var iter: Iter(u8) = .concat(&chain);
 
     try testing.expect(iter.len() == 0);
@@ -288,7 +288,7 @@ test "double deinit" {
     try testing.expect(next == null);
 }
 test "orderBy" {
-    const nums = [_]u8 { 2, 5, 7, 1, 6, 4, 3 };
+    const nums = [_]u8{ 2, 5, 7, 1, 6, 4, 3 };
 
     var inner: Iter(u8) = .from(&nums);
     var iter: Iter(u8) = try inner.orderBy(testing.allocator, compare, .asc, null);
@@ -316,7 +316,7 @@ test "orderBy" {
     try testing.expect(i == 0);
 }
 test "any" {
-    var iter: Iter(u8) = .from(&[_]u8 { 1, 3, 5 });
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
     var result: ?u8 = iter.any(isEven, true);
@@ -401,7 +401,7 @@ test "clone" {
     try testing.expectEqual('d', clone2.next());
 }
 test "clone with where" {
-    var iter: Iter(u8) = .from(&[_]u8 { 1, 2, 3, 4, 5, 6 });
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
     var outer: Iter(u8) = iter.where(isEven);
 
     var result: ?u8 = outer.next();
@@ -431,11 +431,11 @@ test "clone with where" {
 test "clone with select" {
     const ctx = struct {
         pub fn asString(byte: u8, buf: anytype) []const u8 {
-            return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{ byte }) catch unreachable;
+            return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{byte}) catch unreachable;
         }
 
         pub fn asHexString(byte: u8, buf: anytype) []const u8 {
-            return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{ byte }) catch unreachable;
+            return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{byte}) catch unreachable;
         }
     };
     var buf: [4]u8 = undefined;

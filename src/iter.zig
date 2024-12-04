@@ -15,6 +15,7 @@ pub fn AnonymousIterable(comptime T: type) type {
     return struct {
         const Self = @This();
 
+        // zig fmt: off
         pub const VTable = struct {
             next_fn:            *const fn (*anyopaque) ?T,
             prev_fn:            *const fn (*anyopaque) ?T,
@@ -26,6 +27,7 @@ pub fn AnonymousIterable(comptime T: type) type {
             get_len_fn:         *const fn (*anyopaque) usize,
             deinit_fn:          *const fn (*anyopaque) void,
         };
+        // zig fmt: on
 
         ptr: *anyopaque,
         v_table: *const VTable,
@@ -55,7 +57,7 @@ pub fn AnonymousIterable(comptime T: type) type {
             self.v_table.scroll_fn(self.ptr, amount);
         }
 
-        /// Determine if this iterator can use `scroll()` or `setIndex()`.
+        /// Determine if this iterator can use `setIndex()`.
         ///
         /// Indexing is only available when this iterator returns the same number of elements as its `len()`.
         /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
@@ -85,7 +87,7 @@ pub fn AnonymousIterable(comptime T: type) type {
         /// Convert to `Iter(T)`
         pub fn iter(self: Self) Iter(T) {
             return .{
-                .variant = .{ .anonymous = self }
+                .variant = .{ .anonymous = self },
             };
         }
     };
@@ -152,7 +154,7 @@ fn ConcatIterable(comptime T: type) type {
                     _ = self.next();
                 }
             } else if (offset < 0) {
-                for (0..@bitCast(@abs(offset))) |_| {
+                for (0..@abs(offset)) |_| {
                     _ = self.prev();
                 }
             }
@@ -174,13 +176,13 @@ fn ConcatIterable(comptime T: type) type {
             }
             return .{
                 .variant = .{
-                    .concatenated = .{
+                    .concatenated = ConcatIterable(T){
                         .sources = sources_cpy,
                         .idx = self.idx,
                         .owns_sources = true,
-                        .allocator = allocator
-                    }
-                }
+                        .allocator = allocator,
+                    },
+                },
             };
         }
 
@@ -251,7 +253,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| return c.prev(),
                 .anonymous => |a| return a.prev(),
-                .empty => return null
+                .empty => return null,
             }
         }
 
@@ -260,7 +262,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| s.idx = index,
                 .anonymous => |a| try a.setIndex(index),
-                else => return error.NoIndexing
+                else => return error.NoIndexing,
             }
         }
 
@@ -270,7 +272,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |*s| s.idx = 0,
                 .concatenated => |*c| c.reset(),
                 .anonymous => |a| a.reset(),
-                .empty => { }
+                .empty => {},
             }
         }
 
@@ -287,11 +289,11 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.scroll(offset),
                 .anonymous => |a| a.scroll(offset),
-                else => { }
+                else => {},
             }
         }
 
-        /// Determine if this iterator can use `scroll()` or `setIndex()`.
+        /// Determine if this iterator can use `setIndex()`.
         ///
         /// Indexing is only available when this iterator returns the same number of elements as its `len()`.
         /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
@@ -300,7 +302,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => return true,
                 .anonymous => |a| return a.hasIndexing(),
-                else => return false
+                else => return false,
             }
         }
 
@@ -310,22 +312,22 @@ pub fn Iter(comptime T: type) type {
                 .slice => |s| {
                     if (s.owns_slice) {
                         return .{
-                            .variant = .{
-                                .slice = .{
+                            .variant = Variant{
+                                .slice = SliceIterable(T){
                                     .elements = try allocator.dupe(T, s.elements),
                                     .idx = s.idx,
                                     .owns_slice = true,
                                     .allocator = allocator,
                                     .on_deinit = s.on_deinit,
-                                }
-                            }
+                                },
+                            },
                         };
                     }
                     return self;
                 },
                 .concatenated => |c| return try c.cloneToIter(allocator),
                 .anonymous => |a| return try a.clone(allocator),
-                .empty => return self
+                .empty => return self,
             }
         }
 
@@ -345,7 +347,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |s| return s.elements.len,
                 .concatenated => |c| return c.len(),
                 .anonymous => |a| return a.len(),
-                .empty => return 0
+                .empty => return 0,
             }
         }
 
@@ -368,7 +370,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.deinit(),
                 .anonymous => |a| a.deinit(),
-                .empty => { }
+                .empty => {},
             }
             self.* = empty;
         }
@@ -380,27 +382,31 @@ pub fn Iter(comptime T: type) type {
         /// The iterator does not own `slice`, however, and so a `deinit()` call is a no-op.
         pub fn from(slice: []const T) Self {
             return .{
-                .variant = Variant {
-                    .slice = SliceIterable(T) {
+                .variant = Variant{
+                    .slice = SliceIterable(T){
                         .elements = slice,
-                        .owns_slice = false
-                    }
-                }
+                        .owns_slice = false,
+                    },
+                },
             };
         }
 
         /// Instantiate a new iterator, using `slice` as our source.
         /// This iterator owns slice: calling `deinit()` will free it.
-        pub fn fromSliceOwned(allocator: Allocator, slice: []const T, on_deinit: ?*const fn ([]T) void) Self {
+        pub fn fromSliceOwned(
+            allocator: Allocator,
+            slice: []const T,
+            on_deinit: ?*const fn ([]T) void,
+        ) Self {
             return .{
-                .variant = Variant {
-                    .slice = SliceIterable(T) {
+                .variant = Variant{
+                    .slice = SliceIterable(T){
                         .elements = slice,
                         .owns_slice = true,
                         .on_deinit = on_deinit,
                         .allocator = allocator,
-                    }
-                }
+                    },
+                },
             };
         }
 
@@ -413,13 +419,13 @@ pub fn Iter(comptime T: type) type {
                 return sources[0];
             }
 
-            return Self {
-                .variant = .{
-                    .concatenated = .{
+            return .{
+                .variant = Variant{
+                    .concatenated = ConcatIterable(T){
                         .sources = sources,
                         .owns_sources = false,
                     },
-                }
+                },
             };
         }
 
@@ -428,13 +434,13 @@ pub fn Iter(comptime T: type) type {
         /// Be sure to call `deinit()` to free.
         pub fn concatOwned(allocator: Allocator, sources: []Self) Self {
             return .{
-                .variant = .{
-                    .concatenated = .{
+                .variant = Variant{
+                    .concatenated = ConcatIterable(T){
                         .sources = sources,
                         .owns_sources = true,
-                        .allocator = allocator
-                    }
-                }
+                        .allocator = allocator,
+                    },
+                },
             };
         }
 
@@ -456,12 +462,7 @@ pub fn Iter(comptime T: type) type {
         /// Unfortunately, we can only rely on the existence of a `next()` method.
         /// So to get all the functionality in `Iter(T)` from another iterator, we have to enumerate the results to a new slice that this `Iter(T)` will own.
         /// Be sure to call `deinit()` after use.
-        pub fn fromOther(
-            allocator: Allocator,
-            other: anytype,
-            length: usize)
-        Allocator.Error!
-        Self {
+        pub fn fromOther(allocator: Allocator, other: anytype, length: usize) Allocator.Error!Self {
             comptime var OtherType = @TypeOf(other);
             comptime {
                 var is_ptr: bool = false;
@@ -470,7 +471,7 @@ pub fn Iter(comptime T: type) type {
                         OtherType = ptr.child;
                         is_ptr = true;
                     },
-                    else => { }
+                    else => {},
                 }
 
                 if (!std.meta.hasMethod(OtherType, "next")) {
@@ -482,20 +483,13 @@ pub fn Iter(comptime T: type) type {
                         if (next_fn.return_type != ?T) {
                             @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
                         }
-                        if (next_fn.params.len != 1
-                            and is_ptr
-                            and next_fn.params[0] != @TypeOf(*OtherType)
-                        ) {
+                        if (next_fn.params.len != 1 and is_ptr and next_fn.params[0] != @TypeOf(*OtherType)) {
                             @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not take in 0 parameters after the method receiver.");
-                        } else if (
-                            next_fn.params.len != 1
-                            and !is_ptr
-                            and next_fn.params[0] != @TypeOf(OtherType)
-                        ) {
+                        } else if (next_fn.params.len != 1 and !is_ptr and next_fn.params[0] != @TypeOf(OtherType)) {
                             @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not take in 0 parameters after the method receiver.");
                         }
                     },
-                    else => unreachable
+                    else => unreachable,
                 }
             }
             if (length == 0) {
@@ -527,8 +521,8 @@ pub fn Iter(comptime T: type) type {
             self: *Self,
             comptime TOther: type,
             transform: fn (T, anytype) TOther,
-            args: anytype)
-        Iter(TOther) {
+            args: anytype,
+        ) Iter(TOther) {
             const ctx = struct {
                 // WARN : In testing, this didn't cause problems, but I still feel skeptical about this working in all scenarios.
                 // Static locals feel like a dangerous way to store state.
@@ -599,7 +593,7 @@ pub fn Iter(comptime T: type) type {
                     .clone_fn = &ctx.implClone,
                     .get_len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,
-                }
+                },
             };
             return transformed.iter();
         }
@@ -652,7 +646,9 @@ pub fn Iter(comptime T: type) type {
                     }
                 }
 
-                pub fn implHasIndexing(_: *anyopaque) bool { return false; }
+                pub fn implHasIndexing(_: *anyopaque) bool {
+                    return false;
+                }
 
                 pub fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
@@ -682,7 +678,7 @@ pub fn Iter(comptime T: type) type {
                     .clone_fn = &ctx.implClone,
                     .get_len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,
-                }
+                },
             };
             return filtered.iter();
         }
@@ -739,9 +735,8 @@ pub fn Iter(comptime T: type) type {
             self: *Self,
             allocator: Allocator,
             comparer: fn (T, T) ComparerResult,
-            ordering: Ordering)
-        Allocator.Error!
-        []T {
+            ordering: Ordering,
+        ) Allocator.Error![]T {
             const slice: []T = try self.toOwnedSlice(allocator);
 
             util.sort(T, slice, 0, slice.len - 1, comparer, ordering);
@@ -756,9 +751,8 @@ pub fn Iter(comptime T: type) type {
             allocator: Allocator,
             comparer: fn (T, T) ComparerResult,
             ordering: Ordering,
-            on_deinit: ?*const fn ([]T) void)
-        Allocator.Error!
-        Self {
+            on_deinit: ?*const fn ([]T) void,
+        ) Allocator.Error!Self {
             const slice: []T = try self.toSortedSliceOwned(allocator, comparer, ordering);
             return fromSliceOwned(allocator, slice, on_deinit);
         }
@@ -798,9 +792,7 @@ pub fn Iter(comptime T: type) type {
         /// Ensure there is exactly 1 or 0 elements that match the given `filter`.
         ///
         /// Will scroll back in place
-        pub fn singleOrNone(self: *Self, filter: ?fn (T) bool)
-        error { MultipleElementsFound }!
-        ?T {
+        pub fn singleOrNone(self: *Self, filter: ?fn (T) bool) error{MultipleElementsFound}!?T {
             if (self.len() == 0) {
                 return null;
             }
@@ -836,9 +828,8 @@ pub fn Iter(comptime T: type) type {
         /// Will scroll back in place
         pub fn single(
             self: *Self,
-            filter: ?fn (T) bool)
-        error { NoElementsFound, MultipleElementsFound }!
-        T {
+            filter: ?fn (T) bool,
+        ) error{ NoElementsFound, MultipleElementsFound }!T {
             return try self.singleOrNone(filter) orelse return error.NoElementsFound;
         }
 
@@ -848,8 +839,8 @@ pub fn Iter(comptime T: type) type {
             action: fn (T, anytype) anyerror!void,
             on_err: ?fn (anyerror, T, anytype) void,
             terminate_on_err: bool,
-            args: anytype)
-        void {
+            args: anytype,
+        ) void {
             while (self.next()) |x| {
                 action(x, args) catch |err| {
                     if (on_err) |execute_on_err| {
@@ -873,7 +864,7 @@ pub fn Iter(comptime T: type) type {
                 pub fn filter(x: T) bool {
                     return switch (comparer(ctx_item, x)) {
                         .equal_to => true,
-                        else => false
+                        else => false,
                     };
                 }
             };
@@ -934,9 +925,8 @@ fn cloneTransformedIter(
     transform: fn (T, anytype) TOther,
     args: anytype,
     iter: *Iter(T),
-    allocator: Allocator)
-Allocator.Error!
-Iter(TOther) {
+    allocator: Allocator,
+) Allocator.Error!Iter(TOther) {
     const ptr: *Iter(T) = try allocator.create(Iter(T));
     ptr.* = iter.*;
 
@@ -1012,7 +1002,7 @@ Iter(TOther) {
             .clone_fn = &ctx.implClone,
             .get_len_fn = &ctx.implLen,
             .deinit_fn = &ctx.implDeinit,
-        }
+        },
     };
     return clone.iter();
 }
@@ -1021,9 +1011,8 @@ fn cloneFilteredFromIter(
     comptime T: type,
     allocator: Allocator,
     iter: *Iter(T),
-    filter: fn (T) bool)
-Allocator.Error!
-Iter(T) {
+    filter: fn (T) bool,
+) Allocator.Error!Iter(T) {
     const ptr: *Iter(T) = try allocator.create(Iter(T));
     ptr.* = iter.*;
 
@@ -1073,7 +1062,9 @@ Iter(T) {
             }
         }
 
-        pub fn implHasIndexing(_: *anyopaque) bool { return false; }
+        pub fn implHasIndexing(_: *anyopaque) bool {
+            return false;
+        }
 
         pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
             const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
@@ -1105,7 +1096,7 @@ Iter(T) {
             .clone_fn = &ctx.implClone,
             .get_len_fn = &ctx.implLen,
             .deinit_fn = &ctx.implDeinit,
-        }
+        },
     };
     return clone.iter();
 }

@@ -12,7 +12,7 @@ pub fn build(b: *Build) void {
     {
         const iter_test: *Build.Step.Compile = b.addTest(.{
             .root_source_file = b.path("test/iter_tests.zig"),
-            .target =  target,
+            .target = target,
             .optimize = optimize,
         });
         iter_test.root_module.addImport("iter_z", iter_module);
