@@ -195,10 +195,10 @@ fn ConcatIterable(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            for (self.sources) |*s| {
-                s.deinit();
-            }
             if (self.owns_sources) {
+                for (self.sources) |*s| {
+                    s.deinit();
+                }
                 if (self.allocator) |alloc| {
                     alloc.free(self.sources);
                 } else unreachable;
@@ -410,8 +410,9 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Concatenates several iterators into one.
-        /// They'll iterate in the order they're passed in.
+        /// Concatenates several iterators into one. They'll iterate in the order they're passed in.
+        ///
+        /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
         pub fn concat(sources: []Self) Self {
             if (sources.len == 0) {
                 return empty;
@@ -463,8 +464,8 @@ pub fn Iter(comptime T: type) type {
         /// So to get all the functionality in `Iter(T)` from another iterator, we have to enumerate the results to a new slice that this `Iter(T)` will own.
         /// Be sure to call `deinit()` after use.
         pub fn fromOther(allocator: Allocator, other: anytype, length: usize) Allocator.Error!Self {
-            comptime var OtherType = @TypeOf(other);
             comptime {
+                var OtherType = @TypeOf(other);
                 var is_ptr: bool = false;
                 switch (@typeInfo(OtherType)) {
                     .pointer => |ptr| {
@@ -500,9 +501,8 @@ pub fn Iter(comptime T: type) type {
 
             var i: usize = 0;
             while (@as(?T, other.next())) |x| {
-                if (i >= length) {
-                    break;
-                }
+                if (i >= length) break;
+
                 buf[i] = x;
                 i += 1;
             }
@@ -524,8 +524,8 @@ pub fn Iter(comptime T: type) type {
             args: anytype,
         ) Iter(TOther) {
             const ctx = struct {
-                // WARN : In testing, this didn't cause problems, but I still feel skeptical about this working in all scenarios.
-                // Static locals feel like a dangerous way to store state.
+                // WARN : In testing and in use for other code bases, this didn't cause problems.
+                // However, I feel skeptical about this working in all scenarios, since static locals feel like a dangerous way to store state.
                 threadlocal var ctx_args: @TypeOf(args) = undefined;
 
                 pub fn implNext(impl: *anyopaque) ?TOther {
@@ -688,13 +688,16 @@ pub fn Iter(comptime T: type) type {
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
         ///
         /// Returns a slice of `buf`, containing the enumerated elements.
+        /// If there are more elements than space on `buf`, returns `error.NoSpaceLeft`.
+        /// However, the buffer will hold the encountered elements.
         pub fn enumerateToBuffer(self: *Self, buf: []T) error{NoSpaceLeft}![]T {
-            if (buf.len < self.len()) {
-                return error.NoSpaceLeft;
-            }
-
             var i: usize = 0;
             while (self.next()) |x| {
+                if (i >= buf.len) {
+                    self.scroll(-1);
+                    return error.NoSpaceLeft;
+                }
+
                 buf[i] = x;
                 i += 1;
             }

@@ -643,4 +643,43 @@ test "append" {
 
     try testing.expectEqual(8, i);
 }
+test "enumerate to buffer" {
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+    var buf1: [8]u8 = undefined;
+
+    const result: []u8 = try iter.enumerateToBuffer(&buf1);
+    for (result, 1..) |x, i| {
+        try testing.expectEqual(i, x);
+    }
+
+    iter.reset();
+    var buf2: [4]u8 = undefined;
+
+    try testing.expectError(error.NoSpaceLeft, iter.enumerateToBuffer(&buf2));
+    for (&buf2, 1..) |x, i| {
+        return testing.expectEqual(i, x);
+    }
+
+    try testing.expectEqual(5, iter.next());
+}
+test "set index" {
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+
+    try iter.setIndex(2);
+    try testing.expectEqual(3, iter.next());
+
+    const ctx = struct {
+        var buf: [1]u8 = undefined;
+        pub fn toString(byte: u8, _: anytype) []const u8 {
+            return std.fmt.bufPrint(&buf, "{d}", .{byte}) catch &buf;
+        }
+    };
+
+    var transformed: Iter([]const u8) = iter.select([]const u8, ctx.toString, {});
+    try transformed.setIndex(5);
+    try testing.expectEqualStrings("6", transformed.next().?);
+
+    var filtered: Iter(u8) = iter.where(isEven);
+    try testing.expectError(error.NoIndexing, filtered.setIndex(0));
+}
 // TODO : multi-threaded cases
