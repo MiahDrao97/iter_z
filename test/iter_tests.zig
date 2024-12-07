@@ -549,6 +549,40 @@ test "Overlapping select edge cases" {
 
     result = tripler_clone.next();
     try testing.expectEqual(9, result);
+
+    doubler.reset();
+    tripler.reset();
+
+    var doubler_cpy: Iter(u32) = doubler;
+    var tripler_cpy: Iter(u32) = tripler;
+
+    result = doubler_cpy.next();
+    try testing.expectEqual(2, result);
+
+    doStackFrames();
+
+    result = tripler_cpy.next();
+    try testing.expectEqual(3, result);
+
+    doStackFrames();
+
+    result = doubler_cpy.next();
+    try testing.expectEqual(4, result);
+
+    doStackFrames();
+
+    result = tripler_cpy.next();
+    try testing.expectEqual(6, result);
+
+    doStackFrames();
+
+    result = doubler_cpy.next();
+    try testing.expectEqual(6, result);
+
+    doStackFrames();
+
+    result = tripler_cpy.next();
+    try testing.expectEqual(9, result);
 }
 test "owned slice iterator" {
     const slice: []u8 = try testing.allocator.alloc(u8, 6);

@@ -862,7 +862,7 @@ pub fn Iter(comptime T: type) type {
         /// Scrolls back in place.
         pub fn contains(self: *Self, item: T, comparer: fn (T, T) ComparerResult) bool {
             const ctx = struct {
-                // WARN : Same issue as `select()`
+                // not worried about this static local because it doesn't create an iterator
                 threadlocal var ctx_item: T = undefined;
 
                 pub fn filter(x: T) bool {
