@@ -566,7 +566,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return try cloneTransformedIter(T, TOther, transform, ctx_args, self_ptr, allocator);
+                    return try cloneTransformedIter(T, TOther, transform, ctx_args, self_ptr.*, allocator);
                 }
 
                 pub fn implLen(impl: *anyopaque) usize {
@@ -652,7 +652,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return try cloneFilteredFromIter(T, allocator, self_ptr, filter);
+                    return try cloneFilteredFromIter(T, allocator, self_ptr.*, filter);
                 }
 
                 pub fn implLen(impl: *anyopaque) usize {
@@ -922,76 +922,84 @@ pub fn Iter(comptime T: type) type {
     };
 }
 
+fn CloneIter(comptime T: type) type {
+    return struct {
+        iter: Iter(T),
+        allocator: Allocator,
+    };
+}
+
 fn cloneTransformedIter(
     comptime T: type,
     comptime TOther: type,
     transform: fn (T, anytype) TOther,
     args: anytype,
-    iter: *Iter(T),
+    iter: Iter(T),
     allocator: Allocator,
 ) Allocator.Error!Iter(TOther) {
-    const ptr: *Iter(T) = try allocator.create(Iter(T));
-    ptr.* = iter.*;
+    const ptr: *CloneIter(T) = try allocator.create(CloneIter(T));
+    ptr.* = .{
+        .iter = iter,
+        .allocator = allocator
+    };
 
     const ctx = struct {
         // WARN : See above comment for static locals on `select()`
-        threadlocal var ctx_alloc: Allocator = undefined;
         threadlocal var ctx_args: @TypeOf(args) = undefined;
 
         pub fn implNext(impl: *anyopaque) ?TOther {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            if (self_ptr.next()) |x| {
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            if (self_ptr.iter.next()) |x| {
                 return transform(x, ctx_args);
             }
             return null;
         }
 
         pub fn implPrev(impl: *anyopaque) ?TOther {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            if (self_ptr.prev()) |x| {
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            if (self_ptr.iter.prev()) |x| {
                 return transform(x, ctx_args);
             }
             return null;
         }
 
         pub fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            try self_ptr.setIndex(to);
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            try self_ptr.iter.setIndex(to);
         }
 
         pub fn implReset(impl: *anyopaque) void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            self_ptr.reset();
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.reset();
         }
 
         pub fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            self_ptr.scroll(offset);
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.scroll(offset);
         }
 
         pub fn implHasIndexing(impl: *anyopaque) bool {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return self_ptr.hasIndexing();
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            return self_ptr.iter.hasIndexing();
         }
 
         pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return try cloneTransformedIter(T, TOther, transform, ctx_args, self_ptr, alloc);
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            return try cloneTransformedIter(T, TOther, transform, ctx_args, self_ptr.iter, alloc);
         }
 
         pub fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return self_ptr.len();
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            return self_ptr.iter.len();
         }
 
         pub fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            self_ptr.deinit();
-            ctx_alloc.destroy(self_ptr);
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.deinit();
+            self_ptr.allocator.destroy(self_ptr);
         }
     };
 
-    ctx.ctx_alloc = allocator;
     ctx.ctx_args = args;
     const clone: AnonymousIterable(TOther) = .{
         .ptr = ptr,
@@ -1013,19 +1021,19 @@ fn cloneTransformedIter(
 fn cloneFilteredFromIter(
     comptime T: type,
     allocator: Allocator,
-    iter: *Iter(T),
+    iter: Iter(T),
     filter: fn (T) bool,
 ) Allocator.Error!Iter(T) {
-    const ptr: *Iter(T) = try allocator.create(Iter(T));
-    ptr.* = iter.*;
+    const ptr: *CloneIter(T) = try allocator.create(CloneIter(T));
+    ptr.* = .{
+        .iter = iter,
+        .allocator = allocator
+    };
 
     const ctx = struct {
-        // TEST : Is a static local allocator okay to do?
-        threadlocal var ctx_alloc: Allocator = undefined;
-
         pub fn implNext(impl: *anyopaque) ?T {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            while (self_ptr.next()) |x| {
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            while (self_ptr.iter.next()) |x| {
                 if (filter(x)) {
                     return x;
                 }
@@ -1034,8 +1042,8 @@ fn cloneFilteredFromIter(
         }
 
         pub fn implPrev(impl: *anyopaque) ?T {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            while (self_ptr.prev()) |x| {
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            while (self_ptr.iter.prev()) |x| {
                 if (filter(x)) {
                     return x;
                 }
@@ -1048,19 +1056,19 @@ fn cloneFilteredFromIter(
         }
 
         pub fn implReset(impl: *anyopaque) void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            self_ptr.reset();
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.reset();
         }
 
         pub fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
             if (offset > 0) {
                 for (0..@bitCast(offset)) |_| {
-                    _ = self_ptr.next();
+                    _ = self_ptr.iter.next();
                 }
             } else if (offset < 0) {
                 for (0..@bitCast(@abs(offset))) |_| {
-                    _ = self_ptr.prev();
+                    _ = self_ptr.iter.prev();
                 }
             }
         }
@@ -1070,23 +1078,22 @@ fn cloneFilteredFromIter(
         }
 
         pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return try cloneFilteredFromIter(T, alloc, self_ptr, filter);
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            return try cloneFilteredFromIter(T, alloc, self_ptr.iter, filter);
         }
 
         pub fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return self_ptr.len();
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            return self_ptr.iter.len();
         }
 
         pub fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            self_ptr.deinit();
-            ctx_alloc.destroy(self_ptr);
+            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.deinit();
+            self_ptr.allocator.destroy(self_ptr);
         }
     };
 
-    ctx.ctx_alloc = allocator;
     const clone: AnonymousIterable(T) = .{
         .ptr = ptr,
         .v_table = &.{

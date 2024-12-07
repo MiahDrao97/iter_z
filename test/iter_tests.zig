@@ -6,6 +6,8 @@ const Iter = iter_z.Iter;
 const ComparerResult = iter_z.ComparerResult;
 const Allocator = std.mem.Allocator;
 const SplitIterator = std.mem.SplitIterator;
+const ArenaAllocator = std.heap.ArenaAllocator;
+const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
 fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
     return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{num});
@@ -681,5 +683,30 @@ test "set index" {
 
     var filtered: Iter(u8) = iter.where(isEven);
     try testing.expectError(error.NoIndexing, filtered.setIndex(0));
+}
+test "allocator mix n match" {
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+    var filtered: Iter(u8) = iter.where(isEven);
+
+    var arena: ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const clone: Iter(u8) = try filtered.clone(arena.allocator());
+
+    var clone2: Iter(u8) = try clone.clone(testing.allocator);
+    defer clone2.deinit();
+
+    var clone3 = try clone2.clone(arena.allocator());
+    defer clone3.deinit();
+
+    var arena2: ArenaAllocator = .init(testing.allocator);
+    defer arena2.deinit();
+
+    var clone4 = try iter.clone(arena2.allocator());
+    defer clone4.deinit();
+
+    var filtered2 = clone4.where(isEven);
+
+    var clone5 = try filtered2.clone(arena2.allocator());
+    defer clone5.deinit();
 }
 // TODO : multi-threaded cases
