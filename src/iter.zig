@@ -128,17 +128,17 @@ fn ConcatIterable(comptime T: type) type {
 
         pub fn prev(self: *Self) ?T {
             var current: *Iter(T) = undefined;
-            while (self.idx < self.sources.len) {
+            while (self.idx > 0) {
                 current = &self.sources[self.idx];
-                if (current.next()) |x| {
+                if (current.prev()) |x| {
                     return x;
                 } else {
-                    self.idx += 1;
+                    self.idx -|= 1;
                     continue;
                 }
             }
             current = &self.sources[self.idx];
-            return current.next();
+            return current.prev();
         }
 
         pub fn reset(self: *Self) void {
