@@ -8,6 +8,46 @@ It would be awesome to have a standard iterator in Zig's standard library so we 
 The main type is `Iter(T)`, which comes with several methods and queries.
 It's currently not threadsafe, but that's a pending feature.
 
+## Use This Package
+In your build.zig.zon, add the following dependency:
+```zig
+.{
+    .name = "my awesome app",
+    .version = "0.0.0",
+    .dependencies = .{
+        .iter_z = .{
+            .url = "https://github.com/MiahDrao97/iter_z/archive/main.tar.gz",
+            .hash = "", // get hash
+        },
+    },
+    .paths = .{""},
+}
+```
+
+Get your hash from the following:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
+```
+
+Finally, in your build.zig, import this module in your root module:
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const exe = b.addExecutable(.{
+        .name = "my awesome app",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const iter_z = b.dependency("iter_z", .{}).module("iter_z");
+    exe.addImport("iter_z", iter_z);
+
+    // rest of your build def
+}
+```
+
 ## Methods
 
 ### Next
