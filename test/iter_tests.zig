@@ -299,7 +299,6 @@ test "orderBy" {
     var i: usize = 0;
     while (iter.next()) |x| {
         i += 1;
-        // should only be the evens
         try testing.expectEqual(i, x);
     }
 
@@ -310,7 +309,6 @@ test "orderBy" {
     defer iter2.deinit();
 
     while (iter2.next()) |x| {
-        // should only be the evens
         try testing.expectEqual(i, x);
         i -= 1;
     }
