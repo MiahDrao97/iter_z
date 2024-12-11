@@ -425,3 +425,25 @@ If you wish to start from the beginning, make sure to call `reset()`.
 ## Extensibility
 You are free to create your own iterator!
 You only need to implement `AnonymousIterable(T)`, and call `iter()` on it, which will result in a `Iter(T)`, using your definition.
+```zig
+/// User may implement this interface to define their own `Iter(T)`
+pub fn AnonymousIterable(comptime T: type) type {
+    return struct {
+        pub const VTable = struct {
+            next_fn:            *const fn (*anyopaque) ?T,
+            prev_fn:            *const fn (*anyopaque) ?T,
+            reset_fn:           *const fn (*anyopaque) void,
+            scroll_fn:          *const fn (*anyopaque, isize) void,
+            has_indexing_fn:    *const fn (*anyopaque) bool,
+            set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
+            clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
+            get_len_fn:         *const fn (*anyopaque) usize,
+            deinit_fn:          *const fn (*anyopaque) void,
+        };
+
+        ptr: *anyopaque,
+        v_table: *const VTable,
+
+        // methods...
+}
+```
