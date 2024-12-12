@@ -48,7 +48,7 @@ pub fn build(b: *std.Build) void {
 }
 ```
 
-## Methods
+## Iter(T) Methods
 
 ### Next
 Standard iterator method: Returns next element or null if iteration is over.
@@ -158,11 +158,11 @@ const allocator = @import("std").testing.allocator;
 const slice: []u8 = try allocator.alloc(u8, 5);
 @memcpy(slice, "blarf");
 
-var iter: Iter(u8) = .fromSliceOwned(allocator, &slice, null);
+var iter: Iter(u8) = .fromSliceOwned(allocator, slice, null);
 // frees the slice
 iter.deinit();
 
-// `iter` is not invalid: it's just become an empty iter
+// `iter` is still valid: it's just become an empty iter
 _ = iter.next(); // null
 ```
 
@@ -175,8 +175,118 @@ _ = iter.next(); // null
 _ = iter.len(); // 0
 ```
 
+## Instantiation
+
+### From
+Initializes an `Iter(T)` from a slice. It does not own the slice, and will not affect it while iterating.
+
+### From Slice Owned
+Initializes an `Iter(T)` from a slice, except it owns the slice.
+As a result, calling `deinit()` will free the slice.
+Also, on optional action may be passed in that will be called on the slice when the iterator is deinitialized.
+This is useful for individually freeing memory for each element.
+```zig
+const allocator = @import("std").testing.allocator;
+
+const ctx = struct {
+    pub fn onDeinit(slice: [][]u8) void {
+        const alloc = @import("std").testing.allocator;
+        for (slice) |s| {
+            alloc.free(s);
+        }
+    }
+};
+
+const slice1: []u8 = try allocator.alloc(u8, 5);
+errdefer allocator.free(slice1);
+@memcpy(slice1, "blarf");
+
+const slice2: []u8 = try allocator.alloc(u8, 4);
+errdefer allocator.free(slice2);
+@memcpy(slice2, "asdf");
+
+const combined: [][]u8 = try allocator.alloc([]u8, 2);
+combined[0] = slice1;
+combined[1] = slice2;
+
+var iter: Iter(u8) = .fromSliceOwned(allocator, combined, &ctx.onDeinit);
+// frees the slice
+defer iter.deinit();
+
+while (iter.next()) |x| {
+    // "blarf", "asdf"
+}
+```
+
+### From Other
+Initialize an `Iter(T)` from any object, provided it has a `next()` method that returns `?T`.
+Unfortunately, it's not very efficient since we have to enumerate the whole thing to a slice and return an `Iter(T)` that owns that slice.
+However, this gives you access to query methods from iterators returned from other libraries.
+```zig
+const allocator = @import("std").testing.allocator;
+const str = "this,is,a,string,to,split";
+var split_iter = std.mem.splitAny(u8, str, ",");
+
+var iter: Iter([]const u8) = try .fromOther(allocator, &split_iter, split_iter.buffer.len);
+defer iter.deinit(); // must free
+
+while (iter.next()) |x| {
+    // "this", "is", "a", "string", "to", "split"
+}
+```
+
+### Concat
+Concatenate any number of iterators into 1.
+It will iterate in the same order the iterators were passed in.
+Keep in mind that the resulting iterator does not own these sources, so caller must `deinit()` the sources invidually afterward.
+```zig
+var chain = [_]Iter(u8){
+    .from(&[_]u8{ 1, 2, 3 }),
+    .from(&[_]u8{ 4, 5, 6 }),
+    .from(&[_]u8{ 7, 8, 9 }),
+};
+var iter: Iter(u8) = .concat(&chain);
+
+while (iter.next()) |x| {
+    // 1, 2, 3, 4, 5, 6, 7, 8, 9
+}
+```
+
+### Concat Owned
+Just like `concat()`, except the resulting iterator owns the iterators and slice passed in.
+```zig
+const allocator = @import("std").testing.allocator;
+const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
+errdefer allocator.free(chain);
+
+chain[0] = .from(&[_]u8{ 1, 2, 3 });
+chain[1] = .from(&[_]u8{ 4, 5, 6 });
+chain[2] = .from(&[_]u8{ 7, 8, 9 });
+var iter: Iter(u8) = try .concatOwned(allocator, chain);
+defer iter.deinit(); // must free
+
+while (iter.next()) |x| {
+    // 1, 2, 3, 4, 5, 6, 7, 8, 9
+}
+```
+
 ## Queries
-These are the queries currently available on `Iter(T)`.
+These are the queries currently available on `Iter(T)`:
+
+### Append
+Essentially is a simplified call of `concatOwned()`, which merges two iterators into 1.
+```zig
+const iter_a: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+const iter_b: Iter(u8) = .from(&[_]u8{ 4, 5, 6 });
+
+const allocator = @import("std").testing.allocator;
+var iter: Iter(u8) = try iter_a.append(allocator, iter_b);
+defer iter.deinit(); // must free
+
+while (iter.next()) |x| {
+    // 1, 2, 3, 4, 5, 6
+}
+```
 
 ### Select
 Transform the elements in your iterator from one type `T` to another `TOther`. Takes in a function body with the following signature: `fn (T, anytype) TOther`. Finally, you can pass in additional arguments that will get passed in to your function.
@@ -215,23 +325,6 @@ const ctx = struct {
 var evens = iter.where(ctx.isEven);
 while (evens.next()) |x| {
     // 2, 4
-}
-```
-
-### Concat
-Concatenate any number of iterators into 1.
-It will iterate in the same order the iterators were passed in.
-Keep in mind that the resulting iterator does not own these sources, so caller must `deinit()` the sources invidually afterward.
-```zig
-var chain = [_]Iter(u8){
-    .from(&[_]u8{ 1, 2, 3 }),
-    .from(&[_]u8{ 4, 5, 6 }),
-    .from(&[_]u8{ 7, 8, 9 }),
-};
-var iter: Iter(u8) = .concat(&chain);
-
-while (iter.next()) |x| {
-    // 1, 2, 3, 4, 5, 6, 7, 8, 9
 }
 ```
 
@@ -434,7 +527,7 @@ _ = iter.contains(1, ctx.compare); // true
 ### Enumerate To Buffer
 Enumerate all elements to a buffer passed in from the current. If you wish to start at the beginning, be sure to call `reset()`. Returns a slice of the buffer.
 ```zig
-var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3});
+var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 var buf: [5]u8 = undefined;
 _ = try iter.enumerateToBuffer(&buf); // success!
 

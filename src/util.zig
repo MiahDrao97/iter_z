@@ -28,7 +28,14 @@ pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}!
     return arr;
 }
 
-fn partition(comptime T: type, slice: []T, left: usize, right: usize, comparer: fn (T, T) ComparerResult, ordering: Ordering) usize {
+fn partition(
+    comptime T: type,
+    slice: []T,
+    left: usize,
+    right: usize,
+    comparer: fn (T, T) ComparerResult,
+    ordering: Ordering,
+) usize {
     // i must be an isize because it's allowed to -1 at the beginning
     var i: isize = @as(isize, @bitCast(left)) - 1;
 
@@ -80,7 +87,14 @@ fn swap(comptime T: type, slice: []T, left: usize, right: usize) void {
 }
 
 /// Quick sort implementation
-pub fn sort(comptime T: type, slice: []T, left: usize, right: usize, comparer: fn (T, T) ComparerResult, ordering: Ordering) void {
+pub fn sort(
+    comptime T: type,
+    slice: []T,
+    left: usize,
+    right: usize,
+    comparer: fn (T, T) ComparerResult,
+    ordering: Ordering,
+) void {
     if (right <= left) {
         return;
     }
