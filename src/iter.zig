@@ -131,14 +131,11 @@ fn ConcatIterable(comptime T: type) type {
             while (self.idx > 0) : (self.idx -|= 1) {
                 current = &self.sources[self.idx];
                 if (current.prev()) |x| {
-                    // std.log.err("Concat iter previous: {any}", .{ x });
                     return x;
                 }
-                // std.log.err("Decrementing index from {d} to {d}", .{ self.idx, self.idx - 1 });
             }
             current = &self.sources[0];
             const x: ?T = current.prev();
-            // std.log.err("Concat iter previous: {?any}", .{ x });
             return x;
         }
 
@@ -618,7 +615,6 @@ pub fn Iter(comptime T: type) type {
                 pub fn implPrev(impl: *anyopaque) ?T {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
                     while (self_ptr.prev()) |x| {
-                        // std.log.err("Prev from internal iter: {any}", .{ x });
                         if (filter(x)) {
                             return x;
                         }
