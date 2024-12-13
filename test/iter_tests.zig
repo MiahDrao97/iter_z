@@ -53,6 +53,8 @@ fn doStackFrames() void {
 test "from" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 
+    try testing.expectEqual(null, iter.prev());
+
     var i: usize = 0;
     while (iter.next()) |x| {
         i += 1;
@@ -60,16 +62,13 @@ test "from" {
     }
 
     try testing.expect(i == 3);
+
+    while (iter.prev()) |x| {
+        defer i -= 1;
+        try testing.expect(i == x);
+    }
 }
 test "select" {
-    var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var iter = inner.select(Allocator.Error![]u8, numToStr, testing.allocator);
-
-    try testing.expect(iter.len() == 3);
-
-    var i: usize = 0;
-    var test_failed: bool = false;
-
     const ctx = struct {
         pub fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
             const x: *usize = args.@"0";
@@ -95,6 +94,14 @@ test "select" {
         }
     };
 
+    var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var iter = inner.select(Allocator.Error![]u8, numToStr, testing.allocator);
+
+    try testing.expect(iter.len() == 3);
+
+    var i: usize = 0;
+    var test_failed: bool = false;
+
     iter.forEach(ctx.action, ctx.onErr, true, .{ &i, &test_failed, testing.allocator });
 
     try testing.expect(!test_failed);
@@ -115,7 +122,10 @@ test "cloneReset" {
         try testing.expect(x == i);
     }
 
-    try testing.expect(iter.next() == 2);
+    try testing.expectEqual(2, iter.next());
+
+    // previous should be 3 (because we hit the end of the iteration, so that puts us at null)
+    try testing.expectEqual(3, clone.prev());
 }
 test "where" {
     {
@@ -132,6 +142,8 @@ test "where" {
         }
 
         try testing.expect(i == 1);
+
+        try testing.expectEqual(2, iter.prev());
     }
     {
         var odds = [_]u8{ 1, 3, 5 };
@@ -143,6 +155,10 @@ test "where" {
         var i: usize = 0;
         while (iter.next()) |_| {
             // should not enter this block
+            i += 1;
+        }
+        while (iter.prev()) |_| {
+            // also shouldn't enter this one
             i += 1;
         }
 
@@ -237,10 +253,16 @@ test "concat" {
         while (new_iter.next()) |x| {
             i += 1;
             // should only be the evens
-            try testing.expect(x == (i * 2));
+            try testing.expectEqual(i * 2, x);
         }
 
         try testing.expect(i == 4);
+
+        while (new_iter.prev()) |x| {
+            defer i -= 1;
+            // again, should only be the events
+            try testing.expectEqual(i * 2, x);
+        }
     }
     {
         const other: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -271,6 +293,11 @@ test "concat" {
         }
 
         try testing.expect(i == 3);
+
+        while (iter2.prev()) |x| {
+            defer i -= 1;
+            try testing.expect(x == i);
+        }
     }
 }
 // edge cases
@@ -279,6 +306,8 @@ test "concat empty to empty" {
     var iter: Iter(u8) = .concat(&chain);
 
     try testing.expect(iter.len() == 0);
+    try testing.expect(iter.next() == null);
+    try testing.expect(iter.prev() == null);
 }
 test "double deinit" {
     var iter: Iter(u8) = .from("blarf");
@@ -686,6 +715,11 @@ test "concat owned" {
         try testing.expectEqual(i, x);
     }
     try testing.expectEqual(9, i);
+
+    while (iter.prev()) |x| {
+        defer i -= 1;
+        try testing.expectEqual(i, x);
+    }
 }
 test "append" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 4));

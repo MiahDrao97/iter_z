@@ -114,31 +114,32 @@ fn ConcatIterable(comptime T: type) type {
         allocator: ?Allocator = null,
 
         pub fn next(self: *Self) ?T {
-            while (self.idx < self.sources.len) {
+            while (self.idx < self.sources.len) : (self.idx += 1) {
                 const current: *Iter(T) = &self.sources[self.idx];
                 if (current.next()) |x| {
                     return x;
-                } else {
-                    self.idx += 1;
-                    continue;
                 }
             }
             return null;
         }
 
         pub fn prev(self: *Self) ?T {
+            if (self.idx >= self.sources.len) {
+                self.idx = self.sources.len - 1;
+            }
             var current: *Iter(T) = undefined;
-            while (self.idx > 0) {
+            while (self.idx > 0) : (self.idx -|= 1) {
                 current = &self.sources[self.idx];
                 if (current.prev()) |x| {
+                    // std.log.err("Concat iter previous: {any}", .{ x });
                     return x;
-                } else {
-                    self.idx -|= 1;
-                    continue;
                 }
+                // std.log.err("Decrementing index from {d} to {d}", .{ self.idx, self.idx - 1 });
             }
-            current = &self.sources[self.idx];
-            return current.prev();
+            current = &self.sources[0];
+            const x: ?T = current.prev();
+            // std.log.err("Concat iter previous: {?any}", .{ x });
+            return x;
         }
 
         pub fn reset(self: *Self) void {
@@ -245,10 +246,10 @@ pub fn Iter(comptime T: type) type {
                 .slice => |*s| {
                     if (s.idx == 0) {
                         return null;
-                    } else if (s.idx >= s.elements.len) {
-                        s.idx = s.elements.len - 1;
+                    } else if (s.idx > s.elements.len) {
+                        s.idx = s.elements.len;
                     }
-                    defer s.idx -|= 1;
+                    s.idx -|= 1;
                     return s.elements[s.idx];
                 },
                 .concatenated => |*c| return c.prev(),
@@ -617,6 +618,7 @@ pub fn Iter(comptime T: type) type {
                 pub fn implPrev(impl: *anyopaque) ?T {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
                     while (self_ptr.prev()) |x| {
+                        // std.log.err("Prev from internal iter: {any}", .{ x });
                         if (filter(x)) {
                             return x;
                         }
