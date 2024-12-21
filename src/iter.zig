@@ -599,7 +599,7 @@ pub fn Iter(comptime T: type) type {
         /// Returns a filtered iterator, using `self` as a source.
         ///
         /// NOTE : If simply needing to iterate with a filter, `any()` is preferred.
-        /// Pass in your filter function and `false` for the `peek` argument: `while (iter.any(filter, false)) {...}`
+        /// Pass in your filter function and `false` for the `peek` argument: `while (iter.any(filter, false)) |x| {...}`
         pub fn where(self: *Self, filter: fn (T) bool) Self {
             const ctx = struct {
                 pub fn implNext(impl: *anyopaque) ?T {
