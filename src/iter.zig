@@ -683,11 +683,13 @@ pub fn Iter(comptime T: type) type {
 
         /// Enumerates into `buf`, starting at `self`'s current `next()` call.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
-        /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
+        /// This method will not deallocate `self`, which means the caller is resposible to call `deinit()` if necessary.
+        /// Also, caller must reset again if later enumeration is needed.
         ///
         /// Returns a slice of `buf`, containing the enumerated elements.
-        /// If there are more elements than space on `buf`, returns `error.NoSpaceLeft`.
-        /// However, the buffer will hold the encountered elements.
+        /// If space on `buf` runs out, returns `error.NoSpaceLeft`.
+        /// However, the buffer will still hold the elements encountered before running out of space.
+        /// Also scrolls back 1 if we run out of space so that the next element on `self` will be the one that encountered the `NoSpaceLeft` error.
         pub fn enumerateToBuffer(self: *Self, buf: []T) error{NoSpaceLeft}![]T {
             var i: usize = 0;
             while (self.next()) |x| {
@@ -740,7 +742,7 @@ pub fn Iter(comptime T: type) type {
         ) Allocator.Error![]T {
             const slice: []T = try self.toOwnedSlice(allocator);
 
-            util.sort(T, slice, 0, slice.len - 1, comparer, ordering);
+            util.quickSort(T, slice, comparer, ordering);
             return slice;
         }
 
