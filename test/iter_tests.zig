@@ -504,16 +504,24 @@ test "clone with select" {
 }
 test "Overlapping select edge cases" {
     const ctx = struct {
-        pub fn multiply(in: u8, multiplier: anytype) u32 {
+        fn multiply(in: u8, multiplier: anytype) u32 {
             return in * @as(u8, multiplier);
+        }
+
+        pub fn getDoubler(source: *Iter(u8)) Iter(u32) {
+            return source.select(u32, multiply, @as(u8, 2));
+        }
+
+        pub fn getTripler(source: *Iter(u8)) Iter(u32) {
+            return source.select(u32, multiply, @as(u8, 3));
         }
     };
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
-    var doubler: Iter(u32) = iter.select(u32, ctx.multiply, @as(u8, 2));
-    var tripler: Iter(u32) = clone.select(u32, ctx.multiply, @as(u8, 3));
+    var doubler: Iter(u32) = ctx.getDoubler(&iter);
+    var tripler: Iter(u32) = ctx.getTripler(&clone);
 
     var result: ?u32 = doubler.next();
     try testing.expectEqual(2, result);
