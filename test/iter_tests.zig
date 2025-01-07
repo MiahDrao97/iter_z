@@ -817,4 +817,14 @@ test "allocator mix n match" {
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();
 }
+test "iter with optionals" {
+    var iter: Iter(?u8) = .from(&[_]?u8{ 1, 2, null, 3 });
+    var i: usize = 1;
+    while (iter.next()) |x| {
+        if (x) |y| {
+            try testing.expectEqual(i, y);
+            i += 1;
+        }
+    }
+}
 // TODO : multi-threaded cases
