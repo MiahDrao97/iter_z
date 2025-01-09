@@ -108,16 +108,16 @@ try iter.setIndex(2);
 _ = iter.next(); // 3
 ```
 
-### Has Indexing
-Determine if the iterator supports indexing.
+### Get Index
+Determine if the iterator supports indexing (and consequently has an index).
 ```zig
 const iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.hasIndexing(); // true
+_ = iter.getIndex(); // 0
 
 var chain = [_]Iter(u8){ iter, .from(&[_]u8{ 4, 5, 6 }) };
 // see more info on concat() down below
 const concat_iter: Iter(u8) = .concat(&chain);
-_ = concat_iter.hasIndexing(); // false
+_ = concat_iter.getIndex(); // null
 _ = concat_iter.setIndex(2); // error.NoIndexing
 ```
 

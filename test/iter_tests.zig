@@ -247,7 +247,7 @@ test "concat" {
         var new_iter: Iter(u8) = iter.where(isEven);
 
         try testing.expectEqual(9, new_iter.len());
-        try testing.expect(!new_iter.hasIndexing());
+        try testing.expect(new_iter.getIndex() == null);
 
         i = 0;
         while (new_iter.next()) |x| {

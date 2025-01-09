@@ -21,10 +21,10 @@ pub fn AnonymousIterable(comptime T: type) type {
             prev_fn:            *const fn (*anyopaque) ?T,
             reset_fn:           *const fn (*anyopaque) void,
             scroll_fn:          *const fn (*anyopaque, isize) void,
-            has_indexing_fn:    *const fn (*anyopaque) bool,
+            get_index_fn:       *const fn (*anyopaque) ?usize,
             set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
             clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-            get_len_fn:         *const fn (*anyopaque) usize,
+            len_fn:             *const fn (*anyopaque) usize,
             deinit_fn:          *const fn (*anyopaque) void,
         };
         // zig fmt: on
@@ -62,8 +62,8 @@ pub fn AnonymousIterable(comptime T: type) type {
         /// Indexing is only available when this iterator returns the same number of elements as its `len()`.
         /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
         /// this is no longer possible.
-        pub fn hasIndexing(self: Self) bool {
-            return self.v_table.has_indexing_fn(self.ptr);
+        pub fn getIndex(self: Self) ?usize {
+            return self.v_table.get_index_fn(self.ptr);
         }
 
         /// Produces a clone of `Iter(T)` (note that it is not reset).
@@ -73,10 +73,10 @@ pub fn AnonymousIterable(comptime T: type) type {
 
         /// Get the length of the iterator.
         ///
-        /// If `hasIndexing()` is true, then the sources is expected to return this many items.
+        /// If `getIndex()` returns a value, then the sources is expected to return this many items.
         /// Otherwise, `len()` represents a maximum length that the source can return.
         pub fn len(self: Self) usize {
-            return self.v_table.get_len_fn(self.ptr);
+            return self.v_table.len_fn(self.ptr);
         }
 
         /// Free the underlying pointer and other owned memory.
@@ -296,11 +296,11 @@ pub fn Iter(comptime T: type) type {
         /// Indexing is only available when this iterator returns the same number of elements as its `len()`.
         /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
         /// this is no longer possible.
-        pub fn hasIndexing(self: Self) bool {
+        pub fn getIndex(self: Self) ?usize {
             switch (self.variant) {
-                .slice => return true,
-                .anonymous => |a| return a.hasIndexing(),
-                else => return false,
+                .slice => |s| return s.idx,
+                .anonymous => |a| return a.getIndex(),
+                else => return null,
             }
         }
 
@@ -557,9 +557,9 @@ pub fn Iter(comptime T: type) type {
                     self_ptr.scroll(offset);
                 }
 
-                pub fn implHasIndexing(impl: *anyopaque) bool {
+                pub fn implGetIndex(impl: *anyopaque) ?usize {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return self_ptr.hasIndexing();
+                    return self_ptr.getIndex();
                 }
 
                 pub fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
@@ -587,9 +587,9 @@ pub fn Iter(comptime T: type) type {
                     .set_index_fn = &ctx.implSetIndex,
                     .reset_fn = &ctx.implReset,
                     .scroll_fn = &ctx.implScroll,
-                    .has_indexing_fn = &ctx.implHasIndexing,
+                    .get_index_fn = &ctx.implGetIndex,
                     .clone_fn = &ctx.implClone,
-                    .get_len_fn = &ctx.implLen,
+                    .len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,
                 },
             };
@@ -644,8 +644,8 @@ pub fn Iter(comptime T: type) type {
                     }
                 }
 
-                pub fn implHasIndexing(_: *anyopaque) bool {
-                    return false;
+                pub fn implGetIndex(_: *anyopaque) ?usize {
+                    return null;
                 }
 
                 pub fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
@@ -672,9 +672,9 @@ pub fn Iter(comptime T: type) type {
                     .set_index_fn = &ctx.implSetIndex,
                     .reset_fn = &ctx.implReset,
                     .scroll_fn = &ctx.implScroll,
-                    .has_indexing_fn = &ctx.implHasIndexing,
+                    .get_index_fn = &ctx.implGetIndex,
                     .clone_fn = &ctx.implClone,
-                    .get_len_fn = &ctx.implLen,
+                    .len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,
                 },
             };
@@ -986,9 +986,9 @@ fn cloneTransformedIter(
             self_ptr.iter.scroll(offset);
         }
 
-        pub fn implHasIndexing(impl: *anyopaque) bool {
+        pub fn implGetIndex(impl: *anyopaque) ?usize {
             const self_ptr: *CloneTransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.hasIndexing();
+            return self_ptr.iter.getIndex();
         }
 
         pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
@@ -1015,10 +1015,10 @@ fn cloneTransformedIter(
             .prev_fn = &ctx.implPrev,
             .reset_fn = &ctx.implReset,
             .scroll_fn = &ctx.implScroll,
-            .has_indexing_fn = &ctx.implHasIndexing,
+            .get_index_fn = &ctx.implGetIndex,
             .set_index_fn = &ctx.implSetIndex,
             .clone_fn = &ctx.implClone,
-            .get_len_fn = &ctx.implLen,
+            .len_fn = &ctx.implLen,
             .deinit_fn = &ctx.implDeinit,
         },
     };
@@ -1080,8 +1080,8 @@ fn cloneFilteredFromIter(
             }
         }
 
-        pub fn implHasIndexing(_: *anyopaque) bool {
-            return false;
+        pub fn implGetIndex(_: *anyopaque) ?usize {
+            return null;
         }
 
         pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
@@ -1109,9 +1109,9 @@ fn cloneFilteredFromIter(
             .set_index_fn = &ctx.implSetIndex,
             .reset_fn = &ctx.implReset,
             .scroll_fn = &ctx.implScroll,
-            .has_indexing_fn = &ctx.implHasIndexing,
+            .get_index_fn = &ctx.implGetIndex,
             .clone_fn = &ctx.implClone,
-            .get_len_fn = &ctx.implLen,
+            .len_fn = &ctx.implLen,
             .deinit_fn = &ctx.implDeinit,
         },
     };
