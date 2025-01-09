@@ -57,11 +57,11 @@ pub fn AnonymousIterable(comptime T: type) type {
             self.v_table.scroll_fn(self.ptr, amount);
         }
 
-        /// Determine if this iterator can use `setIndex()`.
+        /// Determine which index/offset the iterator is on. (If not null, then caller can use `setIndex()`.)
         ///
-        /// Indexing is only available when this iterator returns the same number of elements as its `len()`.
+        /// Generally, indexing is only available on iterators that are directly made from slices or transformed from the former with a `select()` call.
         /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
-        /// this is no longer possible.
+        /// indexing is no longer feasible.
         pub fn getIndex(self: Self) ?usize {
             return self.v_table.get_index_fn(self.ptr);
         }
@@ -291,11 +291,11 @@ pub fn Iter(comptime T: type) type {
             }
         }
 
-        /// Determine if this iterator can use `setIndex()`.
+        /// Determine which index/offset the iterator is on. (If not null, then caller can use `setIndex()`.)
         ///
-        /// Indexing is only available when this iterator returns the same number of elements as its `len()`.
+        /// Generally, indexing is only available on iterators that are directly made from slices or transformed from the former with a `select()` call.
         /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
-        /// this is no longer possible.
+        /// indexing is no longer feasible.
         pub fn getIndex(self: Self) ?usize {
             switch (self.variant) {
                 .slice => |s| return s.idx,
