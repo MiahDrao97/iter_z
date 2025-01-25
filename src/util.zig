@@ -40,9 +40,7 @@ fn partition(
     var i: isize = @as(isize, @bitCast(left_idx)) - 1;
 
     const pivot: T = slice[right_idx];
-    std.log.debug("Left = {d}. Pivot at index[{d}]: {any}", .{ left_idx, right_idx, pivot });
     for (left_idx..right_idx) |j| {
-        std.log.debug("Index[{d}]: Comparing {any} to pivot {any}", .{ j, slice[j], pivot });
         switch (ordering) {
             .asc => {
                 switch (comparer(pivot, slice[j])) {
@@ -70,20 +68,17 @@ fn partition(
 
 fn swap(comptime T: type, slice: []T, left_idx: usize, right_idx: usize) void {
     if (left_idx >= slice.len) {
-        std.log.debug("Left-hand index exceeds slice size.", .{});
+        // Left-hand index exceeds slice size
         return;
     }
     if (left_idx == right_idx) {
-        std.log.debug("Indexes are equal. No swap operation taking place.", .{});
+        // Indexes are equal. No swap operation taking place.
         return;
     }
-    std.log.debug("Slice snapshot: [{any}] =>", .{slice});
     const temp: T = slice[left_idx];
 
     slice[left_idx] = slice[right_idx];
     slice[right_idx] = temp;
-
-    std.log.debug("                [{any}]", .{slice});
 }
 
 /// Quick sort implementation
