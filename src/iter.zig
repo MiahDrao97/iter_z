@@ -206,8 +206,6 @@ fn ConcatIterable(comptime T: type) type {
 }
 
 /// This struct is an iterator that offers some basic filtering and transformations.
-///
-/// Not threadsafe
 pub fn Iter(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -217,7 +215,6 @@ pub fn Iter(comptime T: type) type {
             concatenated: ConcatIterable(T),
             anonymous: AnonymousIterable(T),
             empty: void,
-            // TODO : atomic variant for thread safety
         };
 
         variant: Variant,

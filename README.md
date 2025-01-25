@@ -6,7 +6,6 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 It would be awesome to have a standard iterator in Zig's standard library so we can use these queries everywhere.
 
 The main type is `Iter(T)`, which comes with several methods and queries.
-It's currently not threadsafe, but that's a pending feature.
 
 ## Use This Package
 In your build.zig.zon, add the following dependency:

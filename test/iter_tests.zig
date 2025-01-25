@@ -827,4 +827,3 @@ test "iter with optionals" {
         }
     }
 }
-// TODO : multi-threaded cases
