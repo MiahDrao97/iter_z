@@ -1,5 +1,5 @@
 # iter_z
-Generic Iterator for Zig - Leveraging Zig 0.14.0
+Generic Iterator for Zig - Leveraging Zig 0.14.0 (built with `0.14.0-dev.2370+5c6b25d9b`)
 
 Inspired by C#'s `IEnumerable<T>` and the various transformations and filters provided by System.Linq.
 Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful queries.
