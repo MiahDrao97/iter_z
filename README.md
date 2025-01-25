@@ -536,13 +536,15 @@ var buf2: [2]u8 = undefined;
 var result: []u8 = iter.enumerateToBuffer(&buf2) catch &buf2; // fails, but results are [ 1, 2 ]
 ```
 
-### To Owned Slice
-Allocate a slice and enumerate all elements to it from the current offset. Caller owns the slice. If you wish to start at the beginning, be sure to call `reset()`.
+### Enumerate To Owned Slice
+Allocate a slice and enumerate all elements to it from the current offset.
+This will not free the iterator if it owns any memory, so you'll still have to call `deinit()` on it if it does.
+Caller owns the slice. If you wish to start enumerating at the beginning, be sure to call `reset()`.
 ```zig
 const allocator = @import("std").testing.allocator;
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-const results: []u8 = try iter.toOwnedSlice(allocator);
+const results: []u8 = try iter.enumerateToOwnedSlice(allocator);
 defer allocator.free(results);
 ```
 
@@ -551,7 +553,7 @@ If you have a transformed iterator, it holds a pointer to the original.
 The original and the transformed iterator move forward together unless you create a clone.
 If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source.
 
-Methods such as `enumerateToBuffer()`, `toOwnedSlice()`, `orderBy()`, and other queries start at the current offset.
+Methods such as `enumerateToBuffer()`, `enumerateToOwnedSlice()`, `orderBy()`, and other queries start at the current offset.
 If you wish to start from the beginning, make sure to call `reset()`.
 
 ## Extensibility

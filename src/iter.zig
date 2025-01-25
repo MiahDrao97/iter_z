@@ -706,7 +706,7 @@ pub fn Iter(comptime T: type) type {
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
         ///
         /// Caller owns the resulting slice.
-        pub fn toOwnedSlice(self: *Self, allocator: Allocator) Allocator.Error![]T {
+        pub fn enumerateToOwnedSlice(self: *Self, allocator: Allocator) Allocator.Error![]T {
             const buf: []T = try allocator.alloc(T, self.len());
 
             var i: usize = 0;
@@ -737,7 +737,7 @@ pub fn Iter(comptime T: type) type {
             comparer: fn (T, T) ComparerResult,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            const slice: []T = try self.toOwnedSlice(allocator);
+            const slice: []T = try self.enumerateToOwnedSlice(allocator);
 
             util.quickSort(T, slice, comparer, ordering);
             return slice;

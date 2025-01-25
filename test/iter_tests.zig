@@ -180,7 +180,7 @@ test "where" {
         try testing.expect(clone2.next() == null);
     }
 }
-test "toOwnedSlice" {
+test "enumerateToOwnedSlice" {
     var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var iter: Iter(u8) = inner.where(isEven);
 
@@ -195,7 +195,7 @@ test "toOwnedSlice" {
     try testing.expect(i == 1);
 
     iter.reset();
-    const slice: []u8 = try iter.toOwnedSlice(testing.allocator);
+    const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
     defer testing.allocator.free(slice);
 
     try testing.expect(slice.len == 1);
