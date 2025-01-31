@@ -33,6 +33,9 @@ Finally, in your build.zig, import this module in your root module:
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
     const exe = b.addExecutable(.{
         .name = "my awesome app",
         .root_source_file = b.path("src/main.zig"),
@@ -40,7 +43,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const iter_z = b.dependency("iter_z", .{}).module("iter_z");
+    const iter_z = b.dependency("iter_z", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("iter_z");
     exe.addImport("iter_z", iter_z);
 
     // rest of your build def
