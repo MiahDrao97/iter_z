@@ -294,7 +294,13 @@ while (iter.next()) |x| {
 ```
 
 ### Select
-Transform the elements in your iterator from one type `T` to another `TOther`. Takes in a function body with the following signature: `fn (T, anytype) TOther`. Finally, you can pass in additional arguments that will get passed in to your function.
+Transform the elements in your iterator from one type `T` to another `TOther`.
+Takes in a function body with the following signature: `fn (T, anytype) TOther`.
+Finally, you can pass in additional arguments that will get passed in to your function.
+
+Be sure to call `deinit()` after you are done.
+A pointer must be created since we're creating a lightweight closure: The args need to be stored on the allocated object.
+If this is a one-time call that's local in a function, see `selectNoAlloc()`.
 ```zig
 const Allocator = @import("std").mem.Allocator;
 
@@ -307,7 +313,40 @@ const ctx = struct {
 const allocator = @import("std").testing.allocator;
 
 var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
-var strings = iter.select(Allocator.Error![]const u8, ctx.toString, allocator);
+var strings = try iter.select(allocator, Allocator.Error![]const u8, ctx.toString, allocator);
+defer strings.deinit();
+
+while (strings.next()) |maybe_str| {
+    const str: []const u8 = try maybe_str;
+    defer allocator.free(str);
+
+    // "224", "7842", "12", "1837", "0924"
+}
+```
+
+### Select No Alloc
+Transform the elements in your iterator from one type `T` to another `TOther`.
+Takes in a function body with the following signature: `fn (T, anytype) TOther`.
+Finally, you can pass in additional arguments that will get passed in to your function.
+
+This does not require allocation since it stores the args as a threadlocal container-level variable.
+Basically, args become static, and subsequent calls replace that value.
+This is perfect for local, one-time use select iterators.
+```zig
+const Allocator = @import("std").mem.Allocator;
+
+const ctx = struct {
+    pub fn toString(item: u32, allocator: anytype) Allocator.Error![]const u8 {
+        return std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{ item });
+    }
+};
+
+const allocator = @import("std").testing.allocator;
+
+var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
+var strings = iter.selectNoAlloc(Allocator.Error![]const u8, ctx.toString, allocator);
+// deinit() call omitted since no memory is allocated this time
+
 while (strings.next()) |maybe_str| {
     const str: []const u8 = try maybe_str;
     defer allocator.free(str);

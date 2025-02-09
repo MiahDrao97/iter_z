@@ -525,6 +525,91 @@ pub fn Iter(comptime T: type) type {
             return try createTransformedIter(T, TOther, transform, args, self, allocator);
         }
 
+        /// Transform an iterator of type `T` to type `TOther`.
+        /// Each element returned from `next()` will go through the `transform` function.
+        ///
+        /// WARN : The args are stored as a static threadlocal container variable, which lets us get away with not allocating memory.
+        /// Keep in mind that the stored args is replaced when you call a new `selectNoAlloc()`.
+        pub fn selectNoAlloc(
+            self: *Self,
+            comptime TOther: type,
+            transform: fn (T, anytype) TOther,
+            args: anytype,
+        ) Iter(TOther) {
+            const ArgsType = @TypeOf(args);
+            const ctx = struct {
+                threadlocal var ctx_args: ArgsType = undefined;
+
+                pub fn implNext(impl: *anyopaque) ?TOther {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    if (self_ptr.next()) |x| {
+                        return transform(x, ctx_args);
+                    }
+                    return null;
+                }
+
+                pub fn implPrev(impl: *anyopaque) ?TOther {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    if (self_ptr.prev()) |x| {
+                        return transform(x, ctx_args);
+                    }
+                    return null;
+                }
+
+                pub fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    try self_ptr.setIndex(to);
+                }
+
+                pub fn implReset(impl: *anyopaque) void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    self_ptr.reset();
+                }
+
+                pub fn implScroll(impl: *anyopaque, offset: isize) void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    self_ptr.scroll(offset);
+                }
+
+                pub fn implGetIndex(impl: *anyopaque) ?usize {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    return self_ptr.getIndex();
+                }
+
+                pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    return try cloneTransformedIter(T, TOther, transform, ctx_args, self_ptr.*, alloc);
+                }
+
+                pub fn implLen(impl: *anyopaque) usize {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    return self_ptr.len();
+                }
+
+                pub fn implDeinit(impl: *anyopaque) void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    self_ptr.deinit();
+                }
+            };
+            ctx.ctx_args = args;
+
+            const transformed: AnonymousIterable(TOther) = .{
+                .ptr = self,
+                .v_table = &.{
+                    .next_fn = &ctx.implNext,
+                    .prev_fn = &ctx.implPrev,
+                    .set_index_fn = &ctx.implSetIndex,
+                    .reset_fn = &ctx.implReset,
+                    .scroll_fn = &ctx.implScroll,
+                    .get_index_fn = &ctx.implGetIndex,
+                    .clone_fn = &ctx.implClone,
+                    .len_fn = &ctx.implLen,
+                    .deinit_fn = &ctx.implDeinit,
+                },
+            };
+            return transformed.iter();
+        }
+
         /// Returns a filtered iterator, using `self` as a source.
         ///
         /// NOTE : If simply needing to iterate with a filter, `any()` is preferred.

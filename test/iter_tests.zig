@@ -505,6 +505,51 @@ test "clone with select" {
     try testing.expectEqualStrings("4", clone.next().?);
     try testing.expectEqualStrings("2", clone2.next().?);
 }
+test "select no alloc" {
+    const ctx = struct {
+        pub fn asString(byte: u8, buf: anytype) []const u8 {
+            return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{byte}) catch unreachable;
+        }
+
+        pub fn asHexString(byte: u8, buf: anytype) []const u8 {
+            return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{byte}) catch unreachable;
+        }
+    };
+    var buf: [4]u8 = undefined;
+
+    var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
+    var outer: Iter([]const u8) = iter.selectNoAlloc([]const u8, ctx.asString, &buf);
+
+    try testing.expectEqualStrings("1", outer.next().?);
+
+    var clone: Iter([]const u8) = try outer.cloneReset(testing.allocator);
+    defer clone.deinit();
+
+    try testing.expectEqualStrings("2", outer.next().?);
+    try testing.expectEqualStrings("3", outer.next().?);
+
+    try testing.expectEqualStrings("1", clone.next().?);
+
+    var clone2: Iter([]const u8) = try clone.cloneReset(testing.allocator);
+    defer clone2.deinit();
+
+    try testing.expectEqualStrings("2", clone.next().?);
+    try testing.expectEqualStrings("3", clone.next().?);
+
+    try testing.expectEqualStrings("1", clone2.next().?);
+
+    try testing.expectEqualStrings("4", outer.next().?);
+
+    // test whether or not we can pass a different transform fn with the same signature, but different body
+    var alternate: Iter([]const u8) = iter.selectNoAlloc([]const u8, ctx.asHexString, &buf);
+    // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
+    try testing.expectEqualStrings("0x05", alternate.next().?);
+    try testing.expectEqualStrings("6", outer.next().?);
+
+    // check the clones
+    try testing.expectEqualStrings("4", clone.next().?);
+    try testing.expectEqualStrings("2", clone2.next().?);
+}
 test "Overlapping select edge cases" {
     // force these args to be runtime values
     const double_const: *u8 = try testing.allocator.create(u8);
