@@ -518,7 +518,7 @@ test "select no alloc" {
     var buf: [4]u8 = undefined;
 
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = iter.selectNoAlloc([]const u8, ctx.asString, &buf);
+    var outer: Iter([]const u8) = iter.selectStatic([]const u8, ctx.asString, &buf);
 
     try testing.expectEqualStrings("1", outer.next().?);
 
@@ -541,7 +541,7 @@ test "select no alloc" {
     try testing.expectEqualStrings("4", outer.next().?);
 
     // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = iter.selectNoAlloc([]const u8, ctx.asHexString, &buf);
+    var alternate: Iter([]const u8) = iter.selectStatic([]const u8, ctx.asHexString, &buf);
     // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
     try testing.expectEqualStrings("0x05", alternate.next().?);
     try testing.expectEqualStrings("6", outer.next().?);

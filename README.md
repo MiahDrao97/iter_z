@@ -300,7 +300,7 @@ Finally, you can pass in additional arguments that will get passed in to your fu
 
 Be sure to call `deinit()` after you are done.
 A pointer must be created since we're creating a lightweight closure: The args need to be stored on the allocated object.
-If this is a one-time call that's local in a function, see `selectNoAlloc()`.
+If this is a one-time call that's local in a function, see `selectStatic()`.
 ```zig
 const Allocator = @import("std").mem.Allocator;
 
@@ -324,7 +324,7 @@ while (strings.next()) |maybe_str| {
 }
 ```
 
-### Select No Alloc
+### Select Static
 Transform the elements in your iterator from one type `T` to another `TOther`.
 Takes in a function body with the following signature: `fn (T, anytype) TOther`.
 Finally, you can pass in additional arguments that will get passed in to your function.
@@ -344,8 +344,8 @@ const ctx = struct {
 const allocator = @import("std").testing.allocator;
 
 var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
-var strings = iter.selectNoAlloc(Allocator.Error![]const u8, ctx.toString, allocator);
-// deinit() call omitted since no memory is allocated this time
+var strings = iter.selectStatic(Allocator.Error![]const u8, ctx.toString, allocator);
+// deinit() call omitted since the iterator owns no allocated memory
 
 while (strings.next()) |maybe_str| {
     const str: []const u8 = try maybe_str;

@@ -529,8 +529,8 @@ pub fn Iter(comptime T: type) type {
         /// Each element returned from `next()` will go through the `transform` function.
         ///
         /// WARN : The args are stored as a static threadlocal container variable, which lets us get away with not allocating memory.
-        /// Keep in mind that the stored args is replaced when you call a new `selectNoAlloc()`.
-        pub fn selectNoAlloc(
+        /// Keep in mind that the stored args is replaced when you call a new `selectStatic()`.
+        pub fn selectStatic(
             self: *Self,
             comptime TOther: type,
             transform: fn (T, anytype) TOther,
