@@ -494,7 +494,7 @@ var iter2: Iter(u8) = .from("12");
 _ = iter.singleOrNone(null); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.single(null); // null
+_ = iter.singleOrNone(null); // null
 ```
 
 ### Single

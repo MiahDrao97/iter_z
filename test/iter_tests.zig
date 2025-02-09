@@ -95,7 +95,8 @@ test "select" {
     };
 
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var iter = inner.select(Allocator.Error![]u8, numToStr, testing.allocator);
+    var iter = try inner.select(testing.allocator, Allocator.Error![]u8, numToStr, testing.allocator);
+    defer iter.deinit();
 
     try testing.expect(iter.len() == 3);
 
@@ -470,7 +471,8 @@ test "clone with select" {
     var buf: [4]u8 = undefined;
 
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = iter.select([]const u8, ctx.asString, &buf);
+    var outer: Iter([]const u8) = try iter.select(testing.allocator, []const u8, ctx.asString, &buf);
+    defer outer.deinit();
 
     try testing.expectEqualStrings("1", outer.next().?);
 
@@ -493,7 +495,8 @@ test "clone with select" {
     try testing.expectEqualStrings("4", outer.next().?);
 
     // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = iter.select([]const u8, ctx.asHexString, &buf);
+    var alternate: Iter([]const u8) = try iter.select(testing.allocator, []const u8, ctx.asHexString, &buf);
+    defer alternate.deinit();
     // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
     try testing.expectEqualStrings("0x05", alternate.next().?);
     try testing.expectEqualStrings("6", outer.next().?);
@@ -503,25 +506,36 @@ test "clone with select" {
     try testing.expectEqualStrings("2", clone2.next().?);
 }
 test "Overlapping select edge cases" {
+    // force these args to be runtime values
+    const double_const: *u8 = try testing.allocator.create(u8);
+    defer testing.allocator.destroy(double_const);
+    double_const.* = 2;
+
+    const triple_const: *u8 = try testing.allocator.create(u8);
+    defer testing.allocator.destroy(triple_const);
+    triple_const.* = 3;
+
     const ctx = struct {
         fn multiply(in: u8, multiplier: anytype) u32 {
             return in * @as(u8, multiplier);
         }
 
-        pub fn getDoubler(source: *Iter(u8)) Iter(u32) {
-            return source.select(u32, multiply, @as(u8, 2));
+        pub fn getDoubler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
+            return try source.select(testing.allocator, u32, multiply, val.*);
         }
 
-        pub fn getTripler(source: *Iter(u8)) Iter(u32) {
-            return source.select(u32, multiply, @as(u8, 3));
+        pub fn getTripler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
+            return try source.select(testing.allocator, u32, multiply, val.*);
         }
     };
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
-    var doubler: Iter(u32) = ctx.getDoubler(&iter);
-    var tripler: Iter(u32) = ctx.getTripler(&clone);
+    var doubler: Iter(u32) = try ctx.getDoubler(&iter, double_const);
+    defer doubler.deinit();
+    var tripler: Iter(u32) = try ctx.getTripler(&clone, triple_const);
+    defer tripler.deinit();
 
     var result: ?u32 = doubler.next();
     try testing.expectEqual(2, result);
@@ -785,7 +799,9 @@ test "set index" {
         }
     };
 
-    var transformed: Iter([]const u8) = iter.select([]const u8, ctx.toString, {});
+    var transformed: Iter([]const u8) = try iter.select(testing.allocator, []const u8, ctx.toString, {});
+    defer transformed.deinit();
+
     try transformed.setIndex(5);
     try testing.expectEqualStrings("6", transformed.next().?);
 
