@@ -706,6 +706,52 @@ test "owned slice iterator" {
 
     try testing.expectEqual(7, expected);
 }
+test "owned slice iterator w/ args" {
+    const ctx = struct {
+        pub fn onDeinit(slice: [][]u8, args: anytype) void {
+            for (slice) |s| {
+                @as(Allocator, args).free(s);
+            }
+        }
+    };
+
+    const allocator: Allocator = testing.allocator;
+    const slice1: []u8 = try allocator.alloc(u8, 5);
+    errdefer allocator.free(slice1);
+    @memcpy(slice1, "blarf");
+
+    const slice2: []u8 = try allocator.alloc(u8, 4);
+    errdefer allocator.free(slice2);
+    @memcpy(slice2, "asdf");
+
+    const combined: [][]u8 = try allocator.alloc([]u8, 2);
+    combined[0] = slice1;
+    combined[1] = slice2;
+
+    var iter: Iter([]u8) = try .fromSliceOwnedArgs(allocator, combined, ctx.onDeinit, allocator);
+    defer iter.deinit();
+
+    try testing.expectEqualStrings("blarf", iter.next().?);
+    try testing.expectEqualStrings("asdf", iter.next().?);
+    try testing.expectEqual(null, iter.next());
+
+    try testing.expectEqualStrings("asdf", iter.prev().?);
+    try testing.expectEqualStrings("blarf", iter.prev().?);
+    try testing.expectEqual(null, iter.prev());
+
+    var clone: Iter([]u8) = try iter.cloneReset(allocator);
+    defer clone.deinit();
+
+    iter.scroll(1);
+
+    // make sure the clone is independent
+    try testing.expectEqualStrings("blarf", clone.next().?);
+    try testing.expectEqualStrings("asdf", clone.next().?);
+    try testing.expectEqual(null, clone.next());
+
+    // make sure OG iterator is still where we expect
+    try testing.expectEqualStrings("asdf", iter.next().?);
+}
 test "from other" {
     const str = "this,is,a,string,to,split";
     var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");

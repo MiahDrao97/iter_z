@@ -98,9 +98,125 @@ fn SliceIterable(comptime T: type) type {
     return struct {
         elements: []const T,
         idx: usize = 0,
-        owns_slice: bool,
+        owns_slice: bool = false,
         on_deinit: ?*const fn ([]T) void = null,
         allocator: ?Allocator = null,
+    };
+}
+
+fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T, anytype) void) type {
+    return struct {
+        elements: []const T,
+        idx: usize = 0,
+        args: TArgs,
+        allocator: Allocator,
+
+        const Self = @This();
+
+        pub fn new(
+            alllocator: Allocator,
+            elements: []const T,
+            args: TArgs,
+        ) Allocator.Error!*Self {
+            const ptr: *Self = try alllocator.create(@This());
+            ptr.* = .{
+                .elements = elements,
+                .args = args,
+                .allocator = alllocator,
+            };
+            return ptr;
+        }
+
+        pub fn iter(self: *Self) Iter(T) {
+            const ctx = struct {
+                pub fn implNext(impl: *anyopaque) ?T {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    if (self_ptr.idx >= self_ptr.elements.len) {
+                        return null;
+                    }
+                    defer self_ptr.idx += 1;
+                    return self_ptr.elements[self_ptr.idx];
+                }
+
+                pub fn implPrev(impl: *anyopaque) ?T {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    if (self_ptr.idx == 0) {
+                        return null;
+                    } else if (self_ptr.idx > self_ptr.elements.len) {
+                        self_ptr.idx = self_ptr.elements.len;
+                    }
+                    self_ptr.idx -|= 1;
+                    return self_ptr.elements[self_ptr.idx];
+                }
+
+                pub fn implSetIndex(impl: *anyopaque, index: usize) error{NoIndexing}!void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    self_ptr.idx = index;
+                }
+
+                pub fn implReset(impl: *anyopaque) void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    self_ptr.idx = 0;
+                }
+
+                pub fn implScroll(impl: *anyopaque, offset: isize) void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    const new_idx: isize = @as(isize, @bitCast(self_ptr.idx)) + offset;
+                    if (new_idx < 0) {
+                        self_ptr.idx = 0;
+                    } else {
+                        self_ptr.idx = @bitCast(new_idx);
+                    }
+                }
+
+                pub fn implGetIndex(impl: *anyopaque) ?usize {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    return self_ptr.idx;
+                }
+
+                pub fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    return .{
+                        .variant = Iter(T).Variant{
+                            .slice = SliceIterable(T){
+                                .allocator = alloc,
+                                .elements = try alloc.dupe(T, self_ptr.elements),
+                                .idx = self_ptr.idx,
+                                .owns_slice = true,
+                            },
+                        },
+                    };
+                }
+
+                pub fn implLen(impl: *anyopaque) usize {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    return self_ptr.elements.len;
+                }
+
+                pub fn implDeinit(impl: *anyopaque) void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    on_deinit(@constCast(self_ptr.elements), self_ptr.args);
+                    self_ptr.allocator.free(self_ptr.elements);
+                    self_ptr.allocator.destroy(self_ptr);
+                }
+            };
+
+            const anon: AnonymousIterable(T) = .{
+                .ptr = self,
+                .v_table = &.{
+                    .next_fn = &ctx.implNext,
+                    .prev_fn = &ctx.implPrev,
+                    .set_index_fn = &ctx.implSetIndex,
+                    .reset_fn = &ctx.implReset,
+                    .scroll_fn = &ctx.implScroll,
+                    .get_index_fn = &ctx.implGetIndex,
+                    .clone_fn = &ctx.implClone,
+                    .len_fn = &ctx.implLen,
+                    .deinit_fn = &ctx.implDeinit,
+                },
+            };
+            return anon.iter();
+        }
     };
 }
 
@@ -312,8 +428,8 @@ pub fn Iter(comptime T: type) type {
                                     .elements = try allocator.dupe(T, s.elements),
                                     .idx = s.idx,
                                     .owns_slice = true,
-                                    .allocator = allocator,
                                     .on_deinit = s.on_deinit,
+                                    .allocator = allocator,
                                 },
                             },
                         };
@@ -380,7 +496,6 @@ pub fn Iter(comptime T: type) type {
                 .variant = Variant{
                     .slice = SliceIterable(T){
                         .elements = slice,
-                        .owns_slice = false,
                     },
                 },
             };
@@ -403,6 +518,23 @@ pub fn Iter(comptime T: type) type {
                     },
                 },
             };
+        }
+
+        /// Instantiate a new iterator, using `slice` as our source.
+        /// Differs from `fromSliceOwned()` because the `on_deinit` function can take external arguments.
+        /// This iterator owns slice: calling `deinit()` will free it.
+        ///
+        /// NOTE : If this iterator is cloned, the clone will not call `on_deinit`.
+        /// The reason for this is that, while the underlying slice is duplicated, each element the slice points to is not.
+        /// Thus, `on_deinit` may cause unexpected behavior such as double-free's if you are attempting to free each element in the slice.
+        pub fn fromSliceOwnedArgs(
+            allocator: Allocator,
+            slice: []const T,
+            on_deinit: fn ([]T, anytype) void,
+            args: anytype,
+        ) Allocator.Error!Self {
+            const slice_iter: *SliceIterableArgs(T, @TypeOf(args), on_deinit) = try .new(allocator, slice, args);
+            return slice_iter.iter();
         }
 
         /// Concatenates several iterators into one. They'll iterate in the order they're passed in.

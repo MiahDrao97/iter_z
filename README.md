@@ -214,7 +214,7 @@ const combined: [][]u8 = try allocator.alloc([]u8, 2);
 combined[0] = slice1;
 combined[1] = slice2;
 
-var iter: Iter(u8) = .fromSliceOwned(allocator, combined, &ctx.onDeinit);
+var iter: Iter([]u8) = .fromSliceOwned(allocator, combined, &ctx.onDeinit);
 // frees the slice
 defer iter.deinit();
 
@@ -613,7 +613,7 @@ pub fn AnonymousIterable(comptime T: type) type {
             prev_fn:            *const fn (*anyopaque) ?T,
             reset_fn:           *const fn (*anyopaque) void,
             scroll_fn:          *const fn (*anyopaque, isize) void,
-            has_indexing_fn:    *const fn (*anyopaque) bool,
+            get_index_fn:       *const fn (*anyopaque) ?usize,
             set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
             clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
             get_len_fn:         *const fn (*anyopaque) usize,
