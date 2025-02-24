@@ -323,7 +323,7 @@ test "orderBy" {
     const nums = [_]u8{ 2, 5, 7, 1, 6, 4, 3 };
 
     var inner: Iter(u8) = .from(&nums);
-    var iter: Iter(u8) = try inner.orderBy(testing.allocator, compare, .asc, null);
+    var iter: Iter(u8) = try inner.orderBy(testing.allocator, compare, .asc);
     defer iter.deinit();
 
     var i: usize = 0;
@@ -335,7 +335,7 @@ test "orderBy" {
     try testing.expect(i == 7);
 
     var inner2: Iter(u8) = .from(&nums);
-    var iter2 = try inner2.orderBy(testing.allocator, compare, .desc, null);
+    var iter2 = try inner2.orderBy(testing.allocator, compare, .desc);
     defer iter2.deinit();
 
     while (iter2.next()) |x| {

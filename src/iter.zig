@@ -428,7 +428,7 @@ pub fn Iter(comptime T: type) type {
                                     .elements = try allocator.dupe(T, s.elements),
                                     .idx = s.idx,
                                     .owns_slice = true,
-                                    .on_deinit = s.on_deinit,
+                                    // intentionally don't copy `on_deinit` since we're assuming that must be called only once
                                     .allocator = allocator,
                                 },
                             },
@@ -900,10 +900,9 @@ pub fn Iter(comptime T: type) type {
             allocator: Allocator,
             comparer: fn (T, T) ComparerResult,
             ordering: Ordering,
-            on_deinit: ?*const fn ([]T) void,
         ) Allocator.Error!Self {
             const slice: []T = try self.toSortedSliceOwned(allocator, comparer, ordering);
-            return fromSliceOwned(allocator, slice, on_deinit);
+            return fromSliceOwned(allocator, slice, null);
         }
 
         /// Determine if the sequence contains any element with a given filter (or pass in null to ensure if has an element).
