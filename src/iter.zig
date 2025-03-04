@@ -605,6 +605,7 @@ pub fn Iter(comptime T: type) type {
                 if (!std.meta.hasMethod(OtherType, "next")) {
                     @compileError(@typeName(OtherType) ++ " does not define a method called 'next'.");
                 }
+
                 const method = @field(OtherType, "next");
                 switch (@typeInfo(@TypeOf(method))) {
                     .@"fn" => |next_fn| {

@@ -1,5 +1,6 @@
 .{
-    .name = "iter",
+    .fingerprint = 0x4415db88c6a4829c,
+    .name = .iter_z,
     .version = "0.0.0",
     .dependencies = .{},
     .paths = .{""},
