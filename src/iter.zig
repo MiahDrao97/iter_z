@@ -960,7 +960,7 @@ pub fn Iter(comptime T: type) type {
         /// Ensure there is exactly 1 or 0 elements that match the given `filter`.
         ///
         /// Will scroll back in place
-        pub fn singleOrNone(self: *Self, filter: ?fn (T) bool) error{MultipleElementsFound}!?T {
+        pub fn singleOrNull(self: *Self, filter: ?fn (T) bool) error{MultipleElementsFound}!?T {
             if (self.len() == 0) {
                 return null;
             }
@@ -998,7 +998,7 @@ pub fn Iter(comptime T: type) type {
             self: *Self,
             filter: ?fn (T) bool,
         ) error{ NoElementsFound, MultipleElementsFound }!T {
-            return try self.singleOrNone(filter) orelse return error.NoElementsFound;
+            return try self.singleOrNull(filter) orelse return error.NoElementsFound;
         }
 
         /// Run `action` for each element in the iterator
@@ -1084,6 +1084,68 @@ pub fn Iter(comptime T: type) type {
                 }
             }
             return true;
+        }
+
+        /// Fold the iterator into a single value.
+        pub fn fold(self: *Self, comptime TOther: type, init: TOther, mut: fn (TOther, T, anytype) TOther, args: anytype) TOther {
+            var result: TOther = init;
+            while (self.next()) |x| {
+                result = mut(result, x, args);
+            }
+            return result;
+        }
+
+        /// Calls `fold`, using the first element as `init`.
+        /// Note that this returns null if the iterator is empty.
+        pub fn reduce(self: *Self, mut: fn (T, T, anytype) T, args: anytype) ?T {
+            const init: T = self.next() orelse return null;
+            return self.fold(T, init, mut, args);
+        }
+
+        /// Generate an auto-sum function, assuming elements are a numeric type
+        /// Note that it performs saturating addition.
+        pub fn autoSum() fn (T, T, anytype) T {
+            switch (@typeInfo(T)) {
+                .int, .float => {},
+                else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
+            }
+            return struct {
+                fn sum(a: T, b: T, _: anytype) T {
+                    return a +| b;
+                }
+            }.sum;
+        }
+
+        /// Generate an auto-min function, assuming elements are a numeric type
+        pub fn autoMin() fn (T, T, anytype) T {
+            switch (@typeInfo(T)) {
+                .int, .float => {},
+                else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
+            }
+            return struct {
+                fn min(a: T, b: T, _: anytype) T {
+                    if (a < b) {
+                        return a;
+                    }
+                    return b;
+                }
+            }.min;
+        }
+
+        /// Generate an auto-max function, assuming elements are a numeric type
+        pub fn autoMax() fn (T, T, anytype) T {
+            switch (@typeInfo(T)) {
+                .int, .float => {},
+                else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
+            }
+            return struct {
+                fn max(a: T, b: T, _: anytype) T {
+                    if (a > b) {
+                        return a;
+                    }
+                    return b;
+                }
+            }.max;
         }
     };
 }

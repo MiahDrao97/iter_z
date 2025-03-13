@@ -365,12 +365,12 @@ test "single/single or none" {
             return char == 'r';
         }
     };
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNone(ctx.filter3));
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(ctx.filter3));
 
-    var result: ?u8 = try iter.singleOrNone(ctx.filter1);
+    var result: ?u8 = try iter.singleOrNull(ctx.filter1);
     try testing.expect(result.? == 'e');
 
-    result = try iter.singleOrNone(ctx.filter2);
+    result = try iter.singleOrNull(ctx.filter2);
     try testing.expect(result == null);
 
     result = try iter.single(ctx.filter1);
@@ -380,7 +380,7 @@ test "single/single or none" {
 
     try testing.expectError(error.MultipleElementsFound, iter.single(ctx.filter3));
 
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNone(null));
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null));
     try testing.expectError(error.MultipleElementsFound, iter.single(null));
 
     iter.deinit();
@@ -388,13 +388,13 @@ test "single/single or none" {
 
     try testing.expectError(error.NoElementsFound, iter.single(null));
 
-    result = try iter.singleOrNone(null);
+    result = try iter.singleOrNull(null);
     try testing.expect(result == null);
 
     iter.deinit();
     iter = .from("x");
 
-    result = try iter.singleOrNone(null);
+    result = try iter.singleOrNull(null);
     try testing.expect(result.? == 'x');
 
     result = try iter.single(null);
@@ -889,4 +889,16 @@ test "iter with optionals" {
             i += 1;
         }
     }
+}
+test "reduce auto sum" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    try testing.expectEqual(6, iter.reduce(Iter(u8).autoSum(), {}));
+}
+test "reduce auto min" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    try testing.expectEqual(1, iter.reduce(Iter(u8).autoMin(), {}));
+}
+test "reduce auto max" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    try testing.expectEqual(3, iter.reduce(Iter(u8).autoMax(), {}));
 }

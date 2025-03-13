@@ -524,17 +524,17 @@ var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
 _ = iter.all(ctx.isEven); // true
 ```
 
-### Single Or None
+### Single Or Null
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.singleOrNone(null); // "1"
+_ = iter.singleOrNull(null); // "1"
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.singleOrNone(null); // error.MultipleElementsFound
+_ = iter.singleOrNull(null); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.singleOrNone(null); // null
+_ = iter.singleOrNull(null); // null
 ```
 
 ### Single
