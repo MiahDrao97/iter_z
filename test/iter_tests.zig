@@ -17,16 +17,6 @@ fn isEven(num: u8) bool {
     return num % 2 == 0;
 }
 
-fn compare(a: u8, b: u8) ComparerResult {
-    if (a < b) {
-        return .less_than;
-    } else if (a > b) {
-        return .greater_than;
-    } else {
-        return .equal_to;
-    }
-}
-
 fn stringCompare(a: []const u8, b: []const u8) ComparerResult {
     // basically alphabetical
     for (0..@min(a.len, b.len)) |i| {
@@ -44,10 +34,6 @@ fn stringCompare(a: []const u8, b: []const u8) ComparerResult {
     } else {
         return .equal_to;
     }
-}
-
-fn doStackFrames() void {
-    _ = compare(@intFromBool(isEven(2)), @intFromBool(isEven(1)));
 }
 
 test "from" {
@@ -323,7 +309,7 @@ test "orderBy" {
     const nums = [_]u8{ 2, 5, 7, 1, 6, 4, 3 };
 
     var inner: Iter(u8) = .from(&nums);
-    var iter: Iter(u8) = try inner.orderBy(testing.allocator, compare, .asc);
+    var iter: Iter(u8) = try inner.orderBy(testing.allocator, ComparerResult.auto(u8), .asc);
     defer iter.deinit();
 
     var i: usize = 0;
@@ -335,7 +321,7 @@ test "orderBy" {
     try testing.expect(i == 7);
 
     var inner2: Iter(u8) = .from(&nums);
-    var iter2 = try inner2.orderBy(testing.allocator, compare, .desc);
+    var iter2 = try inner2.orderBy(testing.allocator, ComparerResult.auto(u8), .desc);
     defer iter2.deinit();
 
     while (iter2.next()) |x| {
@@ -585,27 +571,17 @@ test "Overlapping select edge cases" {
     var result: ?u32 = doubler.next();
     try testing.expectEqual(2, result);
 
-    doStackFrames();
-
     result = tripler.next();
     try testing.expectEqual(3, result);
-
-    doStackFrames();
 
     result = doubler.next();
     try testing.expectEqual(4, result);
 
-    doStackFrames();
-
     result = tripler.next();
     try testing.expectEqual(6, result);
 
-    doStackFrames();
-
     result = doubler.next();
     try testing.expectEqual(6, result);
-
-    doStackFrames();
 
     result = tripler.next();
     try testing.expectEqual(9, result);
@@ -619,27 +595,17 @@ test "Overlapping select edge cases" {
     result = doubler_clone.next();
     try testing.expectEqual(2, result);
 
-    doStackFrames();
-
     result = tripler_clone.next();
     try testing.expectEqual(3, result);
-
-    doStackFrames();
 
     result = doubler_clone.next();
     try testing.expectEqual(4, result);
 
-    doStackFrames();
-
     result = tripler_clone.next();
     try testing.expectEqual(6, result);
 
-    doStackFrames();
-
     result = doubler_clone.next();
     try testing.expectEqual(6, result);
-
-    doStackFrames();
 
     result = tripler_clone.next();
     try testing.expectEqual(9, result);
@@ -653,27 +619,17 @@ test "Overlapping select edge cases" {
     result = doubler_cpy.next();
     try testing.expectEqual(2, result);
 
-    doStackFrames();
-
     result = tripler_cpy.next();
     try testing.expectEqual(3, result);
-
-    doStackFrames();
 
     result = doubler_cpy.next();
     try testing.expectEqual(4, result);
 
-    doStackFrames();
-
     result = tripler_cpy.next();
     try testing.expectEqual(6, result);
 
-    doStackFrames();
-
     result = doubler_cpy.next();
     try testing.expectEqual(6, result);
-
-    doStackFrames();
 
     result = tripler_cpy.next();
     try testing.expectEqual(9, result);
@@ -799,7 +755,7 @@ test "from other" {
 
         pub fn hasNoComma(s: []const u8) bool {
             var inner_iter: Iter(u8) = .from(s);
-            return !inner_iter.contains(',', compare);
+            return !inner_iter.contains(',', ComparerResult.auto(u8));
         }
     };
 

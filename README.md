@@ -1,9 +1,8 @@
 # iter_z
-Generic Iterator for Zig - Leveraging Zig 0.14.0 (built with `0.14.0-dev.2370+5c6b25d9b`)
+Generic Iterator for Zig - Leveraging Zig 0.14.0
 
 Inspired by C#'s `IEnumerable<T>` and the various transformations and filters provided by System.Linq.
 Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful queries.
-It would be awesome to have a standard iterator in Zig's standard library so we can use these queries everywhere.
 
 The main type is `Iter(T)`, which comes with several methods and queries.
 
@@ -375,6 +374,7 @@ while (evens.next()) |x| {
 ### Order By
 Pass in a comparer function to order your iterator in ascending or descending order. Keep in mind that this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
 ```zig
+/// equivalent to `ComparerResult.auto(u8)` -> written out for convenience
 const ctx = struct {
     pub fn compare(a: u8, b: u8) ComparerResult {
         if (a < b) {
@@ -386,13 +386,14 @@ const ctx = struct {
         }
     }
 };
+_ = &ctx;
 
 const allocator = @import("std").testing.allocator;
 
 const nums = [_]u8{ 8, 1, 4, 2, 6, 3, 7, 5 };
 var iter: Iter(u8) = .from(&nums);
 
-var ordered: Iter(u8) = try iter.orderBy(allocator, ctx.compare, .asc, null); // can alternatively do .desc
+var ordered: Iter(u8) = try iter.orderBy(allocator, ComparerResult.auto(u8), .asc, null); // can alternatively do .desc
 defer ordered.deinit();
 
 while (ordered.next()) |x| {
@@ -552,20 +553,8 @@ _ = iter.single(null); // error.NoElementsFound
 ### Contains
 Pass in a comparer function. Returns true if any element returns `.equal_to`. Scrolls back in place.
 ```zig
-const ctx = struct {
-    pub fn compare(a: u8, b: u8) ComparerResult {
-        if (a < b) {
-            return .less_than;
-        } else if (a > b) {
-            return .greater_than;
-        } else {
-            return .equal_to;
-        }
-    }
-};
-
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.contains(1, ctx.compare); // true
+_ = iter.contains(1, ComparerResult.auto(u8)); // true
 ```
 
 ### Enumerate To Buffer

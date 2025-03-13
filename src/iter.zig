@@ -8,6 +8,25 @@ pub const ComparerResult = enum {
     less_than,
     equal_to,
     greater_than,
+
+    /// Generates a simple comparer function for a numeric type `T`.
+    pub fn auto(comptime T: type) fn (T, T) ComparerResult {
+        switch (@typeInfo(T)) {
+            .int, .float => {},
+            else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
+        }
+
+        return struct {
+            fn compare(a: T, b: T) ComparerResult {
+                if (a < b) {
+                    return .less_than;
+                } else if (a > b) {
+                    return .greater_than;
+                }
+                return .equal_to;
+            }
+        }.compare;
+    }
 };
 
 /// User may implement this interface to define their own `Iter(T)`
