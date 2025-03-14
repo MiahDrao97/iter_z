@@ -592,11 +592,11 @@ Fold the iteration into a single value of a given type.
 Pass in an accumulator that is passed in every call of `mut`.
 
 Parameters:
-    * `self`: method receiver (non-const pointer)
-    * `TOther` is the return type
-    * `init` is the starting value of the accumulator
-    * `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
-    * `args` are the additional argument passed in. Pass in void literal `{}` if none are used.
+- `self`: method receiver (non-const pointer)
+- `TOther` is the return type
+- `init` is the starting value of the accumulator
+- `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
+- `args` are the additional argument passed in. Pass in void literal `{}` if none are used.
 A classic example of fold would be summing all the values in the iteration.
 ```zig
 const sum = struct{
