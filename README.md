@@ -330,7 +330,7 @@ Finally, you can pass in additional arguments that will get passed in to your fu
 
 This does not require allocation since it stores the args as a threadlocal container-level variable.
 Basically, args become static, and subsequent calls replace that value.
-This is perfect for local, one-time use select iterators.
+This is perfect for local, one-time-use select iterators.
 ```zig
 const Allocator = @import("std").mem.Allocator;
 
@@ -377,7 +377,7 @@ Keep in mind that this allocates a slice owned by the resulting iterator, so be 
 ```zig
 /// equivalent to `iter_z.autoCompare(u8)` -> written out as example
 /// see Auto Functions section; default comparer function is available to numeric types
-const ctx = struct {
+const compare = struct {
     pub fn compare(a: u8, b: u8) ComparerResult {
         if (a < b) {
             return .less_than;
@@ -387,14 +387,14 @@ const ctx = struct {
             return .equal_to;
         }
     }
-};
+}.compare;
 
 const allocator = @import("std").testing.allocator;
 
 const nums = [_]u8{ 8, 1, 4, 2, 6, 3, 7, 5 };
 var iter: Iter(u8) = .from(&nums);
 
-var ordered: Iter(u8) = try iter.orderBy(allocator, ctx.compare, .asc); // can alternatively do .desc
+var ordered: Iter(u8) = try iter.orderBy(allocator, compare, .asc); // or .desc
 defer ordered.deinit();
 
 while (ordered.next()) |x| {
@@ -404,7 +404,6 @@ while (ordered.next()) |x| {
 
 ### Any
 Peek at the next element with or without a filter.
-This also doubles as imitating `FirstOrDefault()`. An imitation of `First()` is not implemented.
 ```zig
 const isEven = struct {
     fn isEven(item: u32) bool {
@@ -417,6 +416,9 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.any(null); // 1
 // peek with filter
 _ = iter.any(isEven); // 2
+
+// iter hasn't moved
+_ = iter.next(); // 1
 ```
 
 ### Filter Next
@@ -426,24 +428,24 @@ Writes the number of elements moved forward to the out parameter `moved_forward`
 NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
 const testing = @import("std").testing;
-const ctx = struct {
-    pub fn isEven(item: u8) bool {
+const isEven = struct {
+    fn isEven(item: u8) bool {
         return @mod(item, 2) == 0;
     }
-};
+}.isEven;
 
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = 0;
-    try testing.expectEqual(2, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(2, iter.filterNext(isEven, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
 
     moved = 0; // reset here
-    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(null, iter.filterNext(isEven, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
     moved = 0; // reset
-    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(null, iter.filterNext(isEven, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 ```
@@ -457,7 +459,7 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
 const ctx = struct {
-    pub fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
+    fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
         const x: *usize = args.@"0";
         x.* += 1;
 
@@ -475,7 +477,7 @@ const ctx = struct {
         };
     }
 
-    pub fn onErr(_: anyerror, _: Allocator.Error![]u8, args: anytype) void {
+    fn onErr(_: anyerror, _: Allocator.Error![]u8, args: anytype) void {
         const failed: *bool = args.@"1";
         failed.* = true;
     }
@@ -596,10 +598,10 @@ Parameters:
 - `TOther` is the return type
 - `init` is the starting value of the accumulator
 - `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
-- `args` are the additional argument passed in. Pass in void literal `{}` if none are used.
+- `args` are the additional arguments passed in. Pass in void literal `{}` if none are used.
 A classic example of fold would be summing all the values in the iteration.
 ```zig
-const sum = struct{
+const sum = struct {
     // note returning u16
     fn sum(a: u8, b: u8, _: anytype) u16 {
         return a + b;
@@ -616,7 +618,7 @@ The return type will be the same as the element type.
 If there are no elements or iteration is over, will return null.
 ```zig
 // written out as example; see Auto Functions section
-const sum = struct{
+const sum = struct {
     fn sum(a: u8, b: u8, _: anytype) u8 {
         return a + b;
     }
