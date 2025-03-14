@@ -8,25 +8,6 @@ pub const ComparerResult = enum {
     less_than,
     equal_to,
     greater_than,
-
-    /// Generates a simple comparer function for a numeric type `T`.
-    pub fn auto(comptime T: type) fn (T, T) ComparerResult {
-        switch (@typeInfo(T)) {
-            .int, .float => {},
-            else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
-        }
-
-        return struct {
-            fn compare(a: T, b: T) ComparerResult {
-                if (a < b) {
-                    return .less_than;
-                } else if (a > b) {
-                    return .greater_than;
-                }
-                return .equal_to;
-            }
-        }.compare;
-    }
 };
 
 /// User may implement this interface to define their own `Iter(T)`
@@ -764,8 +745,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Returns a filtered iterator, using `self` as a source.
         ///
-        /// NOTE : If simply needing to iterate with a filter, `any()` is preferred.
-        /// Pass in your filter function and `false` for the `peek` argument: `while (iter.any(filter, false)) |x| {...}`
+        /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred.
         pub fn where(self: *Self, filter: fn (T) bool) Self {
             const ctx = struct {
                 pub fn implNext(impl: *anyopaque) ?T {
@@ -925,24 +905,15 @@ pub fn Iter(comptime T: type) type {
             return fromSliceOwned(allocator, slice, null);
         }
 
-        /// Determine if the sequence contains any element with a given filter (or pass in null to ensure if has an element).
-        /// Will scroll back in place if `peek` is true.
-        ///
-        /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
-        ///
-        /// WARN : If `peek` is true, and you use this in a while loop, it is effectively the same as `while(true) |x| {...}`.
-        /// Assuming there's an upcoming element that fulfills your filter, the value of `x` will always be the same, and you'll loop forever.
-        pub fn any(self: *Self, filter: ?fn (T) bool, peek: bool) ?T {
+        /// Determine if the sequence contains any element with a given filter (or pass in null to simply peek at the next element).
+        /// Always scrolls back in place.
+        pub fn any(self: *Self, filter: ?fn (T) bool) ?T {
             if (self.len() == 0) {
                 return null;
             }
 
             var scroll_amt: isize = 0;
-            defer {
-                if (peek) {
-                    self.scroll(scroll_amt);
-                }
-            }
+            defer self.scroll(scroll_amt);
 
             while (self.next()) |n| {
                 scroll_amt -= 1;
@@ -953,6 +924,20 @@ pub fn Iter(comptime T: type) type {
                     continue;
                 }
                 return n;
+            }
+            return null;
+        }
+
+        /// Find the next element that fulfills a given filter.
+        /// This does move the iterator forward, which is reported in the out parameter `moved_forward`.
+        ///
+        /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
+        pub fn filterNext(self: *Self, filter: fn (T) bool, moved_forward: *usize) ?T {
+            while (self.next()) |n| {
+                moved_forward.* += 1;
+                if (filter(n)) {
+                    return n;
+                }
             }
             return null;
         }
@@ -1038,7 +1023,7 @@ pub fn Iter(comptime T: type) type {
                 }
             };
             ctx.ctx_item = item;
-            return self.any(ctx.filter, true) != null;
+            return self.any(ctx.filter) != null;
         }
 
         /// Count the number of filtered items or simply count the items.
@@ -1087,7 +1072,13 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Fold the iterator into a single value.
-        pub fn fold(self: *Self, comptime TOther: type, init: TOther, mut: fn (TOther, T, anytype) TOther, args: anytype) TOther {
+        pub fn fold(
+            self: *Self,
+            comptime TOther: type,
+            init: TOther,
+            mut: fn (TOther, T, anytype) TOther,
+            args: anytype,
+        ) TOther {
             var result: TOther = init;
             while (self.next()) |x| {
                 result = mut(result, x, args);
@@ -1096,56 +1087,10 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Calls `fold`, using the first element as `init`.
-        /// Note that this returns null if the iterator is empty.
+        /// Note that this returns null if the iterator is empty or at the end.
         pub fn reduce(self: *Self, mut: fn (T, T, anytype) T, args: anytype) ?T {
             const init: T = self.next() orelse return null;
             return self.fold(T, init, mut, args);
-        }
-
-        /// Generate an auto-sum function, assuming elements are a numeric type
-        /// Note that it performs saturating addition.
-        pub fn autoSum() fn (T, T, anytype) T {
-            switch (@typeInfo(T)) {
-                .int, .float => {},
-                else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
-            }
-            return struct {
-                fn sum(a: T, b: T, _: anytype) T {
-                    return a +| b;
-                }
-            }.sum;
-        }
-
-        /// Generate an auto-min function, assuming elements are a numeric type
-        pub fn autoMin() fn (T, T, anytype) T {
-            switch (@typeInfo(T)) {
-                .int, .float => {},
-                else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
-            }
-            return struct {
-                fn min(a: T, b: T, _: anytype) T {
-                    if (a < b) {
-                        return a;
-                    }
-                    return b;
-                }
-            }.min;
-        }
-
-        /// Generate an auto-max function, assuming elements are a numeric type
-        pub fn autoMax() fn (T, T, anytype) T {
-            switch (@typeInfo(T)) {
-                .int, .float => {},
-                else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
-            }
-            return struct {
-                fn max(a: T, b: T, _: anytype) T {
-                    if (a > b) {
-                        return a;
-                    }
-                    return b;
-                }
-            }.max;
         }
     };
 }
@@ -1438,4 +1383,69 @@ fn cloneFilteredFromIter(
         },
     };
     return clone.iter();
+}
+
+/// Generate an auto-sum function, assuming elements are a numeric type. Args are not evaluated in this function.
+/// Take note that this function does not check for overflow.
+pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
+    switch (@typeInfo(T)) {
+        .int, .float => {},
+        else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
+    }
+    return struct {
+        fn sum(a: T, b: T, _: anytype) T {
+            return a + b;
+        }
+    }.sum;
+}
+
+/// Generate an auto-min function, assuming elements are a numeric type. Args are not evaluated in this function.
+pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
+    switch (@typeInfo(T)) {
+        .int, .float => {},
+        else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
+    }
+    return struct {
+        fn min(a: T, b: T, _: anytype) T {
+            if (a < b) {
+                return a;
+            }
+            return b;
+        }
+    }.min;
+}
+
+/// Generate an auto-max function, assuming elements are a numeric type. Args are not evaluated in this function.
+pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
+    switch (@typeInfo(T)) {
+        .int, .float => {},
+        else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
+    }
+    return struct {
+        fn max(a: T, b: T, _: anytype) T {
+            if (a > b) {
+                return a;
+            }
+            return b;
+        }
+    }.max;
+}
+
+/// Generates a simple comparer function for a numeric type `T`.
+pub fn autoCompare(comptime T: type) fn (T, T) ComparerResult {
+    switch (@typeInfo(T)) {
+        .int, .float => {},
+        else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
+    }
+
+    return struct {
+        fn compare(a: T, b: T) ComparerResult {
+            if (a < b) {
+                return .less_than;
+            } else if (a > b) {
+                return .greater_than;
+            }
+            return .equal_to;
+        }
+    }.compare;
 }

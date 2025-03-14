@@ -355,7 +355,7 @@ while (strings.next()) |maybe_str| {
 ```
 
 ### Where
-Filter the elements in your iterator, creating a new iterator with only those elements. If you simply need to iterate with a filter, use `any(filter, false)`.
+Filter the elements in your iterator, creating a new iterator with only those elements. If you simply need to iterate with a filter, use `filterNext(...)`.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
@@ -372,9 +372,11 @@ while (evens.next()) |x| {
 ```
 
 ### Order By
-Pass in a comparer function to order your iterator in ascending or descending order. Keep in mind that this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
+Pass in a comparer function to order your iterator in ascending or descending order.
+Keep in mind that this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
 ```zig
-/// equivalent to `ComparerResult.auto(u8)` -> written out for convenience
+/// equivalent to `iter_z.autoCompare(u8)` -> written out as example
+/// see Auto Functions section; default comparer function is available to numeric types
 const ctx = struct {
     pub fn compare(a: u8, b: u8) ComparerResult {
         if (a < b) {
@@ -386,14 +388,13 @@ const ctx = struct {
         }
     }
 };
-_ = &ctx;
 
 const allocator = @import("std").testing.allocator;
 
 const nums = [_]u8{ 8, 1, 4, 2, 6, 3, 7, 5 };
 var iter: Iter(u8) = .from(&nums);
 
-var ordered: Iter(u8) = try iter.orderBy(allocator, ComparerResult.auto(u8), .asc, null); // can alternatively do .desc
+var ordered: Iter(u8) = try iter.orderBy(allocator, ctx.compare, .asc); // can alternatively do .desc
 defer ordered.deinit();
 
 while (ordered.next()) |x| {
@@ -402,14 +403,8 @@ while (ordered.next()) |x| {
 ```
 
 ### Any
-Find the next element with or without a filter.
+Peek at the next element with or without a filter.
 This also doubles as imitating `FirstOrDefault()`. An imitation of `First()` is not implemented.
-
-You can scroll back in place if you pass in `true` for `peek`.
-This is preferred over `where()` when you simply need to iterate with a filter.
-Just make sure that you pass in `false` for `peek`.
-
-WARN: Keep in mind that if you have a while loop with `true` for peek, you've created an infinite loop in which the value of the capture group never changes.
 ```zig
 const ctx = struct {
     pub fn isEven(item: u8) bool {
@@ -418,28 +413,38 @@ const ctx = struct {
 };
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+// peek without filter
+_ = iter.any(null); // 1
 // peek with filter
-_ = iter.any(ctx.isEven, true); // 2
+_ = iter.any(ctx.isEven); // 2
+```
 
-// no peek with filter: iterator moves forward and stays that way
-_ = iter.any(ctx.isEven, false); // 2
+### Filter Next
+Calls `next()` until an element fulfills the given filter condition or returns null if none are found/iteration is over.
+Writes the number of elements moved forward to the out parameter `moved_forward`.
 
-_ = iter.any(ctx.isEven, true); // null
-_ = iter.any(ctx.isEven, false); // null
+NOTE : This is preferred over `where()` when simply iterating with a filter.
+```zig
+const testing = @import("std").testing;
+const ctx = struct {
+    pub fn isEven(item: u8) bool {
+        return @mod(item, 2) == 0;
+    }
+};
 
-// peek with no filter
-_ = iter.any(null, true); // 3
+test "filterNext()" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var moved: usize = 0;
+    try testing.expectEqual(2, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
 
-// no peek with no filter (fully equivalent to next())
-_ = iter.any(null, false); // 3
+    moved = 0; // reset here
+    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-// reset...
-iter.reset();
-
-// Don't do this...
-while (iter.any(ctx.isEven, true)) |x| {
-    // INFINITE LOOP
-    // x is always 2
+    moved = 0; // reset
+    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(0, moved); // did not move again
 }
 ```
 
@@ -554,7 +559,7 @@ _ = iter.single(null); // error.NoElementsFound
 Pass in a comparer function. Returns true if any element returns `.equal_to`. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.contains(1, ComparerResult.auto(u8)); // true
+_ = iter.contains(1, iter_z.autoCompare(u8)); // true
 ```
 
 ### Enumerate To Buffer
@@ -580,6 +585,94 @@ const allocator = @import("std").testing.allocator;
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 const results: []u8 = try iter.enumerateToOwnedSlice(allocator);
 defer allocator.free(results);
+```
+
+### Fold
+Fold the iteration into a single value of a given type.
+Pass in an accumulator that is passed in every call of `mut`
+Parameters:
+    - `self`: method receiver (non-const pointer)
+    - `TOther` is the return type
+    - `init` is the starting value of the accumulator
+    - `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
+    - `args` are the additional argument passed in. Pass in void literal `{}` if none are used.
+A classic example of fold would be summing all the values in the iteration.
+```zig
+// written out as example; see Auto Functions section
+const sum = struct{
+    // note returning u16
+    fn sum(a: u8, b: u8, _: anytype) u16 {
+        return a + b;
+    }
+}.sum;
+
+var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+_ = iter.fold(u16, 0, sum, {}); // 6
+```
+
+### Reduce
+Calls `fold()`, using the first element as the accumulator.
+The return type will be the same as the element type.
+If there are no elements or iteration is over, will return null.
+```zig
+// written out as example; see Auto Functions section
+const sum = struct{
+    fn sum(a: u8, b: u8, _: anytype) u8 {
+        return a + b;
+    }
+}.sum;
+
+var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+_ = iter.reduce(sum, {}); // 6
+```
+
+## Auto Functions
+Functions generated for numerical types for convenience.
+Example usage:
+```zig
+var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+_ = iter.reduce(iter_z.autoSum(u8), {}); // 6
+```
+
+Here are the underlying functions generated.
+
+### Auto Comparer
+```zig
+fn compare(a: T, b: T) ComparerResult {
+    if (a < b) {
+        return .less_than;
+    } else if (a > b) {
+        return .greater_than;
+    }
+    return .equal_to;
+}
+```
+
+### Auto Sum
+```zig
+fn sum(a: T, b: T, _: anytype) T {
+    return a + b;
+}
+```
+
+### Auto Min
+```zig
+fn min(a: T, b: T, _: anytype) T {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+```
+
+### Auto Max
+```zig
+fn max(a: T, b: T, _: anytype) T {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
 ```
 
 ## Implementation Details

@@ -309,7 +309,7 @@ test "orderBy" {
     const nums = [_]u8{ 2, 5, 7, 1, 6, 4, 3 };
 
     var inner: Iter(u8) = .from(&nums);
-    var iter: Iter(u8) = try inner.orderBy(testing.allocator, ComparerResult.auto(u8), .asc);
+    var iter: Iter(u8) = try inner.orderBy(testing.allocator, iter_z.autoCompare(u8), .asc);
     defer iter.deinit();
 
     var i: usize = 0;
@@ -321,7 +321,7 @@ test "orderBy" {
     try testing.expect(i == 7);
 
     var inner2: Iter(u8) = .from(&nums);
-    var iter2 = try inner2.orderBy(testing.allocator, ComparerResult.auto(u8), .desc);
+    var iter2 = try inner2.orderBy(testing.allocator, iter_z.autoCompare(u8), .desc);
     defer iter2.deinit();
 
     while (iter2.next()) |x| {
@@ -335,14 +335,14 @@ test "any" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
-    var result: ?u8 = iter.any(isEven, true);
+    var result: ?u8 = iter.any(isEven);
     try testing.expect(result == null);
 
     // should have scrolled back
     result = iter.next();
     try testing.expect(result.? == 1);
 
-    result = iter.any(null, true);
+    result = iter.any(null);
     try testing.expect(result.? == 3);
 
     result = iter.next();
@@ -755,7 +755,7 @@ test "from other" {
 
         pub fn hasNoComma(s: []const u8) bool {
             var inner_iter: Iter(u8) = .from(s);
-            return !inner_iter.contains(',', ComparerResult.auto(u8));
+            return !inner_iter.contains(',', iter_z.autoCompare(u8));
         }
     };
 
@@ -880,6 +880,26 @@ test "allocator mix n match" {
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();
 }
+test "filterNext()" {
+    const ctx = struct {
+        pub fn isEven(item: u8) bool {
+            return @mod(item, 2) == 0;
+        }
+    };
+
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var moved: usize = 0;
+    try testing.expectEqual(2, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(2, moved); // moved 2 elements
+
+    moved = 0; // reset here
+    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(1, moved); // moved 1 element and then encountered end
+
+    moved = 0; // reset
+    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(0, moved); // did not move again
+}
 test "iter with optionals" {
     var iter: Iter(?u8) = .from(&[_]?u8{ 1, 2, null, 3 });
     var i: usize = 1;
@@ -892,13 +912,13 @@ test "iter with optionals" {
 }
 test "reduce auto sum" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(6, iter.reduce(Iter(u8).autoSum(), {}));
+    try testing.expectEqual(6, iter.reduce(iter_z.autoSum(u8), {}));
 }
 test "reduce auto min" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(1, iter.reduce(Iter(u8).autoMin(), {}));
+    try testing.expectEqual(1, iter.reduce(iter_z.autoMin(u8), {}));
 }
 test "reduce auto max" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(3, iter.reduce(Iter(u8).autoMax(), {}));
+    try testing.expectEqual(3, iter.reduce(iter_z.autoMax(u8), {}));
 }
