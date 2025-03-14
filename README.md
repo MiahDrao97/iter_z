@@ -10,7 +10,7 @@ The main type is `Iter(T)`, which comes with several methods and queries.
 In your build.zig.zon, add the following dependency:
 ```zig
 .{
-    .name = "my awesome app",
+    .name = .my_awesome_app,
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
@@ -359,13 +359,13 @@ Filter the elements in your iterator, creating a new iterator with only those el
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const ctx = struct {
-    pub fn isEven(item: u32) bool {
+const isEven = struct {
+    fn isEven(item: u32) bool {
         return @mod(item, 2) == 0;
     }
-};
+}.isEven;
 
-var evens = iter.where(ctx.isEven);
+var evens = iter.where(isEven);
 while (evens.next()) |x| {
     // 2, 4
 }
@@ -406,17 +406,17 @@ while (ordered.next()) |x| {
 Peek at the next element with or without a filter.
 This also doubles as imitating `FirstOrDefault()`. An imitation of `First()` is not implemented.
 ```zig
-const ctx = struct {
-    pub fn isEven(item: u8) bool {
+const isEven = struct {
+    fn isEven(item: u32) bool {
         return @mod(item, 2) == 0;
     }
-};
+}.isEven;
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 // peek without filter
 _ = iter.any(null); // 1
 // peek with filter
-_ = iter.any(ctx.isEven); // 2
+_ = iter.any(isEven); // 2
 ```
 
 ### Filter Next
@@ -504,29 +504,29 @@ This differs from `len()` because it will count the exact number of remaining el
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const ctx = struct {
-    pub fn isEven(item: u32) bool {
+const isEven = struct {
+    fn isEven(item: u32) bool {
         return @mod(item, 2) == 0;
     }
-};
+}.isEven;
 
-const evens = iter.where(ctx.isEven);
+const evens = iter.where(isEven);
 _ = evens.len(); // length is 5
 _ = evens.count(null); // there are actually 2 elements that fulfill our condition
-_ = iter.count(ctx.isEven); // 2 again
+_ = iter.count(isEven); // 2 again
 ```
 
 ### All
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
 ```zig
-const ctx = struct {
-    pub fn isEven(item: u32) bool {
+const isEven = struct {
+    fn isEven(item: u32) bool {
         return @mod(item, 2) == 0;
     }
-};
+}.isEven;
 
 var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
-_ = iter.all(ctx.isEven); // true
+_ = iter.all(isEven); // true
 ```
 
 ### Single Or Null
@@ -589,16 +589,16 @@ defer allocator.free(results);
 
 ### Fold
 Fold the iteration into a single value of a given type.
-Pass in an accumulator that is passed in every call of `mut`
+Pass in an accumulator that is passed in every call of `mut`.
+
 Parameters:
-    - `self`: method receiver (non-const pointer)
-    - `TOther` is the return type
-    - `init` is the starting value of the accumulator
-    - `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
-    - `args` are the additional argument passed in. Pass in void literal `{}` if none are used.
+    * `self`: method receiver (non-const pointer)
+    * `TOther` is the return type
+    * `init` is the starting value of the accumulator
+    * `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
+    * `args` are the additional argument passed in. Pass in void literal `{}` if none are used.
 A classic example of fold would be summing all the values in the iteration.
 ```zig
-// written out as example; see Auto Functions section
 const sum = struct{
     // note returning u16
     fn sum(a: u8, b: u8, _: anytype) u16 {
