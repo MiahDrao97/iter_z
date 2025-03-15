@@ -1397,7 +1397,8 @@ fn cloneFilteredFromIter(
     return clone.iter();
 }
 
-/// Generate an auto-sum function, assuming elements are a numeric type. Args are not evaluated in this function.
+/// Generate an auto-sum function, assuming elements are a numeric type (excluding enums).
+/// Args are not evaluated in this function.
 /// Take note that this function does not check for overflow.
 pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
@@ -1411,10 +1412,20 @@ pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
     }.sum;
 }
 
-/// Generate an auto-min function, assuming elements are a numeric type. Args are not evaluated in this function.
+/// Generate an auto-min function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
 pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
         .int, .float => {},
+        .@"enum" => {
+            return struct {
+                fn min(a: T, b: T, _: anytype) T {
+                    if (@intFromEnum(a) < @intFromEnum(b)) {
+                        return a;
+                    }
+                    return b;
+                }
+            }.min;
+        },
         else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
     return struct {
@@ -1427,10 +1438,20 @@ pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
     }.min;
 }
 
-/// Generate an auto-max function, assuming elements are a numeric type. Args are not evaluated in this function.
+/// Generate an auto-max function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
 pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
         .int, .float => {},
+        .@"enum" => {
+            return struct {
+                fn max(a: T, b: T, _: anytype) T {
+                    if (@intFromEnum(a) > @intFromEnum(b)) {
+                        return a;
+                    }
+                    return b;
+                }
+            }.max;
+        },
         else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
     return struct {
@@ -1443,10 +1464,22 @@ pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
     }.max;
 }
 
-/// Generates a simple comparer function for a numeric type `T`.
+/// Generates a simple comparer function for a numeric or enum type `T`.
 pub fn autoCompare(comptime T: type) fn (T, T) ComparerResult {
     switch (@typeInfo(T)) {
         .int, .float => {},
+        .@"enum" => {
+            return struct {
+                fn compare(a: T, b: T) ComparerResult {
+                    if (@intFromEnum(a) < @intFromEnum(b)) {
+                        return .less_than;
+                    } else if (@intFromEnum(a) > @intFromEnum(b)) {
+                        return .greater_than;
+                    }
+                    return .equal_to;
+                }
+            }.compare;
+        },
         else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
     }
 
