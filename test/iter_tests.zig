@@ -922,3 +922,40 @@ test "reduce auto max" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     try testing.expectEqual(3, iter.reduce(iter_z.autoMax(u8), {}));
 }
+test "reverse" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var reversed: Iter(u8) = iter.reverse();
+    try testing.expectEqual(null, reversed.next());
+
+    var double_reversed = reversed.reverse();
+    try testing.expectEqual(1, double_reversed.next().?);
+}
+test "reverse reset" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var reversed: Iter(u8) = iter.reverseReset();
+
+    // length should be equal, but indexes reversed
+    try testing.expectEqual(3, reversed.len());
+    try testing.expectEqual(0, reversed.getIndex());
+
+    try testing.expectEqual(3, reversed.next().?);
+    try testing.expectEqual(2, reversed.next().?);
+    try testing.expectEqual(1, reversed.next().?);
+    try testing.expectEqual(null, reversed.next());
+
+    var reversed_clone = try reversed.cloneReset(testing.allocator);
+    defer reversed_clone.deinit();
+
+    try testing.expectEqual(null, reversed.next());
+    // check the clone now
+    try testing.expectEqual(3, reversed_clone.next().?);
+    try testing.expectEqual(2, reversed_clone.next().?);
+    try testing.expectEqual(1, reversed_clone.next().?);
+    try testing.expectEqual(null, reversed_clone.next());
+
+    // again, indexes are reversed
+    reversed.setIndex(0) catch unreachable;
+    try testing.expectEqual(3, reversed.next().?);
+    // clone should not have changed
+    try testing.expectEqual(null, reversed_clone.next());
+}

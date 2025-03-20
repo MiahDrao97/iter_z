@@ -628,6 +628,44 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.reduce(sum, {}); // 6
 ```
 
+### Reverse
+Reverses the direction of iteration and indexing (if applicable)
+It's as if the end of a slice where its beginning, and its beginning is the end.
+```zig
+test "reverse" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var reversed: Iter(u8) = iter.reverse();
+    // note that the beginning of the original is the end of the reversed one, thus returning null on `next()` right away.
+    try testing.expectEqual(null, reversed.next());
+    // reset the reversed iterator to set the original to the end of its sequence
+    reversed.reset() catch unreachable;
+
+    // length should be equal, but indexes reversed
+    try testing.expectEqual(3, reversed.len());
+    // 3 is now at index 0, where it is actually index 2 on the original and the slice
+    try testing.expectEqual(0, reversed.getIndex());
+
+    try testing.expectEqual(3, reversed.next().?);
+    try testing.expectEqual(2, reversed.next().?);
+    try testing.expectEqual(1, reversed.next().?);
+    try testing.expectEqual(null, reversed.next());
+}
+```
+
+### Reverse Reset
+Calls `reverse()` and `reset()` on the reversed iterator for ergonomics.
+```zig
+test "reverse reset" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var reversed: Iter(u8) = iter.reverseReset();
+
+    try testing.expectEqual(3, reversed.next().?);
+    try testing.expectEqual(2, reversed.next().?);
+    try testing.expectEqual(1, reversed.next().?);
+    try testing.expectEqual(null, reversed.next());
+}
+```
+
 ## Auto Functions
 Functions generated for numerical types for convenience.
 Example usage:

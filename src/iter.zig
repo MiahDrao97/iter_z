@@ -490,7 +490,7 @@ pub fn Iter(comptime T: type) type {
         pub const empty: Self = .{ .variant = .empty };
 
         /// Instantiate a new iterator, using `slice` as our source.
-        /// The iterator does not own `slice`, however, and so a `deinit()` call is a no-op.
+        /// The iterator does not own `slice`, however, and so a `deinit()` call is not neccesary.
         pub fn from(slice: []const T) Self {
             return .{
                 .variant = Variant{
@@ -1104,6 +1104,194 @@ pub fn Iter(comptime T: type) type {
             const init: T = self.next() orelse return null;
             return self.fold(T, init, mut, args);
         }
+
+        /// Reverse the direction of the iterator.
+        /// Essentially swaps `prev()` and `next()` as well indexes (if applicable).
+        pub fn reverse(self: *Self) Self {
+            const ctx = struct {
+                fn implNext(impl: *anyopaque) ?T {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    return self_ptr.prev();
+                }
+
+                fn implPrev(impl: *anyopaque) ?T {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    return self_ptr.next();
+                }
+
+                fn implSetIndex(impl: *anyopaque, offset: usize) error{NoIndexing}!void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    switch (self_ptr.variant) {
+                        .slice => |*s| s.idx = s.elements.len -| offset,
+                        else => return error.NoIndexing,
+                    }
+                }
+
+                fn implReset(impl: *anyopaque) void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    switch (self_ptr.variant) {
+                        .slice => |*s| s.idx = s.elements.len,
+                        .empty => {},
+                        else => while (self_ptr.next()) |_| {},
+                    }
+                }
+
+                fn implScroll(impl: *anyopaque, offset: isize) void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    if (offset > 0) {
+                        for (0..@bitCast(offset)) |_| {
+                            _ = self_ptr.prev();
+                        }
+                    } else if (offset < 0) {
+                        for (0..@abs(offset)) |_| {
+                            _ = self_ptr.next();
+                        }
+                    }
+                }
+
+                fn implGetIndex(impl: *anyopaque) ?usize {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    switch (self_ptr.variant) {
+                        .slice => |s| return s.elements.len -| s.idx,
+                        else => return null,
+                    }
+                }
+
+                fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    const cloned: *CloneIter(T) = try allocator.create(CloneIter(T));
+                    cloned.* = .{ .allocator = allocator, .iter = self_ptr.* };
+                    const reversed: AnonymousIterable(T) = .{
+                        .ptr = cloned,
+                        .v_table = &.{
+                            .next_fn = &implNextAsClone,
+                            .prev_fn = &implPrevAsClone,
+                            .set_index_fn = &implSetIndexAsClone,
+                            .reset_fn = &implResetAsClone,
+                            .scroll_fn = &implScrollAsClone,
+                            .get_index_fn = &implGetIndexAsClone,
+                            .clone_fn = &implCloneAsClone,
+                            .len_fn = &implLenAsClone,
+                            .deinit_fn = &implDeinitAsClone,
+                        },
+                    };
+                    return reversed.iter();
+                }
+
+                fn implLen(impl: *anyopaque) usize {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    return self_ptr.len();
+                }
+
+                fn implNextAsClone(impl: *anyopaque) ?T {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    return clone_ptr.iter.prev();
+                }
+
+                fn implPrevAsClone(impl: *anyopaque) ?T {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    return clone_ptr.iter.next();
+                }
+
+                fn implSetIndexAsClone(impl: *anyopaque, offset: usize) error{NoIndexing}!void {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    switch (clone_ptr.iter.variant) {
+                        .slice => |*s| s.idx = s.elements.len -| offset,
+                        else => return error.NoIndexing,
+                    }
+                }
+
+                fn implResetAsClone(impl: *anyopaque) void {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    switch (clone_ptr.iter.variant) {
+                        .slice => |*s| s.idx = s.elements.len,
+                        .empty => {},
+                        else => while (clone_ptr.iter.next()) |_| {},
+                    }
+                }
+
+                fn implScrollAsClone(impl: *anyopaque, offset: isize) void {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    if (offset > 0) {
+                        for (0..@bitCast(offset)) |_| {
+                            _ = clone_ptr.iter.prev();
+                        }
+                    } else if (offset < 0) {
+                        for (0..@abs(offset)) |_| {
+                            _ = clone_ptr.iter.next();
+                        }
+                    }
+                }
+
+                fn implGetIndexAsClone(impl: *anyopaque) ?usize {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    switch (clone_ptr.iter.variant) {
+                        .slice => |s| return s.elements.len -| s.idx,
+                        else => return null,
+                    }
+                }
+
+                fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    const cloned: *CloneIter(T) = try allocator.create(CloneIter(T));
+                    cloned.* = .{ .allocator = allocator, .iter = clone_ptr.iter };
+                    const reversed: AnonymousIterable(T) = .{
+                        .ptr = cloned,
+                        .v_table = &.{
+                            .next_fn = &implNextAsClone,
+                            .prev_fn = &implPrevAsClone,
+                            .set_index_fn = &implSetIndexAsClone,
+                            .reset_fn = &implResetAsClone,
+                            .scroll_fn = &implScrollAsClone,
+                            .get_index_fn = &implGetIndexAsClone,
+                            .clone_fn = &implCloneAsClone,
+                            .len_fn = &implLenAsClone,
+                            .deinit_fn = &implDeinitAsClone,
+                        },
+                    };
+                    return reversed.iter();
+                }
+
+                fn implLenAsClone(impl: *anyopaque) usize {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    return clone_ptr.iter.len();
+                }
+
+                fn implDeinit(impl: *anyopaque) void {
+                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
+                    self_ptr.deinit();
+                }
+
+                fn implDeinitAsClone(impl: *anyopaque) void {
+                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    clone_ptr.allocator.destroy(clone_ptr);
+                }
+            };
+
+            const reversed: AnonymousIterable(T) = .{
+                .ptr = self,
+                .v_table = &.{
+                    .next_fn = &ctx.implNext,
+                    .prev_fn = &ctx.implPrev,
+                    .set_index_fn = &ctx.implSetIndex,
+                    .reset_fn = &ctx.implReset,
+                    .scroll_fn = &ctx.implScroll,
+                    .get_index_fn = &ctx.implGetIndex,
+                    .clone_fn = &ctx.implClone,
+                    .len_fn = &ctx.implLen,
+                    .deinit_fn = &ctx.implDeinit,
+                },
+            };
+            return reversed.iter();
+        }
+
+        /// Reverse an iterator and reset (set to the end of its iteration and reversed its direction).
+        /// NOTE : This modifies the original iterator, unlike `cloneReset()`, since we're dealing with the same iterator.
+        pub fn reverseReset(self: *Self) Self {
+            var reversed: Self = self.reverse();
+            reversed.reset();
+            return reversed;
+        }
     };
 }
 
@@ -1377,6 +1565,11 @@ fn cloneFilteredFromIter(
             const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
             self_ptr.iter.deinit();
             self_ptr.allocator.destroy(self_ptr);
+        }
+
+        fn implDeinitAsClone(impl: *anyopaque) void {
+            const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            clone_ptr.allocator.destroy(clone_ptr);
         }
     };
 
