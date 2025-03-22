@@ -888,15 +888,13 @@ test "filterNext()" {
     };
 
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var moved: usize = 0;
+    var moved: usize = undefined;
     try testing.expectEqual(2, iter.filterNext(ctx.isEven, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements
 
-    moved = 0; // reset here
     try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    moved = 0; // reset
     try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }

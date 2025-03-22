@@ -933,8 +933,10 @@ pub fn Iter(comptime T: type) type {
         ///
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
         pub fn filterNext(self: *Self, filter: fn (T) bool, moved_forward: *usize) ?T {
+            var moved: usize = 0;
+            defer moved_forward.* = moved;
             while (self.next()) |n| {
-                moved_forward.* += 1;
+                moved += 1;
                 if (filter(n)) {
                     return n;
                 }
