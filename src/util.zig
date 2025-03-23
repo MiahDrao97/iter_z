@@ -2,7 +2,6 @@ const std = @import("std");
 const iter = @import("iter.zig");
 const Allocator = std.mem.Allocator;
 const Ordering = iter.Ordering;
-const ComparerResult = iter.ComparerResult;
 
 pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}![len]T {
     switch (@typeInfo(T)) {
@@ -33,7 +32,7 @@ fn partition(
     slice: []T,
     left_idx: usize,
     right_idx: usize,
-    comparer: fn (T, T) ComparerResult,
+    comparer: fn (T, T) std.math.Order,
     ordering: Ordering,
 ) usize {
     // i must be an isize because it's allowed to -1 at the beginning
@@ -44,7 +43,7 @@ fn partition(
         switch (ordering) {
             .asc => {
                 switch (comparer(pivot, slice[j])) {
-                    .greater_than => {
+                    .gt => {
                         i += 1;
                         swap(T, slice, @bitCast(i), j);
                     },
@@ -53,7 +52,7 @@ fn partition(
             },
             .desc => {
                 switch (comparer(pivot, slice[j])) {
-                    .less_than => {
+                    .lt => {
                         i += 1;
                         swap(T, slice, @bitCast(i), j);
                     },
@@ -85,7 +84,7 @@ fn swap(comptime T: type, slice: []T, left_idx: usize, right_idx: usize) void {
 pub fn quickSort(
     comptime T: type,
     slice: []T,
-    comparer: fn (T, T) ComparerResult,
+    comparer: fn (T, T) std.math.Order,
     ordering: Ordering,
 ) void {
     quickSortSegment(T, slice, 0, slice.len - 1, comparer, ordering);
@@ -97,7 +96,7 @@ pub fn quickSortSegment(
     slice: []T,
     left_idx: usize,
     right_idx: usize,
-    comparer: fn (T, T) ComparerResult,
+    comparer: fn (T, T) std.math.Order,
     ordering: Ordering,
 ) void {
     if (right_idx <= left_idx) {

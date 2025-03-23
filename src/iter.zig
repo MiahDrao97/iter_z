@@ -4,12 +4,6 @@ const Allocator = std.mem.Allocator;
 
 pub const Ordering = enum { asc, desc };
 
-pub const ComparerResult = enum {
-    less_than,
-    equal_to,
-    greater_than,
-};
-
 /// User may implement this interface to define their own `Iter(T)`
 pub fn AnonymousIterable(comptime T: type) type {
     return struct {
@@ -883,7 +877,7 @@ pub fn Iter(comptime T: type) type {
         pub fn toSortedSliceOwned(
             self: *Self,
             allocator: Allocator,
-            comparer: fn (T, T) ComparerResult,
+            comparer: fn (T, T) std.math.Order,
             ordering: Ordering,
         ) Allocator.Error![]T {
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
@@ -898,7 +892,7 @@ pub fn Iter(comptime T: type) type {
         pub fn orderBy(
             self: *Self,
             allocator: Allocator,
-            comparer: fn (T, T) ComparerResult,
+            comparer: fn (T, T) std.math.Order,
             ordering: Ordering,
         ) Allocator.Error!Self {
             const slice: []T = try self.toSortedSliceOwned(allocator, comparer, ordering);
@@ -1019,14 +1013,14 @@ pub fn Iter(comptime T: type) type {
         /// Uses the `comparer` function to determine if any element returns `.equal_to`.
         ///
         /// Scrolls back in place.
-        pub fn contains(self: *Self, item: T, comparer: fn (T, T) ComparerResult) bool {
+        pub fn contains(self: *Self, item: T, comparer: fn (T, T) std.math.Order) bool {
             const ctx = struct {
                 // not worried about this static local because it doesn't create an iterator
                 threadlocal var ctx_item: T = undefined;
 
                 fn filter(x: T) bool {
                     return switch (comparer(ctx_item, x)) {
-                        .equal_to => true,
+                        .eq => true,
                         else => false,
                     };
                 }
@@ -1597,20 +1591,30 @@ fn cloneFilteredFromIter(
 /// Take note that this function does not check for overflow.
 pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
-        .int, .float => {},
+        .int, .float => {
+            return struct {
+                fn sum(a: T, b: T, _: anytype) T {
+                    return a + b;
+                }
+            }.sum;
+        },
         else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
-    return struct {
-        fn sum(a: T, b: T, _: anytype) T {
-            return a + b;
-        }
-    }.sum;
 }
 
 /// Generate an auto-min function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
 pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
-        .int, .float => {},
+        .int, .float => {
+            return struct {
+                fn min(a: T, b: T, _: anytype) T {
+                    if (a < b) {
+                        return a;
+                    }
+                    return b;
+                }
+            }.min;
+        },
         .@"enum" => {
             return struct {
                 fn min(a: T, b: T, _: anytype) T {
@@ -1623,20 +1627,21 @@ pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
         },
         else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
-    return struct {
-        fn min(a: T, b: T, _: anytype) T {
-            if (a < b) {
-                return a;
-            }
-            return b;
-        }
-    }.min;
 }
 
 /// Generate an auto-max function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
 pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
-        .int, .float => {},
+        .int, .float => {
+            return struct {
+                fn max(a: T, b: T, _: anytype) T {
+                    if (a > b) {
+                        return a;
+                    }
+                    return b;
+                }
+            }.max;
+        },
         .@"enum" => {
             return struct {
                 fn max(a: T, b: T, _: anytype) T {
@@ -1649,43 +1654,35 @@ pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
         },
         else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
-    return struct {
-        fn max(a: T, b: T, _: anytype) T {
-            if (a > b) {
-                return a;
-            }
-            return b;
-        }
-    }.max;
 }
 
 /// Generates a simple comparer function for a numeric or enum type `T`.
-pub fn autoCompare(comptime T: type) fn (T, T) ComparerResult {
+pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
     switch (@typeInfo(T)) {
-        .int, .float => {},
+        .int, .float => {
+            return struct {
+                fn compare(a: T, b: T) std.math.Order {
+                    if (a < b) {
+                        return .lt;
+                    } else if (a > b) {
+                        return .gt;
+                    }
+                    return .eq;
+                }
+            }.compare;
+        },
         .@"enum" => {
             return struct {
-                fn compare(a: T, b: T) ComparerResult {
+                fn compare(a: T, b: T) std.math.Order {
                     if (@intFromEnum(a) < @intFromEnum(b)) {
-                        return .less_than;
+                        return .lt;
                     } else if (@intFromEnum(a) > @intFromEnum(b)) {
-                        return .greater_than;
+                        return .gt;
                     }
-                    return .equal_to;
+                    return .eq;
                 }
             }.compare;
         },
         else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
     }
-
-    return struct {
-        fn compare(a: T, b: T) ComparerResult {
-            if (a < b) {
-                return .less_than;
-            } else if (a > b) {
-                return .greater_than;
-            }
-            return .equal_to;
-        }
-    }.compare;
 }

@@ -3,7 +3,6 @@ const iter_z = @import("iter_z");
 const util = iter_z.util;
 const testing = std.testing;
 const Iter = iter_z.Iter;
-const ComparerResult = iter_z.ComparerResult;
 const Allocator = std.mem.Allocator;
 const SplitIterator = std.mem.SplitIterator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -17,22 +16,22 @@ fn isEven(num: u8) bool {
     return num % 2 == 0;
 }
 
-fn stringCompare(a: []const u8, b: []const u8) ComparerResult {
+fn stringCompare(a: []const u8, b: []const u8) std.math.Order {
     // basically alphabetical
     for (0..@min(a.len, b.len)) |i| {
         if (a[i] > b[i]) {
-            return .greater_than;
+            return .gt;
         } else if (a[i] < b[i]) {
-            return .less_than;
+            return .lt;
         }
     }
     // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
     if (a.len > b.len) {
-        return .less_than;
+        return .lt;
     } else if (a.len < b.len) {
-        return .greater_than;
+        return .gt;
     } else {
-        return .equal_to;
+        return .eq;
     }
 }
 

@@ -378,13 +378,13 @@ Keep in mind that this allocates a slice owned by the resulting iterator, so be 
 /// equivalent to `iter_z.autoCompare(u8)` -> written out as example
 /// see Auto Functions section; default comparer function is available to numeric types
 const compare = struct {
-    pub fn compare(a: u8, b: u8) ComparerResult {
+    pub fn compare(a: u8, b: u8) std.math.Order {
         if (a < b) {
-            return .less_than;
+            return .lt;
         } else if (a > b) {
-            return .greater_than;
+            return .gt;
         } else {
-            return .equal_to;
+            return .eq;
         }
     }
 }.compare;
@@ -556,7 +556,7 @@ _ = iter.single(null); // error.NoElementsFound
 ```
 
 ### Contains
-Pass in a comparer function. Returns true if any element returns `.equal_to`. Scrolls back in place.
+Pass in a comparer function. Returns true if any element returns `.eq`. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.contains(1, iter_z.autoCompare(u8)); // true
@@ -676,13 +676,13 @@ Here are the underlying functions generated.
 
 ### Auto Comparer
 ```zig
-fn compare(a: T, b: T) ComparerResult {
+fn compare(a: T, b: T) std.math.Order {
     if (a < b) {
-        return .less_than;
+        return .lt;
     } else if (a > b) {
-        return .greater_than;
+        return .gt;
     }
-    return .equal_to;
+    return .eq;
 }
 ```
 
