@@ -636,7 +636,7 @@ test "reverse" {
     // note that the beginning of the original is the end of the reversed one, thus returning null on `next()` right away.
     try testing.expectEqual(null, reversed.next());
     // reset the reversed iterator to set the original to the end of its sequence
-    reversed.reset() catch unreachable;
+    reversed.reset();
 
     // length should be equal, but indexes reversed
     try testing.expectEqual(3, reversed.len());
