@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }).module("iter_z");
-    exe.addImport("iter_z", iter_z);
+    exe.root_module.addImport("iter_z", iter_z);
 
     // rest of your build def
 }
