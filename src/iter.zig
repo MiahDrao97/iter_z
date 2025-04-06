@@ -92,7 +92,6 @@ fn SliceIterable(comptime T: type) type {
     return struct {
         elements: []const T,
         idx: usize = 0,
-        owns_slice: bool = false,
         on_deinit: ?*const fn ([]T) void = null,
         allocator: ?Allocator = null,
     };
@@ -176,7 +175,6 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
                                 .allocator = alloc,
                                 .elements = try alloc.dupe(T, self_ptr.elements),
                                 .idx = self_ptr.idx,
-                                .owns_slice = true,
                             },
                         },
                     };
@@ -220,7 +218,6 @@ fn ConcatIterable(comptime T: type) type {
 
         sources: []Iter(T),
         idx: usize = 0,
-        owns_sources: bool,
         allocator: ?Allocator = null,
 
         fn next(self: *Self) ?T {
@@ -287,7 +284,6 @@ fn ConcatIterable(comptime T: type) type {
                     .concatenated = ConcatIterable(T){
                         .sources = sources_cpy,
                         .idx = self.idx,
-                        .owns_sources = true,
                         .allocator = allocator,
                     },
                 },
@@ -303,13 +299,12 @@ fn ConcatIterable(comptime T: type) type {
         }
 
         fn deinit(self: *Self) void {
-            if (self.owns_sources) {
+            // the existence of the allocator field indicates that we own the sources
+            if (self.allocator) |alloc| {
                 for (self.sources) |*s| {
                     s.deinit();
                 }
-                if (self.allocator) |alloc| {
-                    alloc.free(self.sources);
-                } else unreachable;
+                alloc.free(self.sources);
             }
         }
     };
@@ -415,15 +410,16 @@ pub fn Iter(comptime T: type) type {
         pub fn clone(self: Self, allocator: Allocator) Allocator.Error!Self {
             switch (self.variant) {
                 .slice => |s| {
-                    if (s.owns_slice) {
+                    // if we have an allocator saved on the struct, we know we own the slice
+                    if (s.allocator) |_| {
                         return .{
                             .variant = Variant{
                                 .slice = SliceIterable(T){
                                     .elements = try allocator.dupe(T, s.elements),
                                     .idx = s.idx,
-                                    .owns_slice = true,
-                                    // intentionally don't copy `on_deinit` since we're assuming that must be called only once
+                                    // assign the allocator member to the allocator passed in rather than from the iterator being cloned
                                     .allocator = allocator,
+                                    // intentionally don't copy `on_deinit` since we're assuming that must be called only once
                                 },
                             },
                         };
@@ -464,13 +460,11 @@ pub fn Iter(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             switch (self.variant) {
                 .slice => |*s| {
-                    if (s.owns_slice) {
-                        if (s.allocator) |alloc| {
-                            if (s.on_deinit) |exec_on_deinit| {
-                                exec_on_deinit(@constCast(s.elements));
-                            }
-                            alloc.free(s.elements);
-                        } else unreachable;
+                    if (s.allocator) |alloc| {
+                        if (s.on_deinit) |exec_on_deinit| {
+                            exec_on_deinit(@constCast(s.elements));
+                        }
+                        alloc.free(s.elements);
                     }
                 },
                 .concatenated => |*c| c.deinit(),
@@ -506,7 +500,6 @@ pub fn Iter(comptime T: type) type {
                 .variant = Variant{
                     .slice = SliceIterable(T){
                         .elements = slice,
-                        .owns_slice = true,
                         .on_deinit = on_deinit,
                         .allocator = allocator,
                     },
@@ -545,7 +538,6 @@ pub fn Iter(comptime T: type) type {
                 .variant = Variant{
                     .concatenated = ConcatIterable(T){
                         .sources = sources,
-                        .owns_sources = false,
                     },
                 },
             };
@@ -559,7 +551,6 @@ pub fn Iter(comptime T: type) type {
                 .variant = Variant{
                     .concatenated = ConcatIterable(T){
                         .sources = sources,
-                        .owns_sources = true,
                         .allocator = allocator,
                     },
                 },
