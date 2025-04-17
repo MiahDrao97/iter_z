@@ -12,7 +12,7 @@ fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
     return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{num});
 }
 
-fn isEven(num: u8) bool {
+fn isEven(num: u8, _: anytype) bool {
     return num % 2 == 0;
 }
 
@@ -55,7 +55,7 @@ test "from" {
 }
 test "select" {
     const ctx = struct {
-        pub fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
+        fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
             const x: *usize = args.@"0";
             x.* += 1;
 
@@ -73,7 +73,7 @@ test "select" {
             };
         }
 
-        pub fn onErr(_: anyerror, _: Allocator.Error![]u8, args: anytype) void {
+        fn onErr(_: anyerror, _: Allocator.Error![]u8, args: anytype) void {
             const failed: *bool = args.@"1";
             failed.* = true;
         }
@@ -113,10 +113,10 @@ test "cloneReset" {
     // previous should be 3 (because we hit the end of the iteration, so that puts us at null)
     try testing.expectEqual(3, clone.prev());
 }
-test "where" {
+test "where static" {
     {
         var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-        var iter: Iter(u8) = inner.where(isEven);
+        var iter: Iter(u8) = inner.whereStatic(isEven, {});
         defer iter.deinit();
 
         try testing.expect(iter.len() == 3);
@@ -134,7 +134,7 @@ test "where" {
     {
         var odds = [_]u8{ 1, 3, 5 };
         var inner: Iter(u8) = .from(&odds);
-        var iter: Iter(u8) = inner.where(isEven);
+        var iter: Iter(u8) = inner.whereStatic(isEven, {});
 
         try testing.expect(iter.len() == 3);
 
@@ -149,7 +149,7 @@ test "where" {
         }
 
         try testing.expect(i == 0);
-        try testing.expect(iter.count(null) == 0);
+        try testing.expect(iter.count(null, {}) == 0);
 
         var clone: Iter(u8) = try iter.cloneReset(testing.allocator);
         defer clone.deinit();
@@ -168,7 +168,7 @@ test "where" {
 }
 test "enumerateToOwnedSlice" {
     var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
-    var iter: Iter(u8) = inner.where(isEven);
+    var iter: Iter(u8) = inner.whereStatic(isEven, {});
 
     try testing.expect(iter.len() == 3);
 
@@ -193,7 +193,7 @@ test "empty" {
     try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
 
-    var next_iter = iter.where(isEven);
+    var next_iter = iter.whereStatic(isEven, {});
 
     try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
@@ -230,7 +230,7 @@ test "concat" {
 
         iter.reset();
 
-        var new_iter: Iter(u8) = iter.where(isEven);
+        var new_iter: Iter(u8) = iter.whereStatic(isEven, {});
 
         try testing.expectEqual(9, new_iter.len());
         try testing.expect(new_iter.getIndex() == null);
@@ -334,14 +334,14 @@ test "any" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
-    var result: ?u8 = iter.any(isEven);
+    var result: ?u8 = iter.any(isEven, {});
     try testing.expect(result == null);
 
     // should have scrolled back
     result = iter.next();
     try testing.expect(result.? == 1);
 
-    result = iter.any(null);
+    result = iter.any(null, {});
     try testing.expect(result.? == 3);
 
     result = iter.next();
@@ -352,51 +352,51 @@ test "single/single or none" {
     defer iter.deinit();
 
     const ctx = struct {
-        pub fn filter1(char: u8) bool {
+        fn filter1(char: u8, _: anytype) bool {
             return char == 'e';
         }
 
-        pub fn filter2(char: u8) bool {
+        fn filter2(char: u8, _: anytype) bool {
             return char == 'x';
         }
 
-        pub fn filter3(char: u8) bool {
+        fn filter3(char: u8, _: anytype) bool {
             return char == 'r';
         }
     };
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(ctx.filter3));
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(ctx.filter3, {}));
 
-    var result: ?u8 = try iter.singleOrNull(ctx.filter1);
+    var result: ?u8 = try iter.singleOrNull(ctx.filter1, {});
     try testing.expect(result.? == 'e');
 
-    result = try iter.singleOrNull(ctx.filter2);
+    result = try iter.singleOrNull(ctx.filter2, {});
     try testing.expect(result == null);
 
-    result = try iter.single(ctx.filter1);
+    result = try iter.single(ctx.filter1, {});
     try testing.expect(result.? == 'e');
 
-    try testing.expectError(error.NoElementsFound, iter.single(ctx.filter2));
+    try testing.expectError(error.NoElementsFound, iter.single(ctx.filter2, {}));
 
-    try testing.expectError(error.MultipleElementsFound, iter.single(ctx.filter3));
+    try testing.expectError(error.MultipleElementsFound, iter.single(ctx.filter3, {}));
 
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null));
-    try testing.expectError(error.MultipleElementsFound, iter.single(null));
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null, {}));
+    try testing.expectError(error.MultipleElementsFound, iter.single(null, {}));
 
     iter.deinit();
     iter = .from("");
 
-    try testing.expectError(error.NoElementsFound, iter.single(null));
+    try testing.expectError(error.NoElementsFound, iter.single(null, {}));
 
-    result = try iter.singleOrNull(null);
+    result = try iter.singleOrNull(null, {});
     try testing.expect(result == null);
 
     iter.deinit();
     iter = .from("x");
 
-    result = try iter.singleOrNull(null);
+    result = try iter.singleOrNull(null, {});
     try testing.expect(result.? == 'x');
 
-    result = try iter.single(null);
+    result = try iter.single(null, {});
     try testing.expect(result.? == 'x');
 }
 test "clone" {
@@ -415,9 +415,9 @@ test "clone" {
 
     try testing.expectEqual('d', clone2.next());
 }
-test "clone with where" {
+test "clone with where static" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var outer: Iter(u8) = iter.where(isEven);
+    var outer: Iter(u8) = iter.whereStatic(isEven, {});
 
     var result: ?u8 = outer.next();
     try testing.expectEqual(2, result);
@@ -445,11 +445,11 @@ test "clone with where" {
 }
 test "clone with select" {
     const ctx = struct {
-        pub fn asString(byte: u8, buf: anytype) []const u8 {
+        fn asString(byte: u8, buf: anytype) []const u8 {
             return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{byte}) catch unreachable;
         }
 
-        pub fn asHexString(byte: u8, buf: anytype) []const u8 {
+        fn asHexString(byte: u8, buf: anytype) []const u8 {
             return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{byte}) catch unreachable;
         }
     };
@@ -492,11 +492,11 @@ test "clone with select" {
 }
 test "select no alloc" {
     const ctx = struct {
-        pub fn asString(byte: u8, buf: anytype) []const u8 {
+        fn asString(byte: u8, buf: anytype) []const u8 {
             return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{byte}) catch unreachable;
         }
 
-        pub fn asHexString(byte: u8, buf: anytype) []const u8 {
+        fn asHexString(byte: u8, buf: anytype) []const u8 {
             return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{byte}) catch unreachable;
         }
     };
@@ -550,11 +550,11 @@ test "Overlapping select edge cases" {
             return in * @as(u8, multiplier);
         }
 
-        pub fn getDoubler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
+        fn getDoubler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
             return try source.select(testing.allocator, u32, multiply, val.*);
         }
 
-        pub fn getTripler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
+        fn getTripler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
             return try source.select(testing.allocator, u32, multiply, val.*);
         }
     };
@@ -663,7 +663,7 @@ test "owned slice iterator" {
 }
 test "owned slice iterator w/ args" {
     const ctx = struct {
-        pub fn onDeinit(slice: [][]u8, args: anytype) void {
+        fn onDeinit(slice: [][]u8, args: anytype) void {
             for (slice) |s| {
                 @as(Allocator, args).free(s);
             }
@@ -744,27 +744,27 @@ test "from other" {
     try testing.expect(iter.contains("this", stringCompare));
 
     const ctx = struct {
-        pub fn isOneCharLong(s: []const u8) bool {
+        fn isOneCharLong(s: []const u8, _: anytype) bool {
             return s.len == 1;
         }
 
-        pub fn isTwoCharsLong(s: []const u8) bool {
+        fn isTwoCharsLong(s: []const u8, _: anytype) bool {
             return s.len == 2;
         }
 
-        pub fn hasNoComma(s: []const u8) bool {
+        fn hasNoComma(s: []const u8, _: anytype) bool {
             var inner_iter: Iter(u8) = .from(s);
             return !inner_iter.contains(',', iter_z.autoCompare(u8));
         }
     };
 
-    try testing.expectEqual(1, iter.count(ctx.isOneCharLong));
-    try testing.expectEqual(2, iter.count(ctx.isTwoCharsLong));
-    try testing.expectEqual(6, iter.count(null));
+    try testing.expectEqual(1, iter.count(ctx.isOneCharLong, {}));
+    try testing.expectEqual(2, iter.count(ctx.isTwoCharsLong, {}));
+    try testing.expectEqual(6, iter.count(null, {}));
 
-    try testing.expect(iter.all(ctx.hasNoComma));
-    try testing.expect(!iter.all(ctx.isOneCharLong));
-    try testing.expect(!iter.all(ctx.isTwoCharsLong));
+    try testing.expect(iter.all(ctx.hasNoComma, {}));
+    try testing.expect(!iter.all(ctx.isOneCharLong, {}));
+    try testing.expect(!iter.all(ctx.isTwoCharsLong, {}));
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
@@ -840,7 +840,7 @@ test "set index" {
 
     const ctx = struct {
         var buf: [1]u8 = undefined;
-        pub fn toString(byte: u8, _: anytype) []const u8 {
+        fn toString(byte: u8, _: anytype) []const u8 {
             return std.fmt.bufPrint(&buf, "{d}", .{byte}) catch &buf;
         }
     };
@@ -851,12 +851,12 @@ test "set index" {
     try transformed.setIndex(5);
     try testing.expectEqualStrings("6", transformed.next().?);
 
-    var filtered: Iter(u8) = iter.where(isEven);
+    var filtered: Iter(u8) = iter.whereStatic(isEven, {});
     try testing.expectError(error.NoIndexing, filtered.setIndex(0));
 }
 test "allocator mix n match" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var filtered: Iter(u8) = iter.where(isEven);
+    var filtered: Iter(u8) = iter.whereStatic(isEven, {});
 
     var arena: ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -874,27 +874,27 @@ test "allocator mix n match" {
     var clone4 = try iter.clone(arena2.allocator());
     defer clone4.deinit();
 
-    var filtered2 = clone4.where(isEven);
+    var filtered2 = clone4.whereStatic(isEven, {});
 
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();
 }
 test "filterNext()" {
     const ctx = struct {
-        pub fn isEven(item: u8) bool {
+        fn isEven(item: u8, _: anytype) bool {
             return @mod(item, 2) == 0;
         }
     };
 
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(2, iter.filterNext(ctx.isEven, {}, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements
 
-    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(null, iter.filterNext(ctx.isEven, {}, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(ctx.isEven, &moved));
+    try testing.expectEqual(null, iter.filterNext(ctx.isEven, {}, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 test "iter with optionals" {
