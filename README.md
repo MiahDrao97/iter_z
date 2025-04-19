@@ -363,19 +363,39 @@ If no arguments are passed in or for one-time-use, `whereStatic()` accepts the s
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const isEven = struct {
-    fn isEven(item: u32) bool {
-        return @mod(item, 2) == 0;
+const hasNoRemainder = struct {
+    fn hasNoRemainder(item: u32, args: anytype) bool {
+        const divisor: u32 = args;
+        return @mod(item, divisor) == 0;
     }
-}.isEven;
+}.hasNoRemainder;
 
-var evens = try iter.where(@import("std").testing.allocator, isEven, {});
+var evens: Iter(u32) = try iter.where(@import("std").testing.allocator, hasNoRemainder, 2);
 defer evens.deinit();
 
 while (evens.next()) |x| {
     // 2, 4
 }
 ```
+
+### Where Static
+If no arguments are passed in or for one-time-use, `whereStatic()` is ideal instead of `where()`.
+```zig
+var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
+
+const isEven = struct {
+    fn isEven(item: u32, _: anytype) bool {
+        return @mod(item, 2) == 0;
+    }
+}.isEven;
+
+var evens: Iter(u32) = iter.whereStatic(isEven, {});
+
+while (evens.next()) |x| {
+    // 2, 4
+}
+```
+
 
 ### Order By
 Pass in a comparer function to order your iterator in ascending or descending order.
@@ -412,7 +432,7 @@ while (ordered.next()) |x| {
 Peek at the next element with or without a filter.
 ```zig
 const isEven = struct {
-    fn isEven(item: u32) bool {
+    fn isEven(item: u32, _: anytype) bool {
         return @mod(item, 2) == 0;
     }
 }.isEven;
@@ -435,7 +455,7 @@ NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
 const testing = @import("std").testing;
 const isEven = struct {
-    fn isEven(item: u8) bool {
+    fn isEven(item: u8, _: anytype) bool {
         return @mod(item, 2) == 0;
     }
 }.isEven;
@@ -511,7 +531,7 @@ This differs from `len()` because it will count the exact number of remaining el
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
 const isEven = struct {
-    fn isEven(item: u32) bool {
+    fn isEven(item: u32, _: anytype) bool {
         return @mod(item, 2) == 0;
     }
 }.isEven;
@@ -526,7 +546,7 @@ _ = iter.count(isEven, {}); // 2 again
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
 ```zig
 const isEven = struct {
-    fn isEven(item: u32) bool {
+    fn isEven(item: u32, _: anytype) bool {
         return @mod(item, 2) == 0;
     }
 }.isEven;
