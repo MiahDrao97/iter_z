@@ -559,7 +559,7 @@ _ = iter.all(isEven, {}); // true
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.singleOrNull(null, {}); // "1"
+_ = iter.singleOrNull(null, {}); // '1'
 
 var iter2: Iter(u8) = .from("12");
 _ = iter.singleOrNull(null, {}); // error.MultipleElementsFound
@@ -572,7 +572,7 @@ _ = iter.singleOrNull(null, {}); // null
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.single(null, {}); // "1"
+_ = iter.single(null, {}); // '1'
 
 var iter2: Iter(u8) = .from("12");
 _ = iter.single(null, {}); // error.MultipleElementsFound
@@ -715,7 +715,8 @@ fn compare(a: T, b: T) std.math.Order {
 ### Auto Sum
 ```zig
 fn sum(a: T, b: T, _: anytype) T {
-    return a + b;
+    // notice that we perform saturating addition
+    return a +| b;
 }
 ```
 

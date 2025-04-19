@@ -1713,13 +1713,15 @@ fn cloneFilteredFromIter(
 
 /// Generate an auto-sum function, assuming elements are a numeric type (excluding enums).
 /// Args are not evaluated in this function.
-/// Take note that this function does not check for overflow.
+///
+/// Take note that this function performs saturating addition.
+/// Rather than integer overflow, the sum returns `T`'s max value.
 pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
                 fn sum(a: T, b: T, _: anytype) T {
-                    return a + b;
+                    return a +| b;
                 }
             }.sum;
         },
