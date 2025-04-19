@@ -1573,7 +1573,7 @@ fn createFilteredFromIter(
 
         fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
             const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return try cloneFilteredFromIter(T, ArgsType, alloc, self_ptr.iter.*, filter, self_ptr.args);
+            return try cloneFilteredFromIter(T, alloc, self_ptr.iter.*, filter, self_ptr.args);
         }
 
         fn implLen(impl: *anyopaque) usize {

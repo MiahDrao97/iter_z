@@ -355,7 +355,11 @@ while (strings.next()) |maybe_str| {
 ```
 
 ### Where
-Filter the elements in your iterator, creating a new iterator with only those elements. If you simply need to iterate with a filter, use `filterNext(...)`.
+Filter the elements in your iterator, creating a new iterator with only those elements.
+If you simply need to iterate with a filter, use `filterNext(...)`.
+
+Because this function takes in arguments and works as a quasi-closure, an allocation must be made, so be sure to call `deinit()`.
+If no arguments are passed in or for one-time-use, `whereStatic()` accepts the same arguments but doesn't make an allocation.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
@@ -365,7 +369,9 @@ const isEven = struct {
     }
 }.isEven;
 
-var evens = iter.where(isEven);
+var evens = try iter.where(@import("std").testing.allocator, isEven, {});
+defer evens.deinit();
+
 while (evens.next()) |x| {
     // 2, 4
 }
@@ -413,9 +419,9 @@ const isEven = struct {
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 // peek without filter
-_ = iter.any(null); // 1
+_ = iter.any(null, {}); // 1
 // peek with filter
-_ = iter.any(isEven); // 2
+_ = iter.any(isEven, {}); // 2
 
 // iter hasn't moved
 _ = iter.next(); // 1
@@ -437,13 +443,13 @@ const isEven = struct {
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(isEven, &moved));
+    try testing.expectEqual(2, iter.filterNext(isEven, {}, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
 
-    try testing.expectEqual(null, iter.filterNext(isEven, &moved));
+    try testing.expectEqual(null, iter.filterNext(isEven, {}, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(isEven, &moved));
+    try testing.expectEqual(null, iter.filterNext(isEven, {}, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 ```
@@ -510,10 +516,10 @@ const isEven = struct {
     }
 }.isEven;
 
-const evens = iter.where(isEven);
+const evens = iter.whereStatic(isEven, {});
 _ = evens.len(); // length is 5
-_ = evens.count(null); // there are actually 2 elements that fulfill our condition
-_ = iter.count(isEven); // 2 again
+_ = evens.count(null, {}); // there are actually 2 elements that fulfill our condition
+_ = iter.count(isEven, {}); // 2 again
 ```
 
 ### All
@@ -526,40 +532,40 @@ const isEven = struct {
 }.isEven;
 
 var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
-_ = iter.all(isEven); // true
+_ = iter.all(isEven, {}); // true
 ```
 
 ### Single Or Null
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.singleOrNull(null); // "1"
+_ = iter.singleOrNull(null, {}); // "1"
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.singleOrNull(null); // error.MultipleElementsFound
+_ = iter.singleOrNull(null, {}); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.singleOrNull(null); // null
+_ = iter.singleOrNull(null, {}); // null
 ```
 
 ### Single
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.single(null); // "1"
+_ = iter.single(null, {}); // "1"
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.single(null); // error.MultipleElementsFound
+_ = iter.single(null, {}); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.single(null); // error.NoElementsFound
+_ = iter.single(null, {}); // error.NoElementsFound
 ```
 
 ### Contains
 Pass in a comparer function. Returns true if any element returns `.eq`. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.contains(1, iter_z.autoCompare(u8)); // true
+_ = iter.contains(1, iter_z.autoCompare(u8), {}); // true
 ```
 
 ### Enumerate To Buffer

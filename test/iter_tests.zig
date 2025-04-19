@@ -166,6 +166,23 @@ test "where static" {
         try testing.expect(clone2.next() == null);
     }
 }
+test "where" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
+    var filtered: Iter(u8) = try iter.where(testing.allocator, isEven, {});
+    defer filtered.deinit();
+
+    var clone: Iter(u8) = try filtered.clone(testing.allocator);
+    defer clone.deinit();
+
+    try testing.expectEqual(2, filtered.next());
+    try testing.expectEqual(2, clone.next());
+    try testing.expectEqual(4, filtered.next());
+    try testing.expectEqual(4, clone.next());
+    try testing.expectEqual(6, filtered.next());
+    try testing.expectEqual(6, clone.next());
+    try testing.expectEqual(null, filtered.next());
+    try testing.expectEqual(null, clone.next());
+}
 test "enumerateToOwnedSlice" {
     var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var iter: Iter(u8) = inner.whereStatic(isEven, {});
