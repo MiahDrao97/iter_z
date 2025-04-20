@@ -622,6 +622,10 @@ pub fn Iter(comptime T: type) type {
 
             // if we over-estimated our length
             if (i < length) {
+                if (allocator.resize(buf, i)) {
+                    return fromSliceOwned(allocator, buf, null);
+                }
+
                 defer allocator.free(buf);
                 return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
             }
@@ -871,6 +875,11 @@ pub fn Iter(comptime T: type) type {
 
             // just the right size: return our buffer
             if (i == self.len()) {
+                return buf;
+            }
+
+            // try to resize first
+            if (allocator.resize(buf, i)) {
                 return buf;
             }
 

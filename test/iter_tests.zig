@@ -201,7 +201,7 @@ test "enumerateToOwnedSlice" {
     const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
     defer testing.allocator.free(slice);
 
-    try testing.expect(slice.len == 1);
+    try testing.expectEqual(1, slice.len);
     try testing.expect(slice[0] == 2);
 }
 test "empty" {
