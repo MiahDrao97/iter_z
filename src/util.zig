@@ -87,7 +87,7 @@ pub fn quickSort(
     comparer: fn (T, T) std.math.Order,
     ordering: Ordering,
 ) void {
-    quickSortSegment(T, slice, 0, slice.len - 1, comparer, ordering);
+    quickSortSegment(T, slice, 0, slice.len -| 1, comparer, ordering);
 }
 
 /// Quick sort implementation, except specifying a segment of `slice` to sort
