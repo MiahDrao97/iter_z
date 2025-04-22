@@ -622,6 +622,10 @@ pub fn Iter(comptime T: type) type {
 
             // if we over-estimated our length
             if (i < length) {
+                if (allocator.resize(buf, i)) {
+                    return fromSliceOwned(allocator, buf, null);
+                }
+
                 defer allocator.free(buf);
                 return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
             }
@@ -729,14 +733,33 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Returns a filtered iterator, using `self` as a source.
+        /// Don't forget to call `deinit()` since this leverages a quasi-closure.
+        ///
+        /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred to prevent memory allocation.
+        pub fn where(
+            self: *Self,
+            allocator: Allocator,
+            filter: fn (T, anytype) bool,
+            args: anytype,
+        ) Allocator.Error!Self {
+            return try createFilteredFromIter(T, allocator, self, filter, args);
+        }
+
+        /// Returns a filtered iterator, using `self` as a source.
+        /// To prevent allocating memory, the arguments are stored as a threadlocal static.
+        /// This is for one-time use or for filtering when `args` are void.
+        /// Subsequent calls to this method overwrite `args`.
         ///
         /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred.
-        pub fn where(self: *Self, filter: fn (T) bool) Self {
+        pub fn whereStatic(self: *Self, filter: fn (T, anytype) bool, args: anytype) Self {
+            const ArgsType = @TypeOf(args);
             const ctx = struct {
+                threadlocal var ctx_args: ArgsType = undefined;
+
                 fn implNext(impl: *anyopaque) ?T {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
                     while (self_ptr.next()) |x| {
-                        if (filter(x)) {
+                        if (filter(x, ctx_args)) {
                             return x;
                         }
                     }
@@ -746,7 +769,7 @@ pub fn Iter(comptime T: type) type {
                 fn implPrev(impl: *anyopaque) ?T {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
                     while (self_ptr.prev()) |x| {
-                        if (filter(x)) {
+                        if (filter(x, ctx_args)) {
                             return x;
                         }
                     }
@@ -781,7 +804,7 @@ pub fn Iter(comptime T: type) type {
 
                 fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return try cloneFilteredFromIter(T, allocator, self_ptr.*, filter);
+                    return try cloneFilteredFromIter(T, allocator, self_ptr.*, filter, ctx_args);
                 }
 
                 fn implLen(impl: *anyopaque) usize {
@@ -794,6 +817,7 @@ pub fn Iter(comptime T: type) type {
                     self_ptr.deinit();
                 }
             };
+            ctx.ctx_args = args;
 
             const filtered: AnonymousIterable(T) = .{
                 .ptr = self,
@@ -854,6 +878,11 @@ pub fn Iter(comptime T: type) type {
                 return buf;
             }
 
+            // try to resize first
+            if (allocator.resize(buf, i)) {
+                return buf;
+            }
+
             defer allocator.free(buf);
 
             // pair buf down to final slice
@@ -892,7 +921,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Determine if the sequence contains any element with a given filter (or pass in null to simply peek at the next element).
         /// Always scrolls back in place.
-        pub fn any(self: *Self, filter: ?fn (T) bool) ?T {
+        pub fn any(self: *Self, filter: ?fn (T, anytype) bool, args: anytype) ?T {
             if (self.len() == 0) {
                 return null;
             }
@@ -903,7 +932,7 @@ pub fn Iter(comptime T: type) type {
             while (self.next()) |n| {
                 scroll_amt -= 1;
                 if (filter) |filter_fn| {
-                    if (filter_fn(n)) {
+                    if (filter_fn(n, args)) {
                         return n;
                     }
                     continue;
@@ -917,12 +946,17 @@ pub fn Iter(comptime T: type) type {
         /// This does move the iterator forward, which is reported in the out parameter `moved_forward`.
         ///
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
-        pub fn filterNext(self: *Self, filter: fn (T) bool, moved_forward: *usize) ?T {
+        pub fn filterNext(
+            self: *Self,
+            filter: fn (T, anytype) bool,
+            args: anytype,
+            moved_forward: *usize,
+        ) ?T {
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
                 moved += 1;
-                if (filter(n)) {
+                if (filter(n, args)) {
                     return n;
                 }
             }
@@ -932,7 +966,11 @@ pub fn Iter(comptime T: type) type {
         /// Ensure there is exactly 1 or 0 elements that match the given `filter`.
         ///
         /// Will scroll back in place
-        pub fn singleOrNull(self: *Self, filter: ?fn (T) bool) error{MultipleElementsFound}!?T {
+        pub fn singleOrNull(
+            self: *Self,
+            filter: ?fn (T, anytype) bool,
+            args: anytype,
+        ) error{MultipleElementsFound}!?T {
             if (self.len() == 0) {
                 return null;
             }
@@ -944,7 +982,7 @@ pub fn Iter(comptime T: type) type {
             while (self.next()) |x| {
                 scroll_amt -= 1;
                 if (filter) |filter_fn| {
-                    if (filter_fn(x)) {
+                    if (filter_fn(x, args)) {
                         if (found != null) {
                             return error.MultipleElementsFound;
                         } else {
@@ -968,9 +1006,10 @@ pub fn Iter(comptime T: type) type {
         /// Will scroll back in place
         pub fn single(
             self: *Self,
-            filter: ?fn (T) bool,
+            filter: ?fn (T, anytype) bool,
+            args: anytype,
         ) error{ NoElementsFound, MultipleElementsFound }!T {
-            return try self.singleOrNull(filter) orelse return error.NoElementsFound;
+            return try self.singleOrNull(filter, args) orelse return error.NoElementsFound;
         }
 
         /// Run `action` for each element in the iterator
@@ -1009,7 +1048,7 @@ pub fn Iter(comptime T: type) type {
                 // not worried about this static local because it doesn't create an iterator
                 threadlocal var ctx_item: T = undefined;
 
-                fn filter(x: T) bool {
+                fn filter(x: T, _: anytype) bool {
                     return switch (comparer(ctx_item, x)) {
                         .eq => true,
                         else => false,
@@ -1017,13 +1056,13 @@ pub fn Iter(comptime T: type) type {
                 }
             };
             ctx.ctx_item = item;
-            return self.any(ctx.filter) != null;
+            return self.any(ctx.filter, {}) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining.
         ///
         /// Scrolls back in place.
-        pub fn count(self: *Self, filter: ?fn (T) bool) usize {
+        pub fn count(self: *Self, filter: ?fn (T, anytype) bool, args: anytype) usize {
             if (self.len() == 0) {
                 return 0;
             }
@@ -1035,7 +1074,7 @@ pub fn Iter(comptime T: type) type {
             while (self.next()) |x| {
                 scroll_amt -= 1;
                 if (filter) |filter_fn| {
-                    if (filter_fn(x)) {
+                    if (filter_fn(x, args)) {
                         result += 1;
                     }
                 } else {
@@ -1048,7 +1087,7 @@ pub fn Iter(comptime T: type) type {
         /// Determine whether or not all elements fulfill a given filter.
         ///
         /// Scrolls back in place.
-        pub fn all(self: *Self, filter: fn (T) bool) bool {
+        pub fn all(self: *Self, filter: fn (T, anytype) bool, args: anytype) bool {
             if (self.len() == 0) {
                 return true;
             }
@@ -1058,7 +1097,7 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (!filter(x)) {
+                if (!filter(x, args)) {
                     return false;
                 }
             }
@@ -1282,7 +1321,7 @@ pub fn Iter(comptime T: type) type {
     };
 }
 
-fn TransformedIter(comptime T: type, comptime TArgs: type) type {
+fn IterClosure(comptime T: type, comptime TArgs: type) type {
     return struct {
         iter: *Iter(T),
         args: TArgs,
@@ -1290,7 +1329,7 @@ fn TransformedIter(comptime T: type, comptime TArgs: type) type {
     };
 }
 
-fn CloneTransformIter(comptime T: type, comptime TArgs: type) type {
+fn CloneIterArgs(comptime T: type, comptime TArgs: type) type {
     return struct {
         iter: Iter(T),
         args: TArgs,
@@ -1314,7 +1353,7 @@ fn cloneTransformedIter(
     allocator: Allocator,
 ) Allocator.Error!Iter(TOther) {
     const ArgsType = @TypeOf(args);
-    const ptr: *CloneTransformIter(T, ArgsType) = try allocator.create(CloneTransformIter(T, ArgsType));
+    const ptr: *CloneIterArgs(T, ArgsType) = try allocator.create(CloneIterArgs(T, ArgsType));
     ptr.* = .{
         .iter = iter,
         .args = args,
@@ -1323,7 +1362,7 @@ fn cloneTransformedIter(
 
     const ctx = struct {
         fn implNext(impl: *anyopaque) ?TOther {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             if (self_ptr.iter.next()) |x| {
                 return transform(x, self_ptr.args);
             }
@@ -1331,7 +1370,7 @@ fn cloneTransformedIter(
         }
 
         fn implPrev(impl: *anyopaque) ?TOther {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             if (self_ptr.iter.prev()) |x| {
                 return transform(x, self_ptr.args);
             }
@@ -1339,37 +1378,37 @@ fn cloneTransformedIter(
         }
 
         fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             try self_ptr.iter.setIndex(to);
         }
 
         fn implReset(impl: *anyopaque) void {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.reset();
         }
 
         fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.scroll(offset);
         }
 
         fn implGetIndex(impl: *anyopaque) ?usize {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             return self_ptr.iter.getIndex();
         }
 
         fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             return try cloneTransformedIter(T, TOther, transform, self_ptr.args, self_ptr.iter, alloc);
         }
 
         fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             return self_ptr.iter.len();
         }
 
         fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *CloneTransformIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.deinit();
             self_ptr.allocator.destroy(self_ptr);
         }
@@ -1401,7 +1440,7 @@ fn createTransformedIter(
     allocator: Allocator,
 ) Allocator.Error!Iter(TOther) {
     const ArgsType = @TypeOf(args);
-    const ptr: *TransformedIter(T, ArgsType) = try allocator.create(TransformedIter(T, ArgsType));
+    const ptr: *IterClosure(T, ArgsType) = try allocator.create(IterClosure(T, ArgsType));
     ptr.* = .{
         .iter = iter,
         .args = args,
@@ -1410,7 +1449,7 @@ fn createTransformedIter(
 
     const ctx = struct {
         fn implNext(impl: *anyopaque) ?TOther {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             if (self_ptr.iter.next()) |x| {
                 return transform(x, self_ptr.args);
             }
@@ -1418,7 +1457,7 @@ fn createTransformedIter(
         }
 
         fn implPrev(impl: *anyopaque) ?TOther {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             if (self_ptr.iter.prev()) |x| {
                 return transform(x, self_ptr.args);
             }
@@ -1426,37 +1465,37 @@ fn createTransformedIter(
         }
 
         fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             try self_ptr.iter.setIndex(to);
         }
 
         fn implReset(impl: *anyopaque) void {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.reset();
         }
 
         fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.scroll(offset);
         }
 
         fn implGetIndex(impl: *anyopaque) ?usize {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             return self_ptr.iter.getIndex();
         }
 
         fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             return try cloneTransformedIter(T, TOther, transform, self_ptr.args, self_ptr.iter.*, alloc);
         }
 
         fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             return self_ptr.iter.len();
         }
 
         fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *TransformedIter(T, ArgsType) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.deinit();
             self_ptr.allocator.destroy(self_ptr);
         }
@@ -1479,23 +1518,26 @@ fn createTransformedIter(
     return clone.iter();
 }
 
-fn cloneFilteredFromIter(
+fn createFilteredFromIter(
     comptime T: type,
     allocator: Allocator,
-    iter: Iter(T),
-    filter: fn (T) bool,
+    iter: *Iter(T),
+    filter: fn (T, anytype) bool,
+    args: anytype,
 ) Allocator.Error!Iter(T) {
-    const ptr: *CloneIter(T) = try allocator.create(CloneIter(T));
+    const ArgsType = @TypeOf(args);
+    const ptr: *IterClosure(T, ArgsType) = try allocator.create(IterClosure(T, ArgsType));
     ptr.* = .{
         .iter = iter,
         .allocator = allocator,
+        .args = args,
     };
 
     const ctx = struct {
         fn implNext(impl: *anyopaque) ?T {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             while (self_ptr.iter.next()) |x| {
-                if (filter(x)) {
+                if (filter(x, self_ptr.args)) {
                     return x;
                 }
             }
@@ -1503,9 +1545,9 @@ fn cloneFilteredFromIter(
         }
 
         fn implPrev(impl: *anyopaque) ?T {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             while (self_ptr.iter.prev()) |x| {
-                if (filter(x)) {
+                if (filter(x, self_ptr.args)) {
                     return x;
                 }
             }
@@ -1517,12 +1559,12 @@ fn cloneFilteredFromIter(
         }
 
         fn implReset(impl: *anyopaque) void {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.reset();
         }
 
         fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             if (offset > 0) {
                 for (0..@bitCast(offset)) |_| {
                     _ = self_ptr.iter.next();
@@ -1539,23 +1581,124 @@ fn cloneFilteredFromIter(
         }
 
         fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
-            return try cloneFilteredFromIter(T, alloc, self_ptr.iter, filter);
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
+            return try cloneFilteredFromIter(T, alloc, self_ptr.iter.*, filter, self_ptr.args);
         }
 
         fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             return self_ptr.iter.len();
         }
 
         fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
             self_ptr.iter.deinit();
             self_ptr.allocator.destroy(self_ptr);
         }
 
         fn implDeinitAsClone(impl: *anyopaque) void {
-            const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+            const clone_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
+            clone_ptr.allocator.destroy(clone_ptr);
+        }
+    };
+
+    const clone: AnonymousIterable(T) = .{
+        .ptr = ptr,
+        .v_table = &.{
+            .next_fn = &ctx.implNext,
+            .prev_fn = &ctx.implPrev,
+            .set_index_fn = &ctx.implSetIndex,
+            .reset_fn = &ctx.implReset,
+            .scroll_fn = &ctx.implScroll,
+            .get_index_fn = &ctx.implGetIndex,
+            .clone_fn = &ctx.implClone,
+            .len_fn = &ctx.implLen,
+            .deinit_fn = &ctx.implDeinit,
+        },
+    };
+    return clone.iter();
+}
+
+fn cloneFilteredFromIter(
+    comptime T: type,
+    allocator: Allocator,
+    iter: Iter(T),
+    filter: fn (T, anytype) bool,
+    args: anytype,
+) Allocator.Error!Iter(T) {
+    const ArgsType = @TypeOf(args);
+    const ptr: *CloneIterArgs(T, ArgsType) = try allocator.create(CloneIterArgs(T, ArgsType));
+    ptr.* = .{
+        .iter = iter,
+        .allocator = allocator,
+        .args = args,
+    };
+
+    const ctx = struct {
+        fn implNext(impl: *anyopaque) ?T {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            while (self_ptr.iter.next()) |x| {
+                if (filter(x, self_ptr.args)) {
+                    return x;
+                }
+            }
+            return null;
+        }
+
+        fn implPrev(impl: *anyopaque) ?T {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            while (self_ptr.iter.prev()) |x| {
+                if (filter(x, self_ptr.args)) {
+                    return x;
+                }
+            }
+            return null;
+        }
+
+        fn implSetIndex(_: *anyopaque, _: usize) error{NoIndexing}!void {
+            return error.NoIndexing;
+        }
+
+        fn implReset(impl: *anyopaque) void {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.reset();
+        }
+
+        fn implScroll(impl: *anyopaque, offset: isize) void {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            if (offset > 0) {
+                for (0..@bitCast(offset)) |_| {
+                    _ = self_ptr.iter.next();
+                }
+            } else if (offset < 0) {
+                for (0..@bitCast(@abs(offset))) |_| {
+                    _ = self_ptr.iter.prev();
+                }
+            }
+        }
+
+        fn implGetIndex(_: *anyopaque) ?usize {
+            return null;
+        }
+
+        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            return try cloneFilteredFromIter(T, alloc, self_ptr.iter, filter, self_ptr.args);
+        }
+
+        fn implLen(impl: *anyopaque) usize {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            return self_ptr.iter.len();
+        }
+
+        fn implDeinit(impl: *anyopaque) void {
+            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
+            self_ptr.iter.deinit();
+            self_ptr.allocator.destroy(self_ptr);
+        }
+
+        fn implDeinitAsClone(impl: *anyopaque) void {
+            const clone_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
             clone_ptr.allocator.destroy(clone_ptr);
         }
     };
@@ -1579,13 +1722,15 @@ fn cloneFilteredFromIter(
 
 /// Generate an auto-sum function, assuming elements are a numeric type (excluding enums).
 /// Args are not evaluated in this function.
-/// Take note that this function does not check for overflow.
+///
+/// Take note that this function performs saturating addition.
+/// Rather than integer overflow, the sum returns `T`'s max value.
 pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
                 fn sum(a: T, b: T, _: anytype) T {
-                    return a + b;
+                    return a +| b;
                 }
             }.sum;
         },
