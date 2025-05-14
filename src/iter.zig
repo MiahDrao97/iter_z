@@ -5,86 +5,45 @@ const MultiArrayList = std.MultiArrayList;
 
 pub const Ordering = enum { asc, desc };
 
+/// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
 pub fn VTable(comptime T: type) type {
     return struct {
-        // zig fmt: off
-        next_fn:            *const fn (*anyopaque) ?T,
-        prev_fn:            *const fn (*anyopaque) ?T,
-        reset_fn:           *const fn (*anyopaque) void,
-        scroll_fn:          *const fn (*anyopaque, isize) void,
-        get_index_fn:       *const fn (*anyopaque) ?usize,
-        set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
-        clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-        len_fn:             *const fn (*anyopaque) usize,
-        deinit_fn:          *const fn (*anyopaque) void,
-        // zig fmt: on
+        /// Get the next element or null if iteration is over
+        next_fn: *const fn (*anyopaque) ?T,
+        /// Get the previous element or null if the iteration is at beginning
+        prev_fn: *const fn (*anyopaque) ?T,
+        /// Reset the iterator the beginning
+        reset_fn: *const fn (*anyopaque) void,
+        /// Scroll to a relative offset from the iterator's current offset
+        scroll_fn: *const fn (*anyopaque, isize) void,
+        /// Get the index of the iterator, if availalble. Certain transformations obscure this (such as filtering) and this will be null
+        get_index_fn: *const fn (*anyopaque) ?usize,
+        /// Set the index if indexing is supported. Otherwise, should return `error.NoIndexing`
+        set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
+        clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
+        /// Get the maximum number of elements that an iterator will return.
+        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
+        len_fn: *const fn (*anyopaque) usize,
+        /// Deinitialize and free memory as needed
+        deinit_fn: *const fn (*anyopaque) void,
     };
 }
 
 /// User may implement this interface to define their own `Iter(T)`
 pub fn AnonymousIterable(comptime T: type) type {
     return struct {
-        const Self = @This();
-
+        /// Type-erased pointer to implementation
         ptr: *anyopaque,
+        /// Function pointers to the specific implementation functions
         v_table: *const VTable(T),
 
-        /// Return next element or null if iteration is over.
-        pub fn next(self: Self) ?T {
-            return self.v_table.next_fn(self.ptr);
-        }
-
-        /// Return previous element or null if iteration is at beginning.
-        pub fn prev(self: Self) ?T {
-            return self.v_table.prev_fn(self.ptr);
-        }
-
-        /// Set the index to any place
-        pub fn setIndex(self: Self, index: usize) error{NoIndexing}!void {
-            try self.v_table.set_index_fn(self.ptr, index);
-        }
-
-        /// Reset the iterator to its first element.
-        pub fn reset(self: Self) void {
-            self.v_table.reset_fn(self.ptr);
-        }
-
-        /// Scroll forward or backward x.
-        pub fn scroll(self: Self, amount: isize) void {
-            self.v_table.scroll_fn(self.ptr, amount);
-        }
-
-        /// Determine which index/offset the iterator is on. (If not null, then caller can use `setIndex()`.)
-        ///
-        /// Generally, indexing is only available on iterators that are directly made from slices or transformed from the former with a `select()` call.
-        /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
-        /// indexing is no longer feasible.
-        pub fn getIndex(self: Self) ?usize {
-            return self.v_table.get_index_fn(self.ptr);
-        }
-
-        /// Produces a clone of `Iter(T)` (note that it is not reset).
-        pub fn clone(self: Self, allocator: Allocator) Allocator.Error!Iter(T) {
-            return try self.v_table.clone_fn(self.ptr, allocator);
-        }
-
-        /// Get the length of the iterator.
-        ///
-        /// If `getIndex()` returns a value, then the sources is expected to return this many items.
-        /// Otherwise, `len()` represents a maximum length that the source can return.
-        pub fn len(self: Self) usize {
-            return self.v_table.len_fn(self.ptr);
-        }
-
-        /// Free the underlying pointer and other owned memory.
-        pub fn deinit(self: Self) void {
-            self.v_table.deinit_fn(self.ptr);
-        }
+        const Self = @This();
 
         /// Convert to `Iter(T)`
         pub fn iter(self: Self) Iter(T) {
             return .{
-                .variant = .{ .anonymous = self },
+                .variant = Iter(T).Variant{ .anonymous = self },
             };
         }
     };
@@ -443,7 +402,7 @@ pub fn Iter(comptime T: type) type {
                     return s.elements[s.idx];
                 },
                 .concatenated => |*c| return c.next(),
-                .anonymous => |a| return a.next(),
+                .anonymous => |a| return a.v_table.next_fn(a.ptr),
                 .empty => return null,
             }
         }
@@ -460,7 +419,7 @@ pub fn Iter(comptime T: type) type {
                     return s.elements[s.idx];
                 },
                 .concatenated => |*c| return c.prev(),
-                .anonymous => |a| return a.prev(),
+                .anonymous => |a| return a.v_table.prev_fn(a.ptr),
                 .empty => return null,
             }
         }
@@ -469,7 +428,7 @@ pub fn Iter(comptime T: type) type {
         pub fn setIndex(self: *Self, index: usize) error{NoIndexing}!void {
             switch (self.variant) {
                 .slice => |*s| s.idx = index,
-                .anonymous => |a| try a.setIndex(index),
+                .anonymous => |a| try a.v_table.set_index_fn(a.ptr, index),
                 else => return error.NoIndexing,
             }
         }
@@ -479,7 +438,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| s.idx = 0,
                 .concatenated => |*c| c.reset(),
-                .anonymous => |a| a.reset(),
+                .anonymous => |a| a.v_table.reset_fn(a.ptr),
                 .empty => {},
             }
         }
@@ -496,7 +455,7 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 .concatenated => |*c| c.scroll(offset),
-                .anonymous => |a| a.scroll(offset),
+                .anonymous => |a| a.v_table.scroll_fn(a.ptr, offset),
                 else => {},
             }
         }
@@ -509,7 +468,7 @@ pub fn Iter(comptime T: type) type {
         pub fn getIndex(self: Self) ?usize {
             switch (self.variant) {
                 .slice => |s| return s.idx,
-                .anonymous => |a| return a.getIndex(),
+                .anonymous => |a| return a.v_table.get_index_fn(a.ptr),
                 else => return null,
             }
         }
@@ -535,7 +494,7 @@ pub fn Iter(comptime T: type) type {
                     return self;
                 },
                 .concatenated => |c| return try c.cloneToIter(allocator),
-                .anonymous => |a| return try a.clone(allocator),
+                .anonymous => |a| return try a.v_table.clone_fn(a.ptr, allocator),
                 .empty => return self,
             }
         }
@@ -555,7 +514,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |s| return s.elements.len,
                 .concatenated => |c| return c.len(),
-                .anonymous => |a| return a.len(),
+                .anonymous => |a| return a.v_table.len_fn(a.ptr),
                 .empty => return 0,
             }
         }
@@ -576,7 +535,7 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 .concatenated => |*c| c.deinit(),
-                .anonymous => |a| a.deinit(),
+                .anonymous => |a| a.v_table.deinit_fn(a.ptr),
                 .empty => {},
             }
             self.* = empty;

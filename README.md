@@ -806,27 +806,47 @@ If you wish to start from the beginning, make sure to call `reset()`.
 You are free to create your own iterator!
 You only need to implement `AnonymousIterable(T)`, and call `iter()` on it, which will result in a `Iter(T)`, using your definition.
 ```zig
+/// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
 pub fn VTable(comptime T: type) type {
     return struct {
-        // zig fmt: off
-        next_fn:            *const fn (*anyopaque) ?T,
-        prev_fn:            *const fn (*anyopaque) ?T,
-        reset_fn:           *const fn (*anyopaque) void,
-        scroll_fn:          *const fn (*anyopaque, isize) void,
-        get_index_fn:       *const fn (*anyopaque) ?usize,
-        set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
-        clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-        len_fn:             *const fn (*anyopaque) usize,
-        deinit_fn:          *const fn (*anyopaque) void,
-        // zig fmt: on
+        /// Get the next element or null if iteration is over
+        next_fn: *const fn (*anyopaque) ?T,
+        /// Get the previous element or null if the iteration is at beginning
+        prev_fn: *const fn (*anyopaque) ?T,
+        /// Reset the iterator the beginning
+        reset_fn: *const fn (*anyopaque) void,
+        /// Scroll to a relative offset from the iterator's current offset
+        scroll_fn: *const fn (*anyopaque, isize) void,
+        /// Get the index of the iterator, if availalble. Certain transformations obscure this (such as filtering) and this will be null
+        get_index_fn: *const fn (*anyopaque) ?usize,
+        /// Set the index if indexing is supported. Otherwise, should return `error.NoIndexing`
+        set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
+        clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
+        /// Get the maximum number of elements that an iterator will return.
+        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
+        len_fn: *const fn (*anyopaque) usize,
+        /// Deinitialize and free memory as needed
+        deinit_fn: *const fn (*anyopaque) void,
     };
 }
+
 /// User may implement this interface to define their own `Iter(T)`
 pub fn AnonymousIterable(comptime T: type) type {
     return struct {
+        /// Type-erased pointer to implementation
         ptr: *anyopaque,
+        /// Function pointers to the specific implementation functions
         v_table: *const VTable(T),
 
-        // methods...
+        const Self = @This();
+
+        /// Convert to `Iter(T)`
+        pub fn iter(self: Self) Iter(T) {
+            return .{
+                .variant = Iter(T).Variant{ .anonymous = self },
+            };
+        }
+    };
 }
 ```
