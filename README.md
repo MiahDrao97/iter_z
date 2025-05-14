@@ -224,7 +224,57 @@ while (iter.next()) |x| {
 
 ### From Multi
 Initialize an `Iter(T)` from a `MultiArrayList(T)`.
-Keep in mind that the resulting iterator does not own the backing list.
+Keep in mind that the resulting iterator does not own the backing list (and more specifically, it only has a copy to the list, not a const pointer).
+Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering and cloning (the list, not the iterator).
+The recommended course of action for both of these is to order and clone the list directly and then initialize a new iterator from the ordered/cloned list afterward.
+
+There are 2 ways to initialize an iterator from a `MultiArrayList(T)`. One requires no additional allocation, but is limited to local scopes, whereas the other can be safely returned from a function.
+```zig
+const S = struct {
+    tag: usize,
+    str: []const u8,
+};
+
+// `fromMulti()` initialization, which allocates a pointer to the implementation of `Iter(T)`
+{
+    var list: MultiArrayList(S) = .empty;
+    defer list.deinit(testing.allocator);
+    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+    var iter: Iter(S) = try .fromMulti(testing.allocator, list);
+    defer iter.deinit();
+
+    var expected_tag: usize = 1;
+    while (iter.next()) |s| : (expected_tag += 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+    expected_tag = 2;
+    while (iter.prev()) |s| : (expected_tag -= 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+}
+// use locally scoped iterable
+{
+    var list: MultiArrayList(S) = .empty;
+    defer list.deinit(testing.allocator);
+    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+    var iterable: iter_z.MultiArrayListIterable(S) = .init(list);
+    var iter: Iter(S) = iterable.iter();
+    // don't need to deinit
+
+    var expected_tag: usize = 1;
+    while (iter.next()) |s| : (expected_tag += 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+    expected_tag = 2;
+    while (iter.prev()) |s| : (expected_tag -= 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+}
+```
 
 ### From Other
 Initialize an `Iter(T)` from any object, provided it has a `next()` method that returns `?T`.
@@ -756,23 +806,26 @@ If you wish to start from the beginning, make sure to call `reset()`.
 You are free to create your own iterator!
 You only need to implement `AnonymousIterable(T)`, and call `iter()` on it, which will result in a `Iter(T)`, using your definition.
 ```zig
+pub fn VTable(comptime T: type) type {
+    return struct {
+        // zig fmt: off
+        next_fn:            *const fn (*anyopaque) ?T,
+        prev_fn:            *const fn (*anyopaque) ?T,
+        reset_fn:           *const fn (*anyopaque) void,
+        scroll_fn:          *const fn (*anyopaque, isize) void,
+        get_index_fn:       *const fn (*anyopaque) ?usize,
+        set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
+        len_fn:             *const fn (*anyopaque) usize,
+        deinit_fn:          *const fn (*anyopaque) void,
+        // zig fmt: on
+    };
+}
 /// User may implement this interface to define their own `Iter(T)`
 pub fn AnonymousIterable(comptime T: type) type {
     return struct {
-        pub const VTable = struct {
-            next_fn:            *const fn (*anyopaque) ?T,
-            prev_fn:            *const fn (*anyopaque) ?T,
-            reset_fn:           *const fn (*anyopaque) void,
-            scroll_fn:          *const fn (*anyopaque, isize) void,
-            get_index_fn:       *const fn (*anyopaque) ?usize,
-            set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
-            clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-            get_len_fn:         *const fn (*anyopaque) usize,
-            deinit_fn:          *const fn (*anyopaque) void,
-        };
-
         ptr: *anyopaque,
-        v_table: *const VTable,
+        v_table: *const VTable(T),
 
         // methods...
 }

@@ -215,14 +215,19 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
     };
 }
 
+/// Structure that is an "iterable", meaning it is easily turned into an implementation of `Iter(T)` through the `AnonymousIterable(T)` interface.
 pub fn MultiArrayListIterable(comptime T: type) type {
     return struct {
+        /// `MultiArrayList(T)` we're iterating through
         list: MultiArrayList(T),
+        /// Current index
         idx: usize = 0,
+        /// If not null, we assume that we own `*Self` and will promptly destroy the pointer on `deinit()`.
         allocator: ?Allocator = null,
 
         const Self = @This();
 
+        /// Initialize from a multi array list
         pub fn init(list: MultiArrayList(T)) Self {
             return .{ .list = list };
         }
@@ -627,7 +632,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Create an iterator for a multi-array list. Keep in mind that the iterator does not own the backing list.
-        /// If you do not wish to allocate a pointer, you can initialize a`MultiArrayListIterable(T)` and call `iter()` on it to return the `Iter(T)` interface.
+        /// If you do not wish to allocate a pointer, you can initialize a `MultiArrayListIterable(T)` and call `iter()` on it to return the `Iter(T)` interface.
         /// Recommended if you simply need an iterator in a local scope.
         ///
         /// Note that if you use this method, the resulting `Iter(T)` must be freed with `deinit()`.
