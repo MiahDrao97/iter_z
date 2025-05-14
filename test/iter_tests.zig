@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 const SplitIterator = std.mem.SplitIterator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
+const MultiArrayList = std.MultiArrayList;
 
 fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
     return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{num});
@@ -972,4 +973,67 @@ test "reverse reset" {
     try testing.expectEqual(3, reversed.next().?);
     // clone should not have changed
     try testing.expectEqual(null, reversed_clone.next());
+}
+test "multi array list" {
+    const S = struct {
+        tag: usize,
+        str: []const u8,
+    };
+
+    {
+        var list: MultiArrayList(S) = .empty;
+        defer list.deinit(testing.allocator);
+        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+        var iter: Iter(S) = try .fromMulti(testing.allocator, list);
+        defer iter.deinit();
+
+        var expected_tag: usize = 1;
+        while (iter.next()) |s| : (expected_tag += 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
+        expected_tag = 2;
+        while (iter.prev()) |s| : (expected_tag -= 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
+
+        var clone: Iter(S) = try iter.clone(testing.allocator);
+        defer clone.deinit();
+
+        _ = iter.next();
+        try testing.expectEqualStrings("AAA", clone.next().?.str);
+        try testing.expectEqualStrings("BBB", clone.next().?.str);
+        try testing.expectEqual(1, iter.getIndex());
+        try testing.expectEqual(2, clone.getIndex());
+    }
+    // use locally scoped iterable
+    {
+        var list: MultiArrayList(S) = .empty;
+        defer list.deinit(testing.allocator);
+        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+        var iterable: iter_z.MultiArrayListIterable(S) = .init(list);
+        var iter: Iter(S) = iterable.iter();
+        // don't need to deinit
+
+        var expected_tag: usize = 1;
+        while (iter.next()) |s| : (expected_tag += 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
+        expected_tag = 2;
+        while (iter.prev()) |s| : (expected_tag -= 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
+
+        var clone: Iter(S) = try iter.clone(testing.allocator);
+        defer clone.deinit();
+
+        _ = iter.next();
+        try testing.expectEqualStrings("AAA", clone.next().?.str);
+        try testing.expectEqualStrings("BBB", clone.next().?.str);
+        try testing.expectEqual(1, iter.getIndex());
+        try testing.expectEqual(2, clone.getIndex());
+    }
 }

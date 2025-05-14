@@ -222,6 +222,60 @@ while (iter.next()) |x| {
 }
 ```
 
+### From Multi
+Initialize an `Iter(T)` from a `MultiArrayList(T)`.
+Keep in mind that the resulting iterator does not own the backing list (and more specifically, it only has a copy to the list, not a const pointer).
+Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering and cloning (the list, not the iterator).
+The recommended course of action for both of these is to order and clone the list directly and then initialize a new iterator from the ordered/cloned list afterward.
+
+There are 2 ways to initialize an iterator from a `MultiArrayList(T)`. One requires no additional allocation, but is limited to local scopes, whereas the other can be safely returned from a function.
+```zig
+const S = struct {
+    tag: usize,
+    str: []const u8,
+};
+
+// `fromMulti()` initialization, which allocates a pointer to the implementation of `Iter(T)`
+{
+    var list: MultiArrayList(S) = .empty;
+    defer list.deinit(testing.allocator);
+    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+    var iter: Iter(S) = try .fromMulti(testing.allocator, list);
+    defer iter.deinit();
+
+    var expected_tag: usize = 1;
+    while (iter.next()) |s| : (expected_tag += 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+    expected_tag = 2;
+    while (iter.prev()) |s| : (expected_tag -= 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+}
+// use locally scoped iterable
+{
+    var list: MultiArrayList(S) = .empty;
+    defer list.deinit(testing.allocator);
+    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+    var iterable: iter_z.MultiArrayListIterable(S) = .init(list);
+    var iter: Iter(S) = iterable.iter();
+    // don't need to deinit
+
+    var expected_tag: usize = 1;
+    while (iter.next()) |s| : (expected_tag += 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+    expected_tag = 2;
+    while (iter.prev()) |s| : (expected_tag -= 1) {
+        try testing.expectEqual(expected_tag, s.tag);
+    }
+}
+```
+
 ### From Other
 Initialize an `Iter(T)` from any object, provided it has a `next()` method that returns `?T`.
 Unfortunately, it's not very efficient since we have to enumerate the whole thing to a slice and return an `Iter(T)` that owns that slice.
@@ -752,24 +806,47 @@ If you wish to start from the beginning, make sure to call `reset()`.
 You are free to create your own iterator!
 You only need to implement `AnonymousIterable(T)`, and call `iter()` on it, which will result in a `Iter(T)`, using your definition.
 ```zig
+/// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
+pub fn VTable(comptime T: type) type {
+    return struct {
+        /// Get the next element or null if iteration is over
+        next_fn: *const fn (*anyopaque) ?T,
+        /// Get the previous element or null if the iteration is at beginning
+        prev_fn: *const fn (*anyopaque) ?T,
+        /// Reset the iterator the beginning
+        reset_fn: *const fn (*anyopaque) void,
+        /// Scroll to a relative offset from the iterator's current offset
+        scroll_fn: *const fn (*anyopaque, isize) void,
+        /// Get the index of the iterator, if availalble. Certain transformations obscure this (such as filtering) and this will be null
+        get_index_fn: *const fn (*anyopaque) ?usize,
+        /// Set the index if indexing is supported. Otherwise, should return `error.NoIndexing`
+        set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
+        clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
+        /// Get the maximum number of elements that an iterator will return.
+        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
+        len_fn: *const fn (*anyopaque) usize,
+        /// Deinitialize and free memory as needed
+        deinit_fn: *const fn (*anyopaque) void,
+    };
+}
+
 /// User may implement this interface to define their own `Iter(T)`
 pub fn AnonymousIterable(comptime T: type) type {
     return struct {
-        pub const VTable = struct {
-            next_fn:            *const fn (*anyopaque) ?T,
-            prev_fn:            *const fn (*anyopaque) ?T,
-            reset_fn:           *const fn (*anyopaque) void,
-            scroll_fn:          *const fn (*anyopaque, isize) void,
-            get_index_fn:       *const fn (*anyopaque) ?usize,
-            set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
-            clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-            get_len_fn:         *const fn (*anyopaque) usize,
-            deinit_fn:          *const fn (*anyopaque) void,
-        };
-
+        /// Type-erased pointer to implementation
         ptr: *anyopaque,
-        v_table: *const VTable,
+        /// Function pointers to the specific implementation functions
+        v_table: *const VTable(T),
 
-        // methods...
+        const Self = @This();
+
+        /// Convert to `Iter(T)`
+        pub fn iter(self: Self) Iter(T) {
+            return .{
+                .variant = Iter(T).Variant{ .anonymous = self },
+            };
+        }
+    };
 }
 ```
