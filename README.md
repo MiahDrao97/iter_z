@@ -222,6 +222,10 @@ while (iter.next()) |x| {
 }
 ```
 
+### From Multi
+Initialize an `Iter(T)` from a `MultiArrayList(T)`.
+Keep in mind that the resulting iterator does not own the backing list.
+
 ### From Other
 Initialize an `Iter(T)` from any object, provided it has a `next()` method that returns `?T`.
 Unfortunately, it's not very efficient since we have to enumerate the whole thing to a slice and return an `Iter(T)` that owns that slice.

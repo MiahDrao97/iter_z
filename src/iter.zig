@@ -5,27 +5,29 @@ const MultiArrayList = std.MultiArrayList;
 
 pub const Ordering = enum { asc, desc };
 
+pub fn VTable(comptime T: type) type {
+    return struct {
+        // zig fmt: off
+        next_fn:            *const fn (*anyopaque) ?T,
+        prev_fn:            *const fn (*anyopaque) ?T,
+        reset_fn:           *const fn (*anyopaque) void,
+        scroll_fn:          *const fn (*anyopaque, isize) void,
+        get_index_fn:       *const fn (*anyopaque) ?usize,
+        set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
+        len_fn:             *const fn (*anyopaque) usize,
+        deinit_fn:          *const fn (*anyopaque) void,
+        // zig fmt: on
+    };
+}
+
 /// User may implement this interface to define their own `Iter(T)`
 pub fn AnonymousIterable(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        // zig fmt: off
-        pub const VTable = struct {
-            next_fn:            *const fn (*anyopaque) ?T,
-            prev_fn:            *const fn (*anyopaque) ?T,
-            reset_fn:           *const fn (*anyopaque) void,
-            scroll_fn:          *const fn (*anyopaque, isize) void,
-            get_index_fn:       *const fn (*anyopaque) ?usize,
-            set_index_fn:       *const fn (*anyopaque, usize) error{NoIndexing}!void,
-            clone_fn:           *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-            len_fn:             *const fn (*anyopaque) usize,
-            deinit_fn:          *const fn (*anyopaque) void,
-        };
-        // zig fmt: on
-
         ptr: *anyopaque,
-        v_table: *const VTable,
+        v_table: *const VTable(T),
 
         /// Return next element or null if iteration is over.
         pub fn next(self: Self) ?T {
@@ -213,10 +215,102 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
     };
 }
 
-fn MultiArrayListIterable(comptime T: type) type {
+pub fn MultiArrayListIterable(comptime T: type) type {
     return struct {
         list: MultiArrayList(T),
         idx: usize = 0,
+        allocator: ?Allocator = null,
+
+        const Self = @This();
+
+        pub fn init(list: MultiArrayList(T)) Self {
+            return .{ .list = list };
+        }
+
+        pub fn iter(self: *Self) Iter(T) {
+            const ctx = struct {
+                fn implNext(impl: *anyopaque) ?T {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    if (self_ptr.idx >= self_ptr.list.len) {
+                        return null;
+                    }
+                    defer self_ptr.idx += 1;
+                    return self_ptr.list.get(self_ptr.idx);
+                }
+
+                fn implPrev(impl: *anyopaque) ?T {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    if (self_ptr.idx <= 0) {
+                        return null;
+                    } else if (self_ptr.idx > self_ptr.list.len) {
+                        self_ptr.idx = self_ptr.list.len;
+                    }
+                    self_ptr.idx -|= 1;
+                    return self_ptr.list.get(self_ptr.idx);
+                }
+
+                fn implLen(impl: *anyopaque) usize {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    return self_ptr.list.len;
+                }
+
+                fn implGetIndex(impl: *anyopaque) ?usize {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    return self_ptr.idx;
+                }
+
+                fn implSetIndex(impl: *anyopaque, index: usize) error{NoIndexing}!void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    self_ptr.idx = index;
+                }
+
+                fn implReset(impl: *anyopaque) void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    self_ptr.idx = 0;
+                }
+
+                fn implScroll(impl: *anyopaque, offset: isize) void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    const new_idx: isize = @as(isize, @bitCast(self_ptr.idx)) + offset;
+                    if (new_idx < 0) {
+                        self_ptr.idx = 0;
+                    } else {
+                        self_ptr.idx = @bitCast(new_idx);
+                    }
+                }
+
+                fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    const new_ptr: *Self = try alloc.create(Self);
+                    new_ptr.* = self_ptr.*;
+                    new_ptr.allocator = alloc;
+                    return new_ptr.iter();
+                }
+
+                fn implDeinit(impl: *anyopaque) void {
+                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
+                    if (self_ptr.allocator) |alloc| {
+                        alloc.destroy(self_ptr);
+                    }
+                }
+            };
+
+            const anon: AnonymousIterable(T) = .{
+                .ptr = self,
+                .v_table = &VTable(T){
+                    .next_fn = &ctx.implNext,
+                    .prev_fn = &ctx.implPrev,
+                    .len_fn = &ctx.implLen,
+                    .reset_fn = &ctx.implReset,
+                    .scroll_fn = &ctx.implScroll,
+                    .get_index_fn = &ctx.implGetIndex,
+                    .set_index_fn = &ctx.implSetIndex,
+                    .clone_fn = &ctx.implClone,
+                    .deinit_fn = &ctx.implDeinit,
+                },
+            };
+            return anon.iter();
+        }
     };
 }
 
@@ -530,6 +624,18 @@ pub fn Iter(comptime T: type) type {
         ) Allocator.Error!Self {
             const slice_iter: *SliceIterableArgs(T, @TypeOf(args), on_deinit) = try .new(allocator, slice, args);
             return slice_iter.iter();
+        }
+
+        /// Create an iterator for a multi-array list. Keep in mind that the iterator does not own the backing list.
+        /// If you do not wish to allocate a pointer, you can initialize a`MultiArrayListIterable(T)` and call `iter()` on it to return the `Iter(T)` interface.
+        /// Recommended if you simply need an iterator in a local scope.
+        ///
+        /// Note that if you use this method, the resulting `Iter(T)` must be freed with `deinit()`.
+        pub fn fromMulti(allocator: Allocator, list: MultiArrayList(T)) Allocator.Error!Iter(T) {
+            const ptr: *MultiArrayListIterable(T) = try allocator.create(MultiArrayListIterable(T));
+            ptr.* = .init(list);
+            ptr.allocator = allocator;
+            return ptr.iter();
         }
 
         /// Concatenates several iterators into one. They'll iterate in the order they're passed in.
