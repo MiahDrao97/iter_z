@@ -232,6 +232,7 @@ pub fn MultiArrayListIterable(comptime T: type) type {
             return .{ .list = list };
         }
 
+        /// Convert to `Iter(T)`, using the pointer to `Self` as the implementation of the `AnonymousIterable(T)` interface.
         pub fn iter(self: *Self) Iter(T) {
             const ctx = struct {
                 fn implNext(impl: *anyopaque) ?T {
