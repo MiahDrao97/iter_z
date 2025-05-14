@@ -1,6 +1,7 @@
 const std = @import("std");
 pub const util = @import("util.zig");
 const Allocator = std.mem.Allocator;
+const MultiArrayList = std.MultiArrayList;
 
 pub const Ordering = enum { asc, desc };
 
@@ -209,6 +210,13 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
             };
             return anon.iter();
         }
+    };
+}
+
+fn MultiArrayListIterable(comptime T: type) type {
+    return struct {
+        list: MultiArrayList(T),
+        idx: usize = 0,
     };
 }
 
