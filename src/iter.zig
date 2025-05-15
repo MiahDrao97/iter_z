@@ -1903,9 +1903,12 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
     }
 }
 
-fn validateFilterContext(comptime T: type, context: anytype) void {
+inline fn validateFilterContext(comptime T: type, context: anytype) void {
     const ContextType = @TypeOf(context);
     switch (@typeInfo(ContextType)) {
+        .optional => |optional| {
+            validateFilterContext(T, optional.child);
+        },
         .pointer => |ptr| {
             switch (ptr.size) {
                 .one => {
@@ -1919,6 +1922,31 @@ fn validateFilterContext(comptime T: type, context: anytype) void {
                     }
                     if (method_info.return_type != bool) {
                         @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                    }
+                },
+                else => @compileError("Expecting single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+            }
+        },
+        else => @compileError("Expecting single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
+    }
+}
+
+inline fn validateSelectContext(comptime T: type, comptime TOther: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .one => {
+                    const PtrType = ptr.child;
+                    if (!std.meta.hasMethod(PtrType, "filter")) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                    }
+                    const method_info: Fn = @typeInfo(@TypeOf(@field(PtrType, "filter"))).@"fn";
+                    if (method_info.params.len != 2 or method_info.params[1].type != T) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                    }
+                    if (method_info.return_type != TOther) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
                     }
                 },
                 else => @compileError("Expecting single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
