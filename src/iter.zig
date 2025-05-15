@@ -2,6 +2,7 @@ const std = @import("std");
 pub const util = @import("util.zig");
 const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
+const Fn = std.builtin.Type.Fn;
 
 pub const Ordering = enum { asc, desc };
 
@@ -377,6 +378,22 @@ fn ConcatIterable(comptime T: type) type {
     };
 }
 
+fn ContextIterable(comptime T: type) type {
+    return struct {
+        iter: *Iter(T),
+        context: *const anyopaque,
+        v_table: *const ContextVTable,
+        allocator: ?Allocator = null,
+
+        const ContextVTable = struct {
+            next_fn: *const fn (*const anyopaque, *Iter(T)) ?T,
+            prev_fn: *const fn (*const anyopaque, *Iter(T)) ?T,
+            get_index_fn: *const fn (*const anyopaque, *Iter(T)) ?usize,
+            set_index_fn: *const fn (*const anyopaque, *Iter(T), usize) error{NoIndexing}!void,
+        };
+    };
+}
+
 /// This struct is an iterator that offers some basic filtering and transformations.
 pub fn Iter(comptime T: type) type {
     return struct {
@@ -386,6 +403,7 @@ pub fn Iter(comptime T: type) type {
             slice: SliceIterable(T),
             concatenated: ConcatIterable(T),
             anonymous: AnonymousIterable(T),
+            context: ContextIterable(T),
             empty: void,
         };
 
@@ -403,6 +421,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| return c.next(),
                 .anonymous => |a| return a.v_table.next_fn(a.ptr),
+                .context => |c| return c.v_table.next_fn(c.context, c.iter),
                 .empty => return null,
             }
         }
@@ -420,6 +439,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| return c.prev(),
                 .anonymous => |a| return a.v_table.prev_fn(a.ptr),
+                .context => |c| return c.v_table.prev_fn(c.context, c.iter),
                 .empty => return null,
             }
         }
@@ -429,6 +449,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| s.idx = index,
                 .anonymous => |a| try a.v_table.set_index_fn(a.ptr, index),
+                .context => |c| return c.v_table.set_index_fn(c.context, c.iter, index),
                 else => return error.NoIndexing,
             }
         }
@@ -439,6 +460,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |*s| s.idx = 0,
                 .concatenated => |*c| c.reset(),
                 .anonymous => |a| a.v_table.reset_fn(a.ptr),
+                .context => |c| c.iter.reset(),
                 .empty => {},
             }
         }
@@ -456,6 +478,17 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.scroll(offset),
                 .anonymous => |a| a.v_table.scroll_fn(a.ptr, offset),
+                .context => |c| {
+                    if (offset > 0) {
+                        for (0..@bitCast(offset)) |_| {
+                            _ = c.v_table.next_fn(c.context, c.iter) orelse break;
+                        }
+                    } else if (offset < 0) {
+                        for (0..@abs(offset)) |_| {
+                            _ = c.v_table.prev_fn(c.context, c.iter) orelse break;
+                        }
+                    }
+                },
                 else => {},
             }
         }
@@ -469,6 +502,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |s| return s.idx,
                 .anonymous => |a| return a.v_table.get_index_fn(a.ptr),
+                .context => |c| return c.v_table.get_index_fn(c.context, c.iter),
                 else => return null,
             }
         }
@@ -495,6 +529,20 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |c| return try c.cloneToIter(allocator),
                 .anonymous => |a| return try a.v_table.clone_fn(a.ptr, allocator),
+                .context => |c| {
+                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
+                    iter_clone.* = c.iter.*;
+                    return Iter(T){
+                        .variant = Variant{
+                            .context = ContextIterable(T){
+                                .context = c.context,
+                                .v_table = c.v_table,
+                                .iter = iter_clone,
+                                .allocator = allocator,
+                            },
+                        },
+                    };
+                },
                 .empty => return self,
             }
         }
@@ -515,6 +563,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |s| return s.elements.len,
                 .concatenated => |c| return c.len(),
                 .anonymous => |a| return a.v_table.len_fn(a.ptr),
+                .context => |c| return c.iter.len(),
                 .empty => return 0,
             }
         }
@@ -536,6 +585,12 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.deinit(),
                 .anonymous => |a| a.v_table.deinit_fn(a.ptr),
+                .context => |c| {
+                    c.iter.deinit();
+                    if (c.allocator) |alloc| {
+                        alloc.destroy(c.iter);
+                    }
+                },
                 .empty => {},
             }
             self.* = empty;
@@ -812,107 +867,53 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Returns a filtered iterator, using `self` as a source.
-        /// Don't forget to call `deinit()` since this leverages a quasi-closure.
-        ///
-        /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred to prevent memory allocation.
-        pub fn where(
-            self: *Self,
-            allocator: Allocator,
-            filter: fn (T, anytype) bool,
-            args: anytype,
-        ) Allocator.Error!Self {
-            return try createFilteredFromIter(T, allocator, self, filter, args);
-        }
-
-        /// Returns a filtered iterator, using `self` as a source.
-        /// To prevent allocating memory, the arguments are stored as a threadlocal static.
-        /// This is for one-time use or for filtering when `args` are void.
-        /// Subsequent calls to this method overwrite `args`.
-        ///
-        /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred.
-        pub fn whereStatic(self: *Self, filter: fn (T, anytype) bool, args: anytype) Self {
-            const ArgsType = @TypeOf(args);
+        /// Context must be a pointer to a type that has a method "filter", taking in `T` and returning `bool`.
+        pub fn where(self: *Self, context: anytype) Self {
+            validateFilterContext(T, context);
+            const ContextType = @typeInfo(@TypeOf(context)).pointer.child;
             const ctx = struct {
-                threadlocal var ctx_args: ArgsType = undefined;
-
-                fn implNext(impl: *anyopaque) ?T {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    while (self_ptr.next()) |x| {
-                        if (filter(x, ctx_args)) {
+                fn implNext(c: *const anyopaque, inner: *Iter(T)) ?T {
+                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                    while (inner.next()) |x| {
+                        if (c_ptr.filter(x)) {
                             return x;
                         }
                     }
                     return null;
                 }
 
-                fn implPrev(impl: *anyopaque) ?T {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    while (self_ptr.prev()) |x| {
-                        if (filter(x, ctx_args)) {
+                fn implPrev(c: *const anyopaque, inner: *Iter(T)) ?T {
+                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                    while (inner.prev()) |x| {
+                        if (c_ptr.filter(x)) {
                             return x;
                         }
                     }
                     return null;
                 }
 
-                fn implSetIndex(_: *anyopaque, _: usize) error{NoIndexing}!void {
+                fn implGetIndex(_: *const anyopaque, _: *const Iter(T)) ?usize {
+                    return null;
+                }
+
+                fn implSetIndex(_: *const anyopaque, _: *Iter(T), _: usize) error{NoIndexing}!void {
                     return error.NoIndexing;
                 }
-
-                fn implReset(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.reset();
-                }
-
-                fn implScroll(impl: *anyopaque, offset: isize) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    if (offset > 0) {
-                        for (0..@bitCast(offset)) |_| {
-                            _ = self_ptr.next();
-                        }
-                    } else if (offset < 0) {
-                        for (0..@abs(offset)) |_| {
-                            _ = self_ptr.prev();
-                        }
-                    }
-                }
-
-                fn implGetIndex(_: *anyopaque) ?usize {
-                    return null;
-                }
-
-                fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return try cloneFilteredFromIter(T, allocator, self_ptr.*, filter, ctx_args);
-                }
-
-                fn implLen(impl: *anyopaque) usize {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return self_ptr.len();
-                }
-
-                fn implDeinit(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.deinit();
-                }
             };
-            ctx.ctx_args = args;
-
-            const filtered: AnonymousIterable(T) = .{
-                .ptr = self,
-                .v_table = &.{
-                    .next_fn = &ctx.implNext,
-                    .prev_fn = &ctx.implPrev,
-                    .set_index_fn = &ctx.implSetIndex,
-                    .reset_fn = &ctx.implReset,
-                    .scroll_fn = &ctx.implScroll,
-                    .get_index_fn = &ctx.implGetIndex,
-                    .clone_fn = &ctx.implClone,
-                    .len_fn = &ctx.implLen,
-                    .deinit_fn = &ctx.implDeinit,
+            return Self{
+                .variant = Variant{
+                    .context = ContextIterable(T){
+                        .context = context,
+                        .iter = self,
+                        .v_table = &ContextIterable(T).ContextVTable{
+                            .next_fn = &ctx.implNext,
+                            .prev_fn = &ctx.implPrev,
+                            .get_index_fn = &ctx.implGetIndex,
+                            .set_index_fn = &ctx.implSetIndex,
+                        },
+                    },
                 },
             };
-            return filtered.iter();
         }
 
         /// Enumerates into `buf`, starting at `self`'s current `next()` call.
@@ -1899,5 +1900,30 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
             }.compare;
         },
         else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
+    }
+}
+
+fn validateFilterContext(comptime T: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .one => {
+                    const PtrType = ptr.child;
+                    if (!std.meta.hasMethod(PtrType, "filter")) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                    }
+                    const method_info: Fn = @typeInfo(@TypeOf(@field(PtrType, "filter"))).@"fn";
+                    if (method_info.params.len != 2 or method_info.params[1].type != T) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                    }
+                    if (method_info.return_type != bool) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                    }
+                },
+                else => @compileError("Expecting single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+            }
+        },
+        else => @compileError("Expecting single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
     }
 }

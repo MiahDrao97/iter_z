@@ -13,9 +13,11 @@ fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
     return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{num});
 }
 
-fn isEven(num: u8, _: anytype) bool {
-    return num % 2 == 0;
-}
+const isEven = struct {
+    pub fn filter(_: isEven, num: u8) bool {
+        return num % 2 == 0;
+    }
+};
 
 fn stringCompare(a: []const u8, b: []const u8) std.math.Order {
     // basically alphabetical
@@ -114,63 +116,9 @@ test "cloneReset" {
     // previous should be 3 (because we hit the end of the iteration, so that puts us at null)
     try testing.expectEqual(3, clone.prev());
 }
-test "where static" {
-    {
-        var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-        var iter: Iter(u8) = inner.whereStatic(isEven, {});
-        defer iter.deinit();
-
-        try testing.expect(iter.len() == 3);
-
-        var i: usize = 0;
-        while (iter.next()) |x| {
-            try testing.expect(x == 2);
-            i += 1;
-        }
-
-        try testing.expect(i == 1);
-
-        try testing.expectEqual(2, iter.prev());
-    }
-    {
-        var odds = [_]u8{ 1, 3, 5 };
-        var inner: Iter(u8) = .from(&odds);
-        var iter: Iter(u8) = inner.whereStatic(isEven, {});
-
-        try testing.expect(iter.len() == 3);
-
-        var i: usize = 0;
-        while (iter.next()) |_| {
-            // should not enter this block
-            i += 1;
-        }
-        while (iter.prev()) |_| {
-            // also shouldn't enter this one
-            i += 1;
-        }
-
-        try testing.expect(i == 0);
-        try testing.expect(iter.count(null, {}) == 0);
-
-        var clone: Iter(u8) = try iter.cloneReset(testing.allocator);
-        defer clone.deinit();
-
-        i = 1;
-        while (clone.next()) |x| {
-            defer i += 1;
-            try testing.expect(x == i);
-        }
-
-        var clone2: Iter(u8) = try clone.clone(testing.allocator);
-        defer clone2.deinit();
-
-        try testing.expect(clone2.next() == null);
-    }
-}
 test "where" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var filtered: Iter(u8) = try iter.where(testing.allocator, isEven, {});
-    defer filtered.deinit();
+    var filtered: Iter(u8) = iter.where(&isEven{});
 
     var clone: Iter(u8) = try filtered.clone(testing.allocator);
     defer clone.deinit();
@@ -186,7 +134,7 @@ test "where" {
 }
 test "enumerateToOwnedSlice" {
     var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
-    var iter: Iter(u8) = inner.whereStatic(isEven, {});
+    var iter: Iter(u8) = inner.where(&isEven{});
 
     try testing.expect(iter.len() == 3);
 
@@ -211,7 +159,7 @@ test "empty" {
     try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
 
-    var next_iter = iter.whereStatic(isEven, {});
+    var next_iter = iter.where(&isEven{});
 
     try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
@@ -248,7 +196,7 @@ test "concat" {
 
         iter.reset();
 
-        var new_iter: Iter(u8) = iter.whereStatic(isEven, {});
+        var new_iter: Iter(u8) = iter.where(&isEven{});
 
         try testing.expectEqual(9, new_iter.len());
         try testing.expect(new_iter.getIndex() == null);
@@ -352,7 +300,13 @@ test "any" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
-    var result: ?u8 = iter.any(isEven, {});
+    const getEvens = struct {
+        fn getEvens(x: u8, _: anytype) bool {
+            return x % 2 == 0;
+        }
+    }.getEvens;
+
+    var result: ?u8 = iter.any(getEvens, {});
     try testing.expect(result == null);
 
     // should have scrolled back
@@ -435,7 +389,7 @@ test "clone" {
 }
 test "clone with where static" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var outer: Iter(u8) = iter.whereStatic(isEven, {});
+    var outer: Iter(u8) = iter.where(&isEven{});
 
     var result: ?u8 = outer.next();
     try testing.expectEqual(2, result);
@@ -869,12 +823,12 @@ test "set index" {
     try transformed.setIndex(5);
     try testing.expectEqualStrings("6", transformed.next().?);
 
-    var filtered: Iter(u8) = iter.whereStatic(isEven, {});
+    var filtered: Iter(u8) = iter.where(&isEven{});
     try testing.expectError(error.NoIndexing, filtered.setIndex(0));
 }
 test "allocator mix n match" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var filtered: Iter(u8) = iter.whereStatic(isEven, {});
+    var filtered: Iter(u8) = iter.where(&isEven{});
 
     var arena: ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -892,7 +846,7 @@ test "allocator mix n match" {
     var clone4 = try iter.clone(arena2.allocator());
     defer clone4.deinit();
 
-    var filtered2 = clone4.whereStatic(isEven, {});
+    var filtered2 = clone4.where(&isEven{});
 
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();
