@@ -378,18 +378,35 @@ fn ConcatIterable(comptime T: type) type {
     };
 }
 
+/// Whether or not the context is owned by the iterator
+pub const ContextOwnership = union(enum) {
+    /// No ownership; the context is locally scoped or owned by something else
+    none,
+    /// Owned by the iterator, and this allocator will destroy the context on `deinit()`
+    owned: Allocator,
+};
+
 fn ContextIterable(comptime T: type) type {
     return struct {
         iter: *Iter(T),
         context: *const anyopaque,
         v_table: *const ContextVTable,
-        allocator: ?Allocator = null,
+        ownership: Ownership,
+
+        const Ownership = union(enum) {
+            none,
+            owns_context: Allocator,
+            owns_iter: Allocator,
+            owns_both: Allocator,
+        };
 
         const ContextVTable = struct {
             next_fn: *const fn (*const anyopaque, *Iter(T)) ?T,
             prev_fn: *const fn (*const anyopaque, *Iter(T)) ?T,
             get_index_fn: *const fn (*const anyopaque, *Iter(T)) ?usize,
             set_index_fn: *const fn (*const anyopaque, *Iter(T), usize) error{NoIndexing}!void,
+            clone_fn: *const fn (*const anyopaque, *Iter(T), *const ContextVTable, Ownership, Allocator) Allocator.Error!Iter(T),
+            deinit_fn: *const fn (*const anyopaque, *Iter(T), Ownership) void,
         };
     };
 }
@@ -529,20 +546,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |c| return try c.cloneToIter(allocator),
                 .anonymous => |a| return try a.v_table.clone_fn(a.ptr, allocator),
-                .context => |c| {
-                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
-                    iter_clone.* = c.iter.*;
-                    return Iter(T){
-                        .variant = Variant{
-                            .context = ContextIterable(T){
-                                .context = c.context,
-                                .v_table = c.v_table,
-                                .iter = iter_clone,
-                                .allocator = allocator,
-                            },
-                        },
-                    };
-                },
+                .context => |c| return try c.v_table.clone_fn(c.context, c.iter, c.v_table, c.ownership, allocator),
                 .empty => return self,
             }
         }
@@ -585,12 +589,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.deinit(),
                 .anonymous => |a| a.v_table.deinit_fn(a.ptr),
-                .context => |c| {
-                    c.iter.deinit();
-                    if (c.allocator) |alloc| {
-                        alloc.destroy(c.iter);
-                    }
-                },
+                .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
                 .empty => {},
             }
             self.* = empty;
@@ -868,8 +867,8 @@ pub fn Iter(comptime T: type) type {
 
         /// Returns a filtered iterator, using `self` as a source.
         /// Context must be a pointer to a type that has a method "filter", taking in `T` and returning `bool`.
-        pub fn where(self: *Self, context: anytype) Self {
-            validateFilterContext(T, context);
+        pub fn where(self: *Self, context: anytype, ownership: ContextOwnership) Self {
+            validateFilterContext(T, context, false);
             const ContextType = @typeInfo(@TypeOf(context)).pointer.child;
             const ctx = struct {
                 fn implNext(c: *const anyopaque, inner: *Iter(T)) ?T {
@@ -899,6 +898,60 @@ pub fn Iter(comptime T: type) type {
                 fn implSetIndex(_: *const anyopaque, _: *Iter(T), _: usize) error{NoIndexing}!void {
                     return error.NoIndexing;
                 }
+
+                fn implClone(
+                    c: *const anyopaque,
+                    inner: *Iter(T),
+                    v_table: *const ContextIterable(T).ContextVTable,
+                    owning: ContextIterable(T).Ownership,
+                    allocator: Allocator,
+                ) Allocator.Error!Iter(T) {
+                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
+                    errdefer allocator.destroy(iter_clone);
+                    iter_clone.* = inner.*;
+                    return Iter(T){
+                        .variant = Variant{
+                            .context = ContextIterable(T){
+                                .context = switch (owning) {
+                                    .owns_context, .owns_both => context_blk: {
+                                        const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                                        const c_clone: *ContextType = try allocator.create(ContextType);
+                                        c_clone.* = c_ptr.*;
+                                        break :context_blk c_clone;
+                                    },
+                                    else => c,
+                                },
+                                .v_table = v_table,
+                                .iter = iter_clone,
+                                .ownership = switch (owning) {
+                                    .owns_context, .owns_both => .{ .owns_both = allocator },
+                                    else => .{ .owns_iter = allocator },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                fn implDeinit(
+                    c: *const anyopaque,
+                    inner: *Iter(T),
+                    owning: ContextIterable(T).Ownership,
+                ) void {
+                    inner.deinit();
+                    switch (owning) {
+                        .owns_iter => |alloc| alloc.destroy(inner),
+                        .owns_context => |alloc| {
+                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                            alloc.destroy(c_ptr);
+                        },
+                        .owns_both => |alloc| {
+                            alloc.destroy(inner);
+                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                            alloc.destroy(c_ptr);
+                        },
+                        else => {},
+                    }
+                }
             };
             return Self{
                 .variant = Variant{
@@ -910,6 +963,12 @@ pub fn Iter(comptime T: type) type {
                             .prev_fn = &ctx.implPrev,
                             .get_index_fn = &ctx.implGetIndex,
                             .set_index_fn = &ctx.implSetIndex,
+                            .clone_fn = &ctx.implClone,
+                            .deinit_fn = &ctx.implDeinit,
+                        },
+                        .ownership = switch (ownership) {
+                            .none => .none,
+                            .owned => |alloc| .{ .owns_context = alloc },
                         },
                     },
                 },
@@ -1903,11 +1962,13 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
     }
 }
 
-inline fn validateFilterContext(comptime T: type, context: anytype) void {
+inline fn validateFilterContext(comptime T: type, context: anytype, comptime optional: bool) void {
     const ContextType = @TypeOf(context);
     switch (@typeInfo(ContextType)) {
-        .optional => |optional| {
-            validateFilterContext(T, optional.child);
+        .null => {
+            if (!optional) {
+                @compileError("Context is not optional. Expecting a pointer whose child type defines a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
         },
         .pointer => |ptr| {
             switch (ptr.size) {
