@@ -516,8 +516,7 @@ pub fn Iter(comptime T: type) type {
         /// Determine which index/offset the iterator is on. (If not null, then caller can use `setIndex()`.)
         ///
         /// Generally, indexing is only available on iterators that are directly made from slices or transformed from the former with a `select()` call.
-        /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
-        /// indexing is no longer feasible.
+        /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`), indexing is no longer feasible.
         pub fn getIndex(self: Self) ?usize {
             switch (self.variant) {
                 .slice => |s| return s.idx,
@@ -769,10 +768,20 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
-        /// Each element returned from `next()` will go through the `transform` function.
+        /// - `context` must be a pointer to a type that defines the method: `fn transform(@This(), T) TOther`.
+        /// - `ownership` indicates whether or not `context` is owned by this iterator.
+        ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
+        ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
         ///
-        /// A pointer has to be made in this case since we're creating a pseudo-closure.
-        /// Don't forget to deinit.
+        /// Context example:
+        /// ```zig
+        /// const Multiplier = struct {
+        ///     factor: u32,
+        ///     pub fn transform(self: @This(), item: u32) u32 {
+        ///         return self.factor * item;
+        ///     }
+        /// };
+        /// ```
         pub fn select(
             self: *Iter(T),
             comptime TOther: type,
@@ -901,10 +910,24 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Returns a filtered iterator, using `self` as a source.
-        /// Context must be a pointer to a type that has a method "filter", taking in `T` and returning `bool`.
-        /// The context can be heap-allocated and owned by this iterator, if you pass in the `owned` tag with the allocator that created the context pointer.
+        ///
+        /// - `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// - `ownership` indicates whether or not `context` is owned by this iterator.
+        ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
+        ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
+        ///
+        /// Context example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn where(self: *Self, context: anytype, ownership: ContextOwnership) Self {
-            assert(validateFilterContext(T, context, false) == .exists);
+            assert(validateFilterContext(T, context, .required) == .exists);
             const ContextType = @typeInfo(@TypeOf(context)).pointer.child;
             const ctx = struct {
                 fn implNext(c: *const anyopaque, inner: *anyopaque) ?T {
@@ -1113,7 +1136,7 @@ pub fn Iter(comptime T: type) type {
         /// Determine if the sequence contains any element with a given filter (or pass in null to simply peek at the next element).
         /// Always scrolls back in place.
         pub fn any(self: *Self, context: anytype) ?T {
-            const ctx_type: CtxType = validateFilterContext(T, context, true);
+            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
             if (self.len() == 0) {
                 return null;
             }
@@ -1135,15 +1158,26 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Find the next element that fulfills a given filter.
-        /// This does move the iterator forward, which is reported in the out parameter `moved_forward`.
-        ///
+        /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
+        ///
+        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn filterNext(
             self: *Self,
             context: anytype,
             moved_forward: *usize,
         ) ?T {
-            assert(validateFilterContext(T, context, false) == .exists);
+            assert(validateFilterContext(T, context, .required) == .exists);
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
@@ -1155,14 +1189,26 @@ pub fn Iter(comptime T: type) type {
             return null;
         }
 
-        /// Ensure there is exactly 1 or 0 elements that match the given `filter`.
+        /// Ensure there is exactly 1 or 0 elements that matches the passed-in filter.
+        /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
+        /// Will scroll back in place.
         ///
-        /// Will scroll back in place
+        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn singleOrNull(
             self: *Self,
             context: anytype,
         ) error{MultipleElementsFound}!?T {
-            const ctx_type: CtxType = validateFilterContext(T, context, true);
+            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
 
             if (self.len() == 0) {
                 return null;
@@ -1194,14 +1240,26 @@ pub fn Iter(comptime T: type) type {
             return found;
         }
 
-        /// Ensure there is exactly 1 element that matches the passed-in `filter`.
+        /// Ensure there is exactly 1 element that matches the passed-in filter.
+        /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
+        /// Will scroll back in place.
         ///
-        /// Will scroll back in place
+        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn single(
             self: *Self,
             context: anytype,
         ) error{ NoElementsFound, MultipleElementsFound }!T {
-            _ = validateFilterContext(T, context, true);
+            _ = validateFilterContext(T, context, .optional);
             return try self.singleOrNull(context) orelse return error.NoElementsFound;
         }
 
@@ -1250,11 +1308,22 @@ pub fn Iter(comptime T: type) type {
             return self.any(&ComparerContext{ .ctx_item = item }) != null;
         }
 
-        /// Count the number of filtered items or simply count the items remaining.
+        /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
+        /// If you do not wish to apply a filter, pass in `null` or void literal `{}` to `context`.
         ///
-        /// Scrolls back in place.
+        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn count(self: *Self, context: anytype) usize {
-            const ctx_type: CtxType = validateFilterContext(T, context, true);
+            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
             if (self.len() == 0) {
                 return 0;
             }
@@ -1276,11 +1345,21 @@ pub fn Iter(comptime T: type) type {
             return result;
         }
 
-        /// Determine whether or not all elements fulfill a given filter.
+        /// Determine whether or not all elements fulfill a given filter. Scrolls back in place.
         ///
-        /// Scrolls back in place.
+        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn all(self: *Self, context: anytype) bool {
-            assert(validateFilterContext(T, context, false) == .exists);
+            assert(validateFilterContext(T, context, .required) == .exists);
             if (self.len() == 0) {
                 return true;
             }
@@ -1625,12 +1704,13 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
 }
 
 const CtxType = enum { exists, none };
+const Required = enum { required, optional };
 
-inline fn validateFilterContext(comptime T: type, context: anytype, comptime optional: bool) CtxType {
+inline fn validateFilterContext(comptime T: type, context: anytype, comptime required: Required) CtxType {
     const ContextType = @TypeOf(context);
     switch (@typeInfo(ContextType)) {
         .null, .void => {
-            if (!optional) {
+            if (required == .required) {
                 @compileError("Context is not optional. Expecting a pointer whose child type defines a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
             }
             return .none;

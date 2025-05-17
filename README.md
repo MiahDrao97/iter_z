@@ -348,57 +348,30 @@ while (iter.next()) |x| {
 
 ### Select
 Transform the elements in your iterator from one type `T` to another `TOther`.
-Takes in a function body with the following signature: `fn (T, anytype) TOther`.
-Finally, you can pass in additional arguments that will get passed in to your function.
+Takes in two arguments after the method receiver: `context` and `ownership`.
 
-Be sure to call `deinit()` after you are done.
-A pointer must be created since we're creating a lightweight closure: The args need to be stored on the allocated object.
-If this is a one-time call that's local in a function, see `selectStatic()`.
+`context` must be a pointer whose child type has the following method: `fn transform(@This(), T) TOther`.
+That pointer may optionally be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }` for `ownership`.
+If so, be sure to call `deinit()` after you are done.
+Otherwise, pass in `.none` if context points to something locally scoped or a constant value.
+
+The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
 ```zig
-const Allocator = @import("std").mem.Allocator;
+const std = @import("std");
+const Allocator = std.mem.Allocator;
 
-const ctx = struct {
-    pub fn toString(item: u32, allocator: anytype) Allocator.Error![]const u8 {
-        return std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{ item });
+const Context = struct {
+    allocator: Allocator,
+
+    pub fn transform(self: @This(), item: u32) Allocator.Error![]const u8 {
+        return std.fmt.allocPrint(self.allocator, "{d}", .{ item });
     }
 };
 
-const allocator = @import("std").testing.allocator;
+const allocator = std.testing.allocator;
 
 var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
-var strings = try iter.select(allocator, Allocator.Error![]const u8, ctx.toString, allocator);
-defer strings.deinit();
-
-while (strings.next()) |maybe_str| {
-    const str: []const u8 = try maybe_str;
-    defer allocator.free(str);
-
-    // "224", "7842", "12", "1837", "0924"
-}
-```
-
-### Select Static
-Transform the elements in your iterator from one type `T` to another `TOther`.
-Takes in a function body with the following signature: `fn (T, anytype) TOther`.
-Finally, you can pass in additional arguments that will get passed in to your function.
-
-This does not require allocation since it stores the args as a threadlocal container-level variable.
-Basically, args become static, and subsequent calls replace that value.
-This is perfect for local, one-time-use select iterators.
-```zig
-const Allocator = @import("std").mem.Allocator;
-
-const ctx = struct {
-    pub fn toString(item: u32, allocator: anytype) Allocator.Error![]const u8 {
-        return std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{ item });
-    }
-};
-
-const allocator = @import("std").testing.allocator;
-
-var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
-var strings = iter.selectStatic(Allocator.Error![]const u8, ctx.toString, allocator);
-// deinit() call omitted since the iterator owns no allocated memory
+var strings = iter.select(Allocator.Error![]const u8, &Context{ .allocator = allocator }, .none);
 
 while (strings.next()) |maybe_str| {
     const str: []const u8 = try maybe_str;
@@ -412,44 +385,28 @@ while (strings.next()) |maybe_str| {
 Filter the elements in your iterator, creating a new iterator with only those elements.
 If you simply need to iterate with a filter, use `filterNext(...)`.
 
-Because this function takes in arguments and works as a quasi-closure, an allocation must be made, so be sure to call `deinit()`.
-If no arguments are passed in or for one-time-use, `whereStatic()` accepts the same arguments but doesn't make an allocation.
+Like `select()`, this function takes in 2 arguments: `context` and `ownership`.
+`context` must be a pointer whose child type defines the following method: `fn filter(@This(), T) bool`.
+`ownership` can either take in `.none` if `context` points to something locally scoped or a constant,
+or it can be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }`.
+
+The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const hasNoRemainder = struct {
-    fn hasNoRemainder(item: u32, args: anytype) bool {
-        const divisor: u32 = args;
-        return @mod(item, divisor) == 0;
+const ZeroRemainder = struct {
+    divisor: u32,
+
+    pub fn filter(self: @This(), item: u32) bool {
+        return @mod(item, self.divisor) == 0;
     }
-}.hasNoRemainder;
+};
 
-var evens: Iter(u32) = try iter.where(@import("std").testing.allocator, hasNoRemainder, 2);
-defer evens.deinit();
-
+var evens: Iter(u32) = iter.where(&ZeroRemainder{ .divisor = 2 }, .none);
 while (evens.next()) |x| {
     // 2, 4
 }
 ```
-
-### Where Static
-If no arguments are passed in or for one-time-use, `whereStatic()` is ideal instead of `where()`.
-```zig
-var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
-
-const isEven = struct {
-    fn isEven(item: u32, _: anytype) bool {
-        return @mod(item, 2) == 0;
-    }
-}.isEven;
-
-var evens: Iter(u32) = iter.whereStatic(isEven, {});
-
-while (evens.next()) |x| {
-    // 2, 4
-}
-```
-
 
 ### Order By
 Pass in a comparer function to order your iterator in ascending or descending order.
@@ -484,18 +441,23 @@ while (ordered.next()) |x| {
 
 ### Any
 Peek at the next element with or without a filter.
+The filter context is exactly like the one in `where()`:
+A pointer whose child type defines the method `fn filter(@This(), T) bool`.
+Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
-const isEven = struct {
-    fn isEven(item: u32, _: anytype) bool {
-        return @mod(item, 2) == 0;
+const ZeroRemainder = struct {
+    divisor: u32,
+
+    pub fn filter(self: @This(), item: u8) bool {
+        return @mod(item, self.divisor) == 0;
     }
-}.isEven;
+};
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 // peek without filter
-_ = iter.any(null, {}); // 1
+_ = iter.any(null); // 1
 // peek with filter
-_ = iter.any(isEven, {}); // 2
+_ = iter.any(&ZeroRemainder{ .divisor = 2 }); // 2
 
 // iter hasn't moved
 _ = iter.next(); // 1
@@ -505,25 +467,33 @@ _ = iter.next(); // 1
 Calls `next()` until an element fulfills the given filter condition or returns null if none are found/iteration is over.
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
+The `context` is exactly like the one in `where()`:
+A pointer whose child type defines the method `fn filter(@This(), T) bool`.
+Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+
 NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
 const testing = @import("std").testing;
-const isEven = struct {
-    fn isEven(item: u8, _: anytype) bool {
-        return @mod(item, 2) == 0;
+const ZeroRemainder = struct {
+    divisor: u32,
+
+    pub fn filter(self: @This(), item: u8) bool {
+        return @mod(item, self.divisor) == 0;
     }
-}.isEven;
+};
 
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+
+    const filter: ZeroRemainder = .{ .divisor = 2 };
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(isEven, {}, &moved));
+    try testing.expectEqual(2, iter.filterNext(&filter, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
 
-    try testing.expectEqual(null, iter.filterNext(isEven, {}, &moved));
+    try testing.expectEqual(null, iter.filterNext(&filter, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(isEven, {}, &moved));
+    try testing.expectEqual(null, iter.filterNext(&filter, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 ```
@@ -561,8 +531,16 @@ const ctx = struct {
     }
 };
 
+const PrintNumber = struct{
+    allocator: Allocator,
+
+    pub fn transform(self: @This(), item: u8) Allocator.Error![]u8 {
+        return try std.fmt.allocPrint(self.allocator, "{d}", .{item});
+    }
+};
+
 var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-var iter = inner.select(Allocator.Error![]u8, numToStr, testing.allocator);
+var iter = inner.select(Allocator.Error![]u8, &PrintNumber{ .allocator = testing.allocator }, .none);
 
 var i: usize = 0;
 var test_failed: bool = false;
@@ -581,58 +559,71 @@ try testing.expect(i == 3);
 ### Count
 Count the number of elements in your iterator with or without a filter.
 This differs from `len()` because it will count the exact number of remaining elements with all transformations applied. Scrolls back in place.
+
+The filter context is exactly like the one in `where()`:
+A pointer whose child type defines the method `fn filter(@This(), T) bool`.
+Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
 const isEven = struct {
-    fn isEven(item: u32, _: anytype) bool {
+    pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
-}.isEven;
+};
 
-const evens = iter.whereStatic(isEven, {});
+const evens = iter.where(&isEven{}, .none);
 _ = evens.len(); // length is 5
-_ = evens.count(null, {}); // there are actually 2 elements that fulfill our condition
-_ = iter.count(isEven, {}); // 2 again
+_ = evens.count(null); // there are actually 2 elements that fulfill our condition
+
+// count on original iterator
+_ = iter.count(null); // 5
+_ = iter.count(&isEven{}); // 2
 ```
 
 ### All
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
+The filter context is exactly like the one in `where()`:
+A pointer whose child type defines the method `fn filter(@This(), T) bool`.
 ```zig
 const isEven = struct {
-    fn isEven(item: u32, _: anytype) bool {
+    pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
-}.isEven;
+};
 
 var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
-_ = iter.all(isEven, {}); // true
+_ = iter.all(&isEven{}); // true
 ```
 
 ### Single Or Null
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
+
+The filter context is exactly like the one in `where()`:
+A pointer whose child type defines the method `fn filter(@This(), T) bool`.
+Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.singleOrNull(null, {}); // '1'
+_ = iter.singleOrNull(null); // '1'
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.singleOrNull(null, {}); // error.MultipleElementsFound
+_ = iter.singleOrNull(null); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.singleOrNull(null, {}); // null
+_ = iter.singleOrNull(null); // null
 ```
 
 ### Single
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
 ```zig
 var iter: Iter(u8) = .from("1");
-_ = iter.single(null, {}); // '1'
+_ = iter.single(null); // '1'
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.single(null, {}); // error.MultipleElementsFound
+_ = iter.single(null); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.single(null, {}); // error.NoElementsFound
+_ = iter.single(null); // error.NoElementsFound
 ```
 
 ### Contains
