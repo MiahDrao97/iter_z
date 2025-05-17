@@ -1088,7 +1088,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             // just the right size: return our buffer
-            if (i == self.len()) {
+            if (i == buf.len) {
                 return buf;
             }
 
