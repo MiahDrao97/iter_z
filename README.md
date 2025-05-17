@@ -14,6 +14,7 @@ In your build.zig.zon, add the following dependency:
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
+            // or whichever release
             .url = "https://github.com/MiahDrao97/iter_z/archive/main.tar.gz",
             .hash = "", // get hash
         },
@@ -22,7 +23,7 @@ In your build.zig.zon, add the following dependency:
 }
 ```
 
-Get your hash from the following:
+Get your hash from the following (or whichever release, not necessarily main branch):
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
@@ -171,8 +172,8 @@ _ = iter.next(); // null
 ```
 
 ## Empty
-Default iterator with 0-length that always returns `null` on `next()` and `prev()`.
-All calls to `deinit()` to into an empty instance.
+Default iterator with 0 length that always returns `null` on `next()` and `prev()`.
+All calls to `deinit()` turn to into an empty instance.
 ```zig
 var iter: Iter(u8) = .empty;
 _ = iter.next(); // null
@@ -183,6 +184,7 @@ _ = iter.len(); // 0
 
 ### From
 Initializes an `Iter(T)` from a slice. It does not own the slice, and will not affect it while iterating.
+There are examples of this function all over this document.
 
 ### From Slice Owned
 Initializes an `Iter(T)` from a slice, except it owns the slice.
@@ -573,8 +575,8 @@ const isEven = struct {
 };
 
 const evens = iter.where(&isEven{}, .none);
-_ = evens.len(); // length is 5
-_ = evens.count(null); // there are actually 2 elements that fulfill our condition
+_ = evens.len(); // length is 5 because this iterator is transformed from another
+_ = evens.count(null); // 2 (because that's how many there are with the `where()` filter applied)
 
 // count on original iterator
 _ = iter.count(null); // 5
@@ -584,7 +586,7 @@ _ = iter.count(&isEven{}); // 2
 ### All
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
 The filter context is exactly like the one in `where()`:
-A pointer whose child type defines the method `fn filter(@This(), T) bool`.
+A pointer whose child type defines the method `fn filter(@This(), T) bool` filter applied.
 ```zig
 const isEven = struct {
     pub fn filter(_: @This(), item: u32) bool {
