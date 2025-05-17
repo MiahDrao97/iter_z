@@ -361,7 +361,7 @@ test "any" {
     result = iter.next();
     try testing.expect(result.? == 3);
 }
-test "single/single or none" {
+test "single/single or null" {
     var iter: Iter(u8) = .from("racecar");
     defer iter.deinit();
 
@@ -389,7 +389,7 @@ test "single/single or none" {
     try testing.expectError(error.MultipleElementsFound, iter.single(&HasChar{ .char = 'r' }));
 
     try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null));
-    try testing.expectError(error.MultipleElementsFound, iter.single(null));
+    try testing.expectError(error.MultipleElementsFound, iter.single({}));
 
     iter.deinit();
     iter = .from("");
