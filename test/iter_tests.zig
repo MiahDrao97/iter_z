@@ -9,10 +9,6 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const MultiArrayList = std.MultiArrayList;
 
-fn numToStr(num: u8, allocator: anytype) Allocator.Error![]u8 {
-    return try std.fmt.allocPrint(@as(Allocator, allocator), "{d}", .{num});
-}
-
 const isEven = struct {
     pub fn filter(_: isEven, num: u8) bool {
         return num % 2 == 0;
@@ -27,11 +23,21 @@ const ZeroRemainder = struct {
     }
 };
 
-fn getEventsIter(iter: *Iter(u8)) Iter(u8) {
-    // TODO : welp, runtime values are not persisted (as expected)
-    const divisor: u8 = 2;
-    return iter.where(&ZeroRemainder{ .divisor = divisor }, .none);
+fn getEventsIter(allocator: Allocator, iter: *Iter(u8)) Allocator.Error!Iter(u8) {
+    var divisor: u8 = 2;
+    _ = &divisor;
+    const ctx: *ZeroRemainder = try allocator.create(ZeroRemainder);
+    ctx.* = .{ .divisor = divisor };
+    return iter.where(ctx, .{ .owned = allocator });
 }
+
+const NumToString = struct {
+    buf: []u8,
+
+    pub fn transform(self: @This(), val: u8) []const u8 {
+        return std.fmt.bufPrint(self.buf, "{d}", .{val}) catch self.buf;
+    }
+};
 
 fn stringCompare(a: []const u8, b: []const u8) std.math.Order {
     // basically alphabetical
@@ -96,9 +102,20 @@ test "select" {
         }
     };
 
+    const NumToStringAlloc = struct {
+        allocator: Allocator,
+
+        pub fn transform(self: @This(), num: u8) Allocator.Error![]u8 {
+            return try std.fmt.allocPrint(self.allocator, "{d}", .{num});
+        }
+    };
+
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var iter = try inner.select(testing.allocator, Allocator.Error![]u8, numToStr, testing.allocator);
-    defer iter.deinit();
+    var iter: Iter(Allocator.Error![]u8) = inner.select(
+        Allocator.Error![]u8,
+        &NumToStringAlloc{ .allocator = testing.allocator },
+        .none,
+    );
 
     try testing.expect(iter.len() == 3);
 
@@ -148,7 +165,8 @@ test "where" {
 }
 test "does the context seg-fault?" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var filtered: Iter(u8) = getEventsIter(&iter);
+    var filtered: Iter(u8) = try getEventsIter(testing.allocator, &iter);
+    defer filtered.deinit();
 
     var clone: Iter(u8) = try filtered.clone(testing.allocator);
     defer clone.deinit();
@@ -330,20 +348,14 @@ test "any" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
-    const getEvens = struct {
-        fn getEvens(x: u8, _: anytype) bool {
-            return x % 2 == 0;
-        }
-    }.getEvens;
-
-    var result: ?u8 = iter.any(getEvens, {});
+    var result: ?u8 = iter.any(&isEven{});
     try testing.expect(result == null);
 
     // should have scrolled back
     result = iter.next();
     try testing.expect(result.? == 1);
 
-    result = iter.any(null, {});
+    result = iter.any(null);
     try testing.expect(result.? == 3);
 
     result = iter.next();
@@ -353,52 +365,47 @@ test "single/single or none" {
     var iter: Iter(u8) = .from("racecar");
     defer iter.deinit();
 
-    const ctx = struct {
-        fn filter1(char: u8, _: anytype) bool {
-            return char == 'e';
-        }
+    const HasChar = struct {
+        char: u8,
 
-        fn filter2(char: u8, _: anytype) bool {
-            return char == 'x';
-        }
-
-        fn filter3(char: u8, _: anytype) bool {
-            return char == 'r';
+        pub fn filter(self: @This(), x: u8) bool {
+            return self.char == x;
         }
     };
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(ctx.filter3, {}));
 
-    var result: ?u8 = try iter.singleOrNull(ctx.filter1, {});
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(&HasChar{ .char = 'r' }));
+
+    var result: ?u8 = try iter.singleOrNull(&HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    result = try iter.singleOrNull(ctx.filter2, {});
+    result = try iter.singleOrNull(&HasChar{ .char = 'x' });
     try testing.expect(result == null);
 
-    result = try iter.single(ctx.filter1, {});
+    result = try iter.single(&HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    try testing.expectError(error.NoElementsFound, iter.single(ctx.filter2, {}));
+    try testing.expectError(error.NoElementsFound, iter.single(&HasChar{ .char = 'x' }));
 
-    try testing.expectError(error.MultipleElementsFound, iter.single(ctx.filter3, {}));
+    try testing.expectError(error.MultipleElementsFound, iter.single(&HasChar{ .char = 'r' }));
 
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null, {}));
-    try testing.expectError(error.MultipleElementsFound, iter.single(null, {}));
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null));
+    try testing.expectError(error.MultipleElementsFound, iter.single(null));
 
     iter.deinit();
     iter = .from("");
 
-    try testing.expectError(error.NoElementsFound, iter.single(null, {}));
+    try testing.expectError(error.NoElementsFound, iter.single(null));
 
-    result = try iter.singleOrNull(null, {});
+    result = try iter.singleOrNull(null);
     try testing.expect(result == null);
 
     iter.deinit();
     iter = .from("x");
 
-    result = try iter.singleOrNull(null, {});
+    result = try iter.singleOrNull(null);
     try testing.expect(result.? == 'x');
 
-    result = try iter.single(null, {});
+    result = try iter.single(null);
     try testing.expect(result.? == 'x');
 }
 test "clone" {
@@ -446,20 +453,25 @@ test "clone with where static" {
     try testing.expectEqual(6, result);
 }
 test "clone with select" {
-    const ctx = struct {
-        fn asString(byte: u8, buf: anytype) []const u8 {
-            return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{byte}) catch unreachable;
-        }
+    const AsDigit = struct {
+        representation: enum { hex, decimal },
+        buffer: []u8,
 
-        fn asHexString(byte: u8, buf: anytype) []const u8 {
-            return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{byte}) catch unreachable;
+        pub fn transform(self: @This(), byte: u8) []const u8 {
+            return switch (self.representation) {
+                .decimal => std.fmt.bufPrint(self.buffer, "{d}", .{byte}) catch unreachable,
+                .hex => std.fmt.bufPrint(self.buffer, "0x{x:0>2}", .{byte}) catch unreachable,
+            };
         }
     };
-    var buf: [4]u8 = undefined;
 
+    var buf: [4]u8 = undefined;
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = try iter.select(testing.allocator, []const u8, ctx.asString, &buf);
-    defer outer.deinit();
+    var outer: Iter([]const u8) = iter.select(
+        []const u8,
+        &AsDigit{ .representation = .decimal, .buffer = &buf },
+        .none,
+    );
 
     try testing.expectEqualStrings("1", outer.next().?);
 
@@ -482,53 +494,11 @@ test "clone with select" {
     try testing.expectEqualStrings("4", outer.next().?);
 
     // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = try iter.select(testing.allocator, []const u8, ctx.asHexString, &buf);
-    defer alternate.deinit();
-    // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
-    try testing.expectEqualStrings("0x05", alternate.next().?);
-    try testing.expectEqualStrings("6", outer.next().?);
-
-    // check the clones
-    try testing.expectEqualStrings("4", clone.next().?);
-    try testing.expectEqualStrings("2", clone2.next().?);
-}
-test "select no alloc" {
-    const ctx = struct {
-        fn asString(byte: u8, buf: anytype) []const u8 {
-            return std.fmt.bufPrint(@as([]u8, buf), "{d}", .{byte}) catch unreachable;
-        }
-
-        fn asHexString(byte: u8, buf: anytype) []const u8 {
-            return std.fmt.bufPrint(@as([]u8, buf), "0x{x:0>2}", .{byte}) catch unreachable;
-        }
-    };
-    var buf: [4]u8 = undefined;
-
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = iter.selectStatic([]const u8, ctx.asString, &buf);
-
-    try testing.expectEqualStrings("1", outer.next().?);
-
-    var clone: Iter([]const u8) = try outer.cloneReset(testing.allocator);
-    defer clone.deinit();
-
-    try testing.expectEqualStrings("2", outer.next().?);
-    try testing.expectEqualStrings("3", outer.next().?);
-
-    try testing.expectEqualStrings("1", clone.next().?);
-
-    var clone2: Iter([]const u8) = try clone.cloneReset(testing.allocator);
-    defer clone2.deinit();
-
-    try testing.expectEqualStrings("2", clone.next().?);
-    try testing.expectEqualStrings("3", clone.next().?);
-
-    try testing.expectEqualStrings("1", clone2.next().?);
-
-    try testing.expectEqualStrings("4", outer.next().?);
-
-    // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = iter.selectStatic([]const u8, ctx.asHexString, &buf);
+    var alternate: Iter([]const u8) = iter.select(
+        []const u8,
+        &AsDigit{ .representation = .hex, .buffer = &buf },
+        .none,
+    );
     // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
     try testing.expectEqualStrings("0x05", alternate.next().?);
     try testing.expectEqualStrings("6", outer.next().?);
@@ -538,35 +508,37 @@ test "select no alloc" {
     try testing.expectEqualStrings("2", clone2.next().?);
 }
 test "Overlapping select edge cases" {
-    // force these args to be runtime values
-    const double_const: *u8 = try testing.allocator.create(u8);
-    defer testing.allocator.destroy(double_const);
-    double_const.* = 2;
+    // force these to be runtime values
+    var double_factor: u8 = 2;
+    _ = &double_factor;
 
-    const triple_const: *u8 = try testing.allocator.create(u8);
-    defer testing.allocator.destroy(triple_const);
-    triple_const.* = 3;
+    var triple_factor: u8 = 3;
+    _ = &triple_factor;
 
-    const ctx = struct {
-        fn multiply(in: u8, multiplier: anytype) u32 {
-            return in * @as(u8, multiplier);
-        }
+    const Multiplier = struct {
+        factor: u8,
 
-        fn getDoubler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
-            return try source.select(testing.allocator, u32, multiply, val.*);
-        }
-
-        fn getTripler(source: *Iter(u8), val: *u8) Allocator.Error!Iter(u32) {
-            return try source.select(testing.allocator, u32, multiply, val.*);
+        pub fn transform(self: @This(), val: u8) u32 {
+            return val * self.factor;
         }
     };
+
+    const getMultiplier = struct {
+        fn getMultiplier(allocator: Allocator, factor: u8, iterator: *Iter(u8)) Allocator.Error!Iter(u32) {
+            const multiplier: *Multiplier = try allocator.create(Multiplier);
+            multiplier.* = .{ .factor = factor };
+
+            return iterator.select(u32, multiplier, .{ .owned = allocator });
+        }
+    }.getMultiplier;
+
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 3));
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
-    var doubler: Iter(u32) = try ctx.getDoubler(&iter, double_const);
+    var doubler: Iter(u32) = try getMultiplier(testing.allocator, double_factor, &iter);
     defer doubler.deinit();
-    var tripler: Iter(u32) = try ctx.getTripler(&clone, triple_const);
+    var tripler: Iter(u32) = try getMultiplier(testing.allocator, triple_factor, &clone);
     defer tripler.deinit();
 
     var result: ?u32 = doubler.next();
@@ -745,28 +717,30 @@ test "from other" {
     try testing.expect(!iter.contains("blarf", stringCompare));
     try testing.expect(iter.contains("this", stringCompare));
 
-    const ctx = struct {
-        fn isOneCharLong(s: []const u8, _: anytype) bool {
-            return s.len == 1;
-        }
+    const StrLength = struct {
+        len: usize,
 
-        fn isTwoCharsLong(s: []const u8, _: anytype) bool {
-            return s.len == 2;
-        }
-
-        fn hasNoComma(s: []const u8, _: anytype) bool {
-            var inner_iter: Iter(u8) = .from(s);
-            return !inner_iter.contains(',', iter_z.autoCompare(u8));
+        pub fn filter(self: @This(), s: []const u8) bool {
+            return s.len == self.len;
         }
     };
 
-    try testing.expectEqual(1, iter.count(ctx.isOneCharLong, {}));
-    try testing.expectEqual(2, iter.count(ctx.isTwoCharsLong, {}));
-    try testing.expectEqual(6, iter.count(null, {}));
+    const HasNoChar = struct {
+        char: u8,
 
-    try testing.expect(iter.all(ctx.hasNoComma, {}));
-    try testing.expect(!iter.all(ctx.isOneCharLong, {}));
-    try testing.expect(!iter.all(ctx.isTwoCharsLong, {}));
+        pub fn filter(self: @This(), s: []const u8) bool {
+            var inner_iter: Iter(u8) = .from(s);
+            return !inner_iter.contains(self.char, iter_z.autoCompare(u8));
+        }
+    };
+
+    try testing.expectEqual(1, iter.count(&StrLength{ .len = 1 }));
+    try testing.expectEqual(2, iter.count(&StrLength{ .len = 2 }));
+    try testing.expectEqual(6, iter.count(null));
+
+    try testing.expect(iter.all(&HasNoChar{ .char = ',' }));
+    try testing.expect(!iter.all(&StrLength{ .len = 1 }));
+    try testing.expect(!iter.all(&StrLength{ .len = 2 }));
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
@@ -840,15 +814,8 @@ test "set index" {
     try iter.setIndex(2);
     try testing.expectEqual(3, iter.next());
 
-    const ctx = struct {
-        var buf: [1]u8 = undefined;
-        fn toString(byte: u8, _: anytype) []const u8 {
-            return std.fmt.bufPrint(&buf, "{d}", .{byte}) catch &buf;
-        }
-    };
-
-    var transformed: Iter([]const u8) = try iter.select(testing.allocator, []const u8, ctx.toString, {});
-    defer transformed.deinit();
+    var buffer: [1]u8 = undefined;
+    var transformed: Iter([]const u8) = iter.select([]const u8, &NumToString{ .buf = &buffer }, .none);
 
     try transformed.setIndex(5);
     try testing.expectEqualStrings("6", transformed.next().?);
@@ -882,21 +849,15 @@ test "allocator mix n match" {
     defer clone5.deinit();
 }
 test "filterNext()" {
-    const ctx = struct {
-        fn isEven(item: u8, _: anytype) bool {
-            return @mod(item, 2) == 0;
-        }
-    };
-
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(ctx.isEven, {}, &moved));
+    try testing.expectEqual(2, iter.filterNext(&isEven{}, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements
 
-    try testing.expectEqual(null, iter.filterNext(ctx.isEven, {}, &moved));
+    try testing.expectEqual(null, iter.filterNext(&isEven{}, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(ctx.isEven, {}, &moved));
+    try testing.expectEqual(null, iter.filterNext(&isEven{}, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 test "iter with optionals" {
