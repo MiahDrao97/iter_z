@@ -669,7 +669,6 @@ defer allocator.free(results);
 
 ### Fold
 Fold the iteration into a single value of a given type.
-Pass in an accumulator that is passed in every call of `mut`.
 
 Parameters:
 - `self`: method receiver (non-const pointer)
