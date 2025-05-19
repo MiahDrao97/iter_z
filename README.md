@@ -393,7 +393,11 @@ const Context = struct {
 const allocator = std.testing.allocator;
 
 var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
-var strings = iter.select(Allocator.Error![]const u8, &Context{ .allocator = allocator }, .none);
+var strings: Iter(Allocator.Error![]const u8) = iter.select(
+    Allocator.Error![]const u8,
+    &Context{ .allocator = allocator },
+    .none,
+);
 
 while (strings.next()) |maybe_str| {
     const str: []const u8 = try maybe_str;
@@ -427,8 +431,8 @@ const toString = struct{
 }.toString;
 
 var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
-var strings = try toString(allocator, &iter);
-defer strings.deinit();
+var strings: Iter(Allocator.Error![]const u8) = try toString(allocator, &iter);
+defer strings.deinit(); // frees the context pointer
 
 while (strings.next()) |maybe_str| {
     const str: []const u8 = try maybe_str;
@@ -628,7 +632,7 @@ const PrintNumber = struct{
 };
 
 var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-var iter = inner.select(Allocator.Error![]u8, &PrintNumber{ .allocator = testing.allocator }, .none);
+var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, &PrintNumber{ .allocator = testing.allocator }, .none);
 
 var i: usize = 0;
 var test_failed: bool = false;
