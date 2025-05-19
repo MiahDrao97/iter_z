@@ -1,10 +1,12 @@
 # iter_z
-Generic Iterator for Zig - Leveraging Zig 0.14.0
+Generic Iterator for Zig
 
 Inspired by C#'s `IEnumerable<T>` and the various transformations and filters provided by System.Linq.
 Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful queries.
 
 The main type is `Iter(T)`, which comes with several methods and queries.
+
+The latest release is `v0.2.0`, which leverages Zig 0.14.0.
 
 ## Use This Package
 In your build.zig.zon, add the following dependency:
@@ -14,8 +16,7 @@ In your build.zig.zon, add the following dependency:
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
-            // or whichever release
-            .url = "https://github.com/MiahDrao97/iter_z/archive/main.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.0.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -23,9 +24,9 @@ In your build.zig.zon, add the following dependency:
 }
 ```
 
-Get your hash from the following (or whichever release, not necessarily main branch):
+Get your hash from the following:
 ```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.0.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
@@ -52,6 +53,13 @@ pub fn build(b: *std.Build) void {
     // rest of your build def
 }
 ```
+
+## Previous Releases
+
+### v0.1.1
+Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in function bodies and args before the API was adapted to use the static dispatch
+pattern with context objects. The leap from 0.1.1 to 0.2.0 contains primarily API changes and the ability to create an iterator from a `MultiArrayList`
+as well as the removal of some public functions.
 
 ## Iter(T) Methods
 
