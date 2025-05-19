@@ -350,12 +350,12 @@ while (iter.next()) |x| {
 
 ### Select
 Transform the elements in your iterator from one type `T` to another `TOther`.
-Takes in two arguments after the method receiver: `context` and `ownership`.
+Takes in two arguments after the method receiver: `context_ptr` and `ownership`.
 
-`context` must be a pointer whose child type has the following method: `fn transform(@This(), T) TOther`.
+`context_ptr` must be a pointer whose child type has the following method: `fn transform(@This(), T) TOther`.
 That pointer may optionally be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }` for `ownership`.
 If so, be sure to call `deinit()` after you are done.
-Otherwise, pass in `.none` if context points to something locally scoped or a constant value.
+Otherwise, pass in `.none` if `context_ptr` points to something locally scoped or a constant value.
 
 The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
 ```zig
@@ -387,9 +387,9 @@ while (strings.next()) |maybe_str| {
 Filter the elements in your iterator, creating a new iterator with only those elements.
 If you simply need to iterate with a filter, use `filterNext(...)`.
 
-Like `select()`, this function takes in 2 arguments: `context` and `ownership`.
-`context` must be a pointer whose child type defines the following method: `fn filter(@This(), T) bool`.
-`ownership` can either take in `.none` if `context` points to something locally scoped or a constant,
+Like `select()`, this function takes in 2 arguments: `context_ptr` and `ownership`.
+`context_ptr` must be a pointer whose child type defines the following method: `fn filter(@This(), T) bool`.
+`ownership` can either take in `.none` if `context_ptr` points to something locally scoped or a constant,
 or it can be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }`.
 
 The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
@@ -669,12 +669,14 @@ defer allocator.free(results);
 
 ### Fold
 Fold the iteration into a single value of a given type.
+An initial value is fed into the context's `accumulate()` method with the current item, and the result is assigned to a collector value.
+That collector value is continued is each subsequent call to `accumulate()` with each element in the iterator, reassigning its value the result until the end of the enumeration.
 
 Parameters:
 - `self`: method receiver (non-const pointer)
 - `TOther` is the return type
-- `init` is the starting value of the accumulator
 - `context` must define the method `fn accumulate(@This(), TOther, T) TOther`
+- `init` is the starting value of the accumulator
 A classic example of fold would be summing all the values in the iteration.
 ```zig
 const Sum = struct {
@@ -685,11 +687,11 @@ const Sum = struct {
 };
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.fold(u16, 0, Sum{}); // 6
+_ = iter.fold(u16, Sum{}, 0); // 6
 ```
 
 ### Reduce
-Calls `fold()`, using the first element as the accumulator.
+Calls `fold()`, using the first element as the collector value.
 The return type will be the same as the element type.
 If there are no elements or iteration is over, will return null.
 - `context` must define the method `fn accumulate(@This(), T, T) T`
@@ -751,7 +753,7 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.reduce(iter_z.autoSum(u8)); // 6
 ```
 
-Here are the underlying contexts generated.
+Here are the underlying contexts generated:
 
 ### Auto Comparer
 This generated context is intended to be used with `orderBy()` or `toSortedSliceOwned()`.

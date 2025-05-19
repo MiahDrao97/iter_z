@@ -3,6 +3,7 @@ const iter_z = @import("iter_z");
 const util = iter_z.util;
 const testing = std.testing;
 const Iter = iter_z.Iter;
+const ContextOwnership = iter_z.ContextOwnership;
 const Allocator = std.mem.Allocator;
 const SplitIterator = std.mem.SplitIterator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -28,7 +29,7 @@ fn getEventsIter(allocator: Allocator, iter: *Iter(u8)) Allocator.Error!Iter(u8)
     _ = &divisor;
     const ctx: *ZeroRemainder = try allocator.create(ZeroRemainder);
     ctx.* = .{ .divisor = divisor };
-    return iter.where(ctx, .{ .owned = allocator });
+    return iter.where(ctx, ContextOwnership{ .owned = allocator });
 }
 
 const NumToString = struct {
@@ -530,7 +531,7 @@ test "Overlapping select edge cases" {
             const multiplier: *Multiplier = try allocator.create(Multiplier);
             multiplier.* = .{ .factor = factor };
 
-            return iterator.select(u32, multiplier, .{ .owned = allocator });
+            return iterator.select(u32, multiplier, ContextOwnership{ .owned = allocator });
         }
     }.getMultiplier;
 
