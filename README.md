@@ -403,6 +403,41 @@ while (strings.next()) |maybe_str| {
 }
 ```
 
+This second example shows how the pointer to the context type can be owned by the iterator,
+which allows you to safely return a transformed iterator from a function:
+```zig
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+const Context = struct {
+    allocator: Allocator,
+
+    pub fn transform(self: @This(), item: u32) Allocator.Error![]const u8 {
+        return std.fmt.allocPrint(self.allocator, "{d}", .{ item });
+    }
+};
+
+const allocator = std.testing.allocator;
+const toString = struct{
+    fn toString(allocator: Allocator, iter: Iter(u32)) Allocator.Error!Iter(Allocator.Error![]const u8) {
+        const ctx: *Context = try allocator.create(Context);
+        ctx.* = .{ .allocator = allocator };
+        return iter.select(Allocator.Error![]const u8, ctx, ContextOwnership{ .owned = allocator });
+    }
+}.toString;
+
+var iter: Iter(u32) = .from(&[_]u32{ 224, 7842, 12, 1837, 0924 });
+var strings = try toString(allocator, &iter);
+defer strings.deinit();
+
+while (strings.next()) |maybe_str| {
+    const str: []const u8 = try maybe_str;
+    defer allocator.free(str);
+
+    // "224", "7842", "12", "1837", "0924"
+}
+```
+
 ### Where
 Filter the elements in your iterator, creating a new iterator with only those elements.
 If you simply need to iterate with a filter, use `filterNext(...)`.
@@ -425,6 +460,36 @@ const ZeroRemainder = struct {
 };
 
 var evens: Iter(u32) = iter.where(&ZeroRemainder{ .divisor = 2 }, .none);
+while (evens.next()) |x| {
+    // 2, 4
+}
+```
+
+This second example shows how the pointer to the context type can be owned by the iterator,
+which allows you to safely return a transformed iterator from a function:
+```zig
+const Allocator = @import("std").mem.Allocator;
+
+var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
+
+const ZeroRemainder = struct {
+    divisor: u32,
+
+    pub fn filter(self: @This(), item: u32) bool {
+        return @mod(item, self.divisor) == 0;
+    }
+};
+
+const getEvens = struct {
+    fn getEvens(allocator: Allocator, inner: *Iter(u8)) Allocator.Error!Iter(u8) {
+        const ctx: *ZeroRemainder = try allocator.create(ZeroRemainder);
+        ctx.* = .{ .divisor = 2 };
+        return inner.where(ctx, ContextOwnership{ .owned = allocator });
+    }
+}.getEvens;
+
+var evens: Iter(u32) = try getEvens(@import("std").testing.allocator, &iter);
+defer evens.deinit(); // frees the context pointer
 while (evens.next()) |x| {
     // 2, 4
 }
@@ -627,14 +692,14 @@ The filter context is like the one in `where()`: It must define the method `fn f
 It does not need to be a pointer since it's not being stored as a member of a structure.
 Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
-var iter: Iter(u8) = .from("1");
-_ = iter.singleOrNull(null); // '1'
+var iter1: Iter(u8) = .from("1");
+_ = iter1.singleOrNull(null); // '1'
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.singleOrNull(null); // error.MultipleElementsFound
+_ = iter2.singleOrNull(null); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.singleOrNull(null); // null
+_ = iter3.singleOrNull(null); // null
 ```
 
 ### Single
@@ -644,14 +709,14 @@ The filter context is like the one in `where()`: It must define the method `fn f
 It does not need to be a pointer since it's not being stored as a member of a structure.
 Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
-var iter: Iter(u8) = .from("1");
-_ = iter.single(null); // '1'
+var iter1: Iter(u8) = .from("1");
+_ = iter1.single(null); // '1'
 
 var iter2: Iter(u8) = .from("12");
-_ = iter.single(null); // error.MultipleElementsFound
+_ = iter2.single(null); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
-_ = iter.single(null); // error.NoElementsFound
+_ = iter3.single(null); // error.NoElementsFound
 ```
 
 ### Contains
