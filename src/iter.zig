@@ -1108,6 +1108,7 @@ pub fn Iter(comptime T: type) type {
         /// If stable sorting is required, use `toSortedSliceOwnedStable()`.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
         pub fn toSortedSliceOwned(
@@ -1130,6 +1131,7 @@ pub fn Iter(comptime T: type) type {
         /// Enumerates into new sorted slice, using a stable sorting algorithm.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
         pub fn toSortedSliceOwnedStable(
@@ -1151,6 +1153,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
         /// This makes use of an unstable sorting algorith. If stable sorting is required, use `orderByStable()`.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderBy(
@@ -1164,6 +1167,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderByStable(
@@ -1176,8 +1180,10 @@ pub fn Iter(comptime T: type) type {
             return fromSliceOwned(allocator, slice, null);
         }
 
-        /// Determine if the sequence contains any element with a given filter (or pass in null to simply peek at the next element).
+        /// Determine if the sequence contains any element with a given filter context (or pass in null to simply peek at the next element).
         /// Always scrolls back in place.
+        ///
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
         pub fn any(self: *Self, context: anytype) ?T {
             const ctx_type: CtxType = validateFilterContext(T, context, .optional);
             if (self.len() == 0) {
@@ -1204,7 +1210,7 @@ pub fn Iter(comptime T: type) type {
         /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
         ///
-        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1236,7 +1242,7 @@ pub fn Iter(comptime T: type) type {
         /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
         /// Will scroll back in place.
         ///
-        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1287,7 +1293,7 @@ pub fn Iter(comptime T: type) type {
         /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
         /// Will scroll back in place.
         ///
-        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1334,7 +1340,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Determine if this iterator contains a specific `item`.
-        /// Uses the `comparer` function to determine if any element returns `.equal_to`.
+        /// `context` must define the method: `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// Scrolls back in place.
         pub fn contains(self: *Self, item: T, context: anytype) bool {
@@ -1355,7 +1361,7 @@ pub fn Iter(comptime T: type) type {
         /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
         /// If you do not wish to apply a filter, pass in `null` or void literal `{}` to `context`.
         ///
-        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1391,7 +1397,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Determine whether or not all elements fulfill a given filter. Scrolls back in place.
         ///
-        /// `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1423,9 +1429,8 @@ pub fn Iter(comptime T: type) type {
         /// Fold the iterator into a single value.
         /// - `self`: method receiver (non-const pointer)
         /// - `TOther` is the return type
+        /// - `context` must define the method `fn accumulate(@This(), TOther, T) TOther`
         /// - `init` is the starting value of the accumulator
-        /// - `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
-        /// - `args` are the additional arguments passed in. Pass in void literal `{}` if none are used.
         pub fn fold(
             self: *Self,
             comptime TOther: type,
@@ -1442,6 +1447,8 @@ pub fn Iter(comptime T: type) type {
 
         /// Calls `fold`, using the first element as `init`.
         /// Note that this returns null if the iterator is empty or at the end.
+        ///
+        /// `context` must define the method `fn accumulate(@This(), T, T) T`
         pub fn reduce(self: *Self, context: anytype) ?T {
             validateAccumulatorContext(T, T, context);
             const init: T = self.next() orelse return null;

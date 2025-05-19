@@ -853,13 +853,13 @@ test "allocator mix n match" {
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(&isEven{}, &moved));
+    try testing.expectEqual(2, iter.filterNext(isEven{}, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements
 
-    try testing.expectEqual(null, iter.filterNext(&isEven{}, &moved));
+    try testing.expectEqual(null, iter.filterNext(isEven{}, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(&isEven{}, &moved));
+    try testing.expectEqual(null, iter.filterNext(isEven{}, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 test "iter with optionals" {

@@ -411,13 +411,14 @@ while (evens.next()) |x| {
 ```
 
 ### Order By
-Pass in a comparer function to order your iterator in ascending or descending order.
+Pass in a comparer function to order your iterator in ascending or descending order (unstable sorting).
 Keep in mind that this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
+Stable sorting is available via `orderByStable()`.
 ```zig
 /// equivalent to `iter_z.autoCompare(u8)` -> written out as example
-/// see Auto Functions section; default comparer function is available to numeric types
-const compare = struct {
-    pub fn compare(a: u8, b: u8) std.math.Order {
+/// see Auto Contexts section; default comparer function is available to numeric types
+const Comparer = struct {
+    pub fn compare(_: @This(), a: u8, b: u8) std.math.Order {
         if (a < b) {
             return .lt;
         } else if (a > b) {
@@ -426,14 +427,14 @@ const compare = struct {
             return .eq;
         }
     }
-}.compare;
+};
 
 const allocator = @import("std").testing.allocator;
 
 const nums = [_]u8{ 8, 1, 4, 2, 6, 3, 7, 5 };
 var iter: Iter(u8) = .from(&nums);
 
-var ordered: Iter(u8) = try iter.orderBy(allocator, compare, .asc); // or .desc
+var ordered: Iter(u8) = try iter.orderBy(allocator, Comparer{}, .asc); // or .desc
 defer ordered.deinit();
 
 while (ordered.next()) |x| {
@@ -668,35 +669,35 @@ Parameters:
 - `self`: method receiver (non-const pointer)
 - `TOther` is the return type
 - `init` is the starting value of the accumulator
-- `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
-- `args` are the additional arguments passed in. Pass in void literal `{}` if none are used.
+- `context` must define the method `fn accumulate(@This(), TOther, T) TOther`
 A classic example of fold would be summing all the values in the iteration.
 ```zig
-const sum = struct {
+const Sum = struct {
     // note returning u16
-    fn sum(a: u8, b: u8, _: anytype) u16 {
+    pub fn accumulate(_: @This(), a: u16, b: u8) u16 {
         return a + b;
     }
-}.sum;
+};
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.fold(u16, 0, sum, {}); // 6
+_ = iter.fold(u16, 0, Sum{}); // 6
 ```
 
 ### Reduce
 Calls `fold()`, using the first element as the accumulator.
 The return type will be the same as the element type.
 If there are no elements or iteration is over, will return null.
+- `context` must define the method `fn accumulate(@This(), T, T) T`
 ```zig
-// written out as example; see Auto Functions section
-const sum = struct {
-    fn sum(a: u8, b: u8, _: anytype) u8 {
+// written out as example; see Auto Contexts section
+const Sum = struct {
+    pub fn accumulate(_: @This(), a: u8, b: u8) u8 {
         return a + b;
     }
-}.sum;
+};
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.reduce(sum, {}); // 6
+_ = iter.reduce(Sum{}); // 6
 ```
 
 ### Reverse
@@ -737,19 +738,21 @@ test "reverse reset" {
 }
 ```
 
-## Auto Functions
-Functions generated for numerical types for convenience.
+## Auto Contexts
+Context types generated for numerical types for convenience.
 Example usage:
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.reduce(iter_z.autoSum(u8), {}); // 6
+_ = iter.reduce(iter_z.autoSum(u8)); // 6
 ```
 
-Here are the underlying functions generated.
+Here are the underlying contexts generated.
 
 ### Auto Comparer
+This generated context is intended to be used with `orderBy()` or `toSortedSliceOwned()`.
+The compare method looks like this:
 ```zig
-fn compare(a: T, b: T) std.math.Order {
+pub fn compare(_: @This(), a: T, b: T) std.math.Order {
     if (a < b) {
         return .lt;
     } else if (a > b) {
@@ -760,16 +763,20 @@ fn compare(a: T, b: T) std.math.Order {
 ```
 
 ### Auto Sum
+This generated context is intended to be used with `fold()` or `reduce()` to sum the elements in the iterator.
+The accumulate method looks like this:
 ```zig
-fn sum(a: T, b: T, _: anytype) T {
+pub fn accumulate(_: @This(), a: T, b: T) T {
     // notice that we perform saturating addition
     return a +| b;
 }
 ```
 
 ### Auto Min
+This generated context is intended to be used with `fold()` or `reduce()` to return the minimum element in the iterator.
+The accumulate method looks like this:
 ```zig
-fn min(a: T, b: T, _: anytype) T {
+pub fn accumulate(_: @This(), a: T, b: T) T {
     if (a < b) {
         return a;
     }
@@ -778,8 +785,10 @@ fn min(a: T, b: T, _: anytype) T {
 ```
 
 ### Auto Max
+This generated context is intended to be used with `fold()` or `reduce()` to return the maximum element in the iterator.
+The accumulate method looks like this:
 ```zig
-fn max(a: T, b: T, _: anytype) T {
+pub fn accumulate(_: @This(), a: T, b: T) T {
     if (a > b) {
         return a;
     }
