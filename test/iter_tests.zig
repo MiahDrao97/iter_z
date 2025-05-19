@@ -373,20 +373,20 @@ test "single/single or null" {
         }
     };
 
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(&HasChar{ .char = 'r' }));
+    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(HasChar{ .char = 'r' }));
 
-    var result: ?u8 = try iter.singleOrNull(&HasChar{ .char = 'e' });
+    var result: ?u8 = try iter.singleOrNull(HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    result = try iter.singleOrNull(&HasChar{ .char = 'x' });
+    result = try iter.singleOrNull(HasChar{ .char = 'x' });
     try testing.expect(result == null);
 
-    result = try iter.single(&HasChar{ .char = 'e' });
+    result = try iter.single(HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    try testing.expectError(error.NoElementsFound, iter.single(&HasChar{ .char = 'x' }));
+    try testing.expectError(error.NoElementsFound, iter.single(HasChar{ .char = 'x' }));
 
-    try testing.expectError(error.MultipleElementsFound, iter.single(&HasChar{ .char = 'r' }));
+    try testing.expectError(error.MultipleElementsFound, iter.single(HasChar{ .char = 'r' }));
 
     try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null));
     try testing.expectError(error.MultipleElementsFound, iter.single({}));
@@ -734,13 +734,13 @@ test "from other" {
         }
     };
 
-    try testing.expectEqual(1, iter.count(&StrLength{ .len = 1 }));
-    try testing.expectEqual(2, iter.count(&StrLength{ .len = 2 }));
+    try testing.expectEqual(1, iter.count(StrLength{ .len = 1 }));
+    try testing.expectEqual(2, iter.count(StrLength{ .len = 2 }));
     try testing.expectEqual(6, iter.count(null));
 
-    try testing.expect(iter.all(&HasNoChar{ .char = ',' }));
-    try testing.expect(!iter.all(&StrLength{ .len = 1 }));
-    try testing.expect(!iter.all(&StrLength{ .len = 2 }));
+    try testing.expect(iter.all(HasNoChar{ .char = ',' }));
+    try testing.expect(!iter.all(StrLength{ .len = 1 }));
+    try testing.expect(!iter.all(StrLength{ .len = 2 }));
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
@@ -872,15 +872,15 @@ test "iter with optionals" {
 }
 test "reduce auto sum" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(6, iter.reduce(iter_z.autoSum(u8), {}));
+    try testing.expectEqual(6, iter.reduce(iter_z.autoSum(u8)));
 }
 test "reduce auto min" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(1, iter.reduce(iter_z.autoMin(u8), {}));
+    try testing.expectEqual(1, iter.reduce(iter_z.autoMin(u8)));
 }
 test "reduce auto max" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(3, iter.reduce(iter_z.autoMax(u8), {}));
+    try testing.expectEqual(3, iter.reduce(iter_z.autoMax(u8)));
 }
 test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });

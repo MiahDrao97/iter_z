@@ -911,7 +911,8 @@ pub fn Iter(comptime T: type) type {
 
         /// Returns a filtered iterator, using `self` as a source.
         ///
-        /// - `context` must be a pointer to a type that defines the method: `fn filter(@This(), T) bool`.
+        /// - `context` must be a *pointer* to a type that defines the method: `fn filter(@This(), T) bool`.
+        ///   That pointer will be stored as a type-erased pointer, hybridizing static and dynamic dispatch.
         /// - `ownership` indicates whether or not `context` is owned by this iterator.
         ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
         ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
@@ -927,7 +928,7 @@ pub fn Iter(comptime T: type) type {
         /// }
         /// ```
         pub fn where(self: *Self, context: anytype, ownership: ContextOwnership) Self {
-            assert(validateFilterContext(T, context, .required) == .exists);
+            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = true }) == .exists);
             const ContextType = @typeInfo(@TypeOf(context)).pointer.child;
             const ctx = struct {
                 fn implNext(c: *const anyopaque, inner: *anyopaque) ?T {
@@ -1177,7 +1178,7 @@ pub fn Iter(comptime T: type) type {
             context: anytype,
             moved_forward: *usize,
         ) ?T {
-            assert(validateFilterContext(T, context, .required) == .exists);
+            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = false }) == .exists);
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
@@ -1359,7 +1360,7 @@ pub fn Iter(comptime T: type) type {
         /// }
         /// ```
         pub fn all(self: *Self, context: anytype) bool {
-            assert(validateFilterContext(T, context, .required) == .exists);
+            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = false }) == .exists);
             if (self.len() == 0) {
                 return true;
             }
@@ -1385,22 +1386,23 @@ pub fn Iter(comptime T: type) type {
         pub fn fold(
             self: *Self,
             comptime TOther: type,
+            context: anytype,
             init: TOther,
-            mut: fn (TOther, T, anytype) TOther,
-            args: anytype,
         ) TOther {
+            validateAccumulatorContext(T, TOther, context);
             var result: TOther = init;
             while (self.next()) |x| {
-                result = mut(result, x, args);
+                result = context.accumulate(result, x);
             }
             return result;
         }
 
         /// Calls `fold`, using the first element as `init`.
         /// Note that this returns null if the iterator is empty or at the end.
-        pub fn reduce(self: *Self, mut: fn (T, T, anytype) T, args: anytype) ?T {
+        pub fn reduce(self: *Self, context: anytype) ?T {
+            validateAccumulatorContext(T, T, context);
             const init: T = self.next() orelse return null;
-            return self.fold(T, init, mut, args);
+            return self.fold(T, context, init);
         }
 
         /// Reverse the direction of the iterator.
@@ -1605,68 +1607,80 @@ fn CloneIter(comptime T: type) type {
 ///
 /// Take note that this function performs saturating addition.
 /// Rather than integer overflow, the sum returns `T`'s max value.
-pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
+pub inline fn autoSum(comptime T: type) SumContext(T) {
+    return .{};
+}
+
+fn SumContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn sum(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     return a +| b;
                 }
-            }.sum;
+            };
         },
         else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
 }
 
 /// Generate an auto-min function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
-pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
+pub inline fn autoMin(comptime T: type) MinContext(T) {
+    return .{};
+}
+
+fn MinContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn min(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (a < b) {
                         return a;
                     }
                     return b;
                 }
-            }.min;
+            };
         },
         .@"enum" => {
             return struct {
-                fn min(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (@intFromEnum(a) < @intFromEnum(b)) {
                         return a;
                     }
                     return b;
                 }
-            }.min;
+            };
         },
         else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
 }
 
 /// Generate an auto-max function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
-pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
+pub inline fn autoMax(comptime T: type) MaxContext(T) {
+    return .{};
+}
+
+fn MaxContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn max(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (a > b) {
                         return a;
                     }
                     return b;
                 }
-            }.max;
+            };
         },
         .@"enum" => {
             return struct {
-                fn max(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (@intFromEnum(a) > @intFromEnum(b)) {
                         return a;
                     }
                     return b;
                 }
-            }.max;
+            };
         },
         else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
@@ -1704,14 +1718,19 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
 }
 
 const CtxType = enum { exists, none };
-const Required = enum { required, optional };
+const Descriptor = struct {
+    required: bool,
+    must_be_ptr: bool,
 
-inline fn validateFilterContext(comptime T: type, context: anytype, comptime required: Required) CtxType {
+    const optional: Descriptor = .{ .required = false, .must_be_ptr = false };
+};
+
+inline fn validateFilterContext(comptime T: type, context: anytype, comptime descriptor: Descriptor) CtxType {
     const ContextType = @TypeOf(context);
     switch (@typeInfo(ContextType)) {
         .null, .void => {
-            if (required == .required) {
-                @compileError("Context is not optional. Expecting a pointer whose child type defines a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            if (descriptor.required) {
+                @compileError("Context is not optional. Expected a type defines a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
             }
             return .none;
         },
@@ -1719,22 +1738,28 @@ inline fn validateFilterContext(comptime T: type, context: anytype, comptime req
             switch (ptr.size) {
                 .one => {
                     const PtrType = ptr.child;
-                    if (!std.meta.hasMethod(PtrType, "filter")) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-                    }
-                    const method_info: Fn = @typeInfo(@TypeOf(@field(PtrType, "filter"))).@"fn";
-                    if (method_info.params.len != 2 or method_info.params[1].type != T) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-                    }
-                    if (method_info.return_type != bool) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-                    }
-                    return .exists;
+                    return validateFilterContext(T, @as(PtrType, undefined), Descriptor{ .must_be_ptr = false, .required = true });
                 },
-                else => @compileError("Expecting single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
         },
-        else => @compileError("Expecting single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
+        .optional => @compileError("Expected non-optional type, but found `" ++ @typeName(ContextType) ++ "`. Either pass in null or unwrap the optional."),
+        else => {
+            if (descriptor.must_be_ptr) {
+                @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`");
+            }
+            if (!std.meta.hasMethod(ContextType, "filter")) {
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "filter"))).@"fn";
+            if (method_info.params.len != 2 or method_info.params[1].type != T) {
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            if (method_info.return_type != bool) {
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            return .exists;
+        },
     }
 }
 
@@ -1756,9 +1781,42 @@ inline fn validateSelectContext(comptime T: type, comptime TOther: type, context
                         @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
                     }
                 },
-                else => @compileError("Expecting single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
         },
-        else => @compileError("Expecting single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
+        .optional => @compileError("Expected single item pointer, but found `" ++ @typeName(ContextType) ++ "`. Either pass in null or unwrap the optional."),
+        else => @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
+    }
+}
+
+inline fn validateAccumulatorContext(comptime T: type, comptime TOther: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .one => {
+                    const PtrType = ptr.child;
+                    validateAccumulatorContext(T, TOther, @as(PtrType, undefined));
+                },
+                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+            }
+        },
+        else => {
+            if (!std.meta.hasMethod(ContextType, "accumulate")) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "accumulate"))).@"fn";
+            // zig fmt: off
+            if (method_info.params.len != 3
+                or method_info.params[1].type != TOther
+                or method_info.params[2].type != T
+            ) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not define a method `accumulate` that takes in `" ++ @typeName(TOther) ++  "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+            // zig fmt: on
+            if (method_info.return_type != TOther) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+        }
     }
 }
