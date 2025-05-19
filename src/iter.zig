@@ -785,11 +785,11 @@ pub fn Iter(comptime T: type) type {
         pub fn select(
             self: *Iter(T),
             comptime TOther: type,
-            context: anytype,
+            context_ptr: anytype,
             ownership: ContextOwnership,
         ) Iter(TOther) {
-            validateSelectContext(T, TOther, context);
-            const ContextType = @typeInfo(@TypeOf(context)).pointer.child;
+            validateSelectContext(T, TOther, context_ptr);
+            const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
             const ctx = struct {
                 fn implNext(c: *const anyopaque, inner: *anyopaque) ?TOther {
                     const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
@@ -888,7 +888,7 @@ pub fn Iter(comptime T: type) type {
             return Iter(TOther){
                 .variant = Iter(TOther).Variant{
                     .context = ContextIterable(TOther){
-                        .context = context,
+                        .context = context_ptr,
                         .iter = self,
                         .v_table = &ContextIterable(TOther).ContextVTable{
                             .next_fn = &ctx.implNext,
@@ -927,9 +927,9 @@ pub fn Iter(comptime T: type) type {
         ///     };
         /// }
         /// ```
-        pub fn where(self: *Self, context: anytype, ownership: ContextOwnership) Self {
-            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = true }) == .exists);
-            const ContextType = @typeInfo(@TypeOf(context)).pointer.child;
+        pub fn where(self: *Self, context_ptr: anytype, ownership: ContextOwnership) Self {
+            assert(validateFilterContext(T, context_ptr, Descriptor{ .required = true, .must_be_ptr = true }) == .exists);
+            const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
             const ctx = struct {
                 fn implNext(c: *const anyopaque, inner: *anyopaque) ?T {
                     const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
@@ -1030,7 +1030,7 @@ pub fn Iter(comptime T: type) type {
             return Self{
                 .variant = Variant{
                     .context = ContextIterable(T){
-                        .context = context,
+                        .context = context_ptr,
                         .iter = self,
                         .v_table = &ContextIterable(T).ContextVTable{
                             .next_fn = &ctx.implNext,
