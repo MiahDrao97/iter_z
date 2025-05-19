@@ -1,9 +1,9 @@
 const std = @import("std");
-pub const util = @import("util.zig");
 const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
 const Fn = std.builtin.Type.Fn;
 const assert = std.debug.assert;
+pub const util = @import("util.zig");
 
 pub const Ordering = enum { asc, desc };
 
@@ -1104,7 +1104,8 @@ pub fn Iter(comptime T: type) type {
             return try allocator.dupe(T, buf[0..i]);
         }
 
-        /// Enumerates into new sorted slice.
+        /// Enumerates into new sorted slice. This uses an unstable sorting algorithm.
+        /// If stable sorting is required, use `toSortedSliceOwnedStable()`.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
         ///
@@ -1112,25 +1113,66 @@ pub fn Iter(comptime T: type) type {
         pub fn toSortedSliceOwned(
             self: *Self,
             allocator: Allocator,
-            comparer: fn (T, T) std.math.Order,
+            context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
+            validateCompareContext(T, context);
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
+            const sort_ctx: SortContext(T, @TypeOf(context)) = .{
+                .slice = slice,
+                .ctx = context,
+                .ordering = ordering,
+            };
+            std.sort.heap(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
+            return slice;
+        }
 
-            util.quickSort(T, slice, comparer, ordering);
+        /// Enumerates into new sorted slice, using a stable sorting algorithm.
+        /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
+        /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
+        ///
+        /// Caller owns the resulting slice.
+        pub fn toSortedSliceOwnedStable(
+            self: *Self,
+            allocator: Allocator,
+            context: anytype,
+            ordering: Ordering,
+        ) Allocator.Error![]T {
+            validateCompareContext(T, context);
+            const slice: []T = try self.enumerateToOwnedSlice(allocator);
+            const sort_ctx: SortContext(T, @TypeOf(context)) = .{
+                .slice = slice,
+                .ctx = context,
+                .ordering = ordering,
+            };
+            std.sort.insertion(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
             return slice;
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
+        /// This makes use of an unstable sorting algorith. If stable sorting is required, use `orderByStable()`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderBy(
             self: *Self,
             allocator: Allocator,
-            comparer: fn (T, T) std.math.Order,
+            context: anytype,
             ordering: Ordering,
         ) Allocator.Error!Self {
-            const slice: []T = try self.toSortedSliceOwned(allocator, comparer, ordering);
+            const slice: []T = try self.toSortedSliceOwned(allocator, context, ordering);
+            return fromSliceOwned(allocator, slice, null);
+        }
+
+        /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
+        ///
+        /// This iterator needs its underlying slice freed by calling `deinit()`.
+        pub fn orderByStable(
+            self: *Self,
+            allocator: Allocator,
+            context: anytype,
+            ordering: Ordering,
+        ) Allocator.Error!Self {
+            const slice: []T = try self.toSortedSliceOwnedStable(allocator, context, ordering);
             return fromSliceOwned(allocator, slice, null);
         }
 
@@ -1295,18 +1337,19 @@ pub fn Iter(comptime T: type) type {
         /// Uses the `comparer` function to determine if any element returns `.equal_to`.
         ///
         /// Scrolls back in place.
-        pub fn contains(self: *Self, item: T, comparer: fn (T, T) std.math.Order) bool {
+        pub fn contains(self: *Self, item: T, context: anytype) bool {
+            validateCompareContext(T, context);
             const ComparerContext = struct {
                 ctx_item: T,
 
                 pub fn filter(ctx: @This(), x: T) bool {
-                    return switch (comparer(ctx.ctx_item, x)) {
+                    return switch (context.compare(ctx.ctx_item, x)) {
                         .eq => true,
                         else => false,
                     };
                 }
             };
-            return self.any(&ComparerContext{ .ctx_item = item }) != null;
+            return self.any(ComparerContext{ .ctx_item = item }) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
@@ -1607,11 +1650,11 @@ fn CloneIter(comptime T: type) type {
 ///
 /// Take note that this function performs saturating addition.
 /// Rather than integer overflow, the sum returns `T`'s max value.
-pub inline fn autoSum(comptime T: type) SumContext(T) {
+pub inline fn autoSum(comptime T: type) AutoSumContext(T) {
     return .{};
 }
 
-fn SumContext(comptime T: type) type {
+fn AutoSumContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
@@ -1625,11 +1668,11 @@ fn SumContext(comptime T: type) type {
 }
 
 /// Generate an auto-min function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
-pub inline fn autoMin(comptime T: type) MinContext(T) {
+pub inline fn autoMin(comptime T: type) AutoMinContext(T) {
     return .{};
 }
 
-fn MinContext(comptime T: type) type {
+fn AutoMinContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
@@ -1656,11 +1699,11 @@ fn MinContext(comptime T: type) type {
 }
 
 /// Generate an auto-max function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
-pub inline fn autoMax(comptime T: type) MaxContext(T) {
+pub inline fn autoMax(comptime T: type) AutoMaxContext(T) {
     return .{};
 }
 
-fn MaxContext(comptime T: type) type {
+fn AutoMaxContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
@@ -1686,12 +1729,16 @@ fn MaxContext(comptime T: type) type {
     }
 }
 
-/// Generates a simple comparer function for a numeric or enum type `T`.
-pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
+/// Generates a simple comparer for a numeric or enum type `T`.
+pub inline fn autoCompare(comptime T: type) AutoCompareContext(T) {
+    return .{};
+}
+
+fn AutoCompareContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn compare(a: T, b: T) std.math.Order {
+                pub fn compare(_: @This(), a: T, b: T) std.math.Order {
                     if (a < b) {
                         return .lt;
                     } else if (a > b) {
@@ -1699,11 +1746,11 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
                     }
                     return .eq;
                 }
-            }.compare;
+            };
         },
         .@"enum" => {
             return struct {
-                fn compare(a: T, b: T) std.math.Order {
+                pub fn compare(_: @This(), a: T, b: T) std.math.Order {
                     if (@intFromEnum(a) < @intFromEnum(b)) {
                         return .lt;
                     } else if (@intFromEnum(a) > @intFromEnum(b)) {
@@ -1711,10 +1758,26 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
                     }
                     return .eq;
                 }
-            }.compare;
+            };
         },
-        else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
+        else => @compileError("Cannot generate auto-compare context with non-numeric type '" ++ @typeName(T) ++ "'."),
     }
+}
+
+fn SortContext(comptime T: type, comptime TContext: type) type {
+    return struct {
+        ctx: TContext,
+        slice: []T,
+        ordering: Ordering,
+
+        pub fn lessThan(self: @This(), a: T, b: T) bool {
+            const comparison: std.math.Order = self.ctx.compare(a, b);
+            return switch (self.ordering) {
+                .asc => comparison == .lt,
+                .desc => comparison == .gt,
+            };
+        }
+    };
 }
 
 const CtxType = enum { exists, none };
@@ -1737,8 +1800,7 @@ inline fn validateFilterContext(comptime T: type, context: anytype, comptime des
         .pointer => |ptr| {
             switch (ptr.size) {
                 .one => {
-                    const PtrType = ptr.child;
-                    return validateFilterContext(T, @as(PtrType, undefined), Descriptor{ .must_be_ptr = false, .required = true });
+                    return validateFilterContext(T, context.*, Descriptor{ .must_be_ptr = false, .required = true });
                 },
                 else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
@@ -1749,14 +1811,14 @@ inline fn validateFilterContext(comptime T: type, context: anytype, comptime des
                 @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`");
             }
             if (!std.meta.hasMethod(ContextType, "filter")) {
-                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
             }
             const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "filter"))).@"fn";
             if (method_info.params.len != 2 or method_info.params[1].type != T) {
-                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
             }
             if (method_info.return_type != bool) {
-                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
             }
             return .exists;
         },
@@ -1771,14 +1833,14 @@ inline fn validateSelectContext(comptime T: type, comptime TOther: type, context
                 .one => {
                     const PtrType = ptr.child;
                     if (!std.meta.hasMethod(PtrType, "transform")) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
                     }
                     const method_info: Fn = @typeInfo(@TypeOf(@field(PtrType, "transform"))).@"fn";
                     if (method_info.params.len != 2 or method_info.params[1].type != T) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
                     }
                     if (method_info.return_type != TOther) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
                     }
                 },
                 else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
@@ -1794,16 +1856,13 @@ inline fn validateAccumulatorContext(comptime T: type, comptime TOther: type, co
     switch (@typeInfo(ContextType)) {
         .pointer => |ptr| {
             switch (ptr.size) {
-                .one => {
-                    const PtrType = ptr.child;
-                    validateAccumulatorContext(T, TOther, @as(PtrType, undefined));
-                },
+                .one => validateAccumulatorContext(T, TOther, context.*),
                 else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
         },
         else => {
             if (!std.meta.hasMethod(ContextType, "accumulate")) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
             }
             const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "accumulate"))).@"fn";
             // zig fmt: off
@@ -1811,11 +1870,35 @@ inline fn validateAccumulatorContext(comptime T: type, comptime TOther: type, co
                 or method_info.params[1].type != TOther
                 or method_info.params[2].type != T
             ) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not define a method `accumulate` that takes in `" ++ @typeName(TOther) ++  "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++  "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
             }
             // zig fmt: on
             if (method_info.return_type != TOther) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+        }
+    }
+}
+
+inline fn validateCompareContext(comptime T: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => validateCompareContext(T, context.*),
+        else => {
+            if (!std.meta.hasMethod(ContextType, "compare")) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "compare"))).@"fn";
+            // zig fmt: off
+            if (method_info.params.len != 3
+                or method_info.params[1].type != T
+                or method_info.params[2].type != T
+            ) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
+            }
+            // zig fmt: on
+            if (method_info.return_type != std.math.Order) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
             }
         }
     }

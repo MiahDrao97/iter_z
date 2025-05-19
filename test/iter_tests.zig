@@ -39,24 +39,26 @@ const NumToString = struct {
     }
 };
 
-fn stringCompare(a: []const u8, b: []const u8) std.math.Order {
-    // basically alphabetical
-    for (0..@min(a.len, b.len)) |i| {
-        if (a[i] > b[i]) {
-            return .gt;
-        } else if (a[i] < b[i]) {
+const StringCompare = struct {
+    pub fn compare(_: @This(), a: []const u8, b: []const u8) std.math.Order {
+        // basically alphabetical
+        for (0..@min(a.len, b.len)) |i| {
+            if (a[i] > b[i]) {
+                return .gt;
+            } else if (a[i] < b[i]) {
+                return .lt;
+            }
+        }
+        // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
+        if (a.len > b.len) {
             return .lt;
+        } else if (a.len < b.len) {
+            return .gt;
+        } else {
+            return .eq;
         }
     }
-    // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
-    if (a.len > b.len) {
-        return .lt;
-    } else if (a.len < b.len) {
-        return .gt;
-    } else {
-        return .eq;
-    }
-}
+};
 
 test "from" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -713,9 +715,9 @@ test "from other" {
 
     iter.reset();
 
-    try testing.expect(iter.contains("a", stringCompare));
-    try testing.expect(!iter.contains("blarf", stringCompare));
-    try testing.expect(iter.contains("this", stringCompare));
+    try testing.expect(iter.contains("a", StringCompare{}));
+    try testing.expect(!iter.contains("blarf", StringCompare{}));
+    try testing.expect(iter.contains("this", StringCompare{}));
 
     const StrLength = struct {
         len: usize,
