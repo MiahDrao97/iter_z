@@ -445,8 +445,8 @@ while (ordered.next()) |x| {
 ### Any
 Peek at the next element with or without a filter.
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
-It does not need to be a pointer since it's not being stored as a member of structure.
-Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+It does not need to be a pointer since it's not being stored as a member of a structure.
+Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
 const ZeroRemainder = struct {
     divisor: u32,
@@ -471,8 +471,8 @@ Calls `next()` until an element fulfills the given filter condition or returns n
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
-It does not need to be a pointer since it's not being stored as a member of structure.
-Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+It does not need to be a pointer since it's not being stored as a member of a structure.
+Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 
 NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
@@ -564,47 +564,48 @@ Count the number of elements in your iterator with or without a filter.
 This differs from `len()` because it will count the exact number of remaining elements with all transformations applied. Scrolls back in place.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
-It does not need to be a pointer since it's not being stored as a member of structure.
-Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+It does not need to be a pointer since it's not being stored as a member of a structure.
+Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const isEven = struct {
+const IsEven = struct {
     pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
 };
 
-const evens = iter.where(&isEven{}, .none);
+const filter: IsEven = .{};
+const evens = iter.where(&filter, .none);
 _ = evens.len(); // length is 5 because this iterator is transformed from another
 _ = evens.count(null); // 2 (because that's how many there are with the `where()` filter applied)
 
 // count on original iterator
 _ = iter.count(null); // 5
-_ = iter.count(&isEven{}); // 2
+_ = iter.count(filter); // 2
 ```
 
 ### All
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
-It does not need to be a pointer since it's not being stored as a member of structure.
+It does not need to be a pointer since it's not being stored as a member of a structure.
 ```zig
-const isEven = struct {
+const IsEven = struct {
     pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
 };
 
 var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
-_ = iter.all(&isEven{}); // true
+_ = iter.all(IsEven{}); // true
 ```
 
 ### Single Or Null
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
-It does not need to be a pointer since it's not being stored as a member of structure.
-Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+It does not need to be a pointer since it's not being stored as a member of a structure.
+Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u8) = .from("1");
 _ = iter.singleOrNull(null); // '1'
@@ -620,8 +621,8 @@ _ = iter.singleOrNull(null); // null
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
-It does not need to be a pointer since it's not being stored as a member of structure.
-Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+It does not need to be a pointer since it's not being stored as a member of a structure.
+Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u8) = .from("1");
 _ = iter.single(null); // '1'

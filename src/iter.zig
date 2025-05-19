@@ -1812,6 +1812,7 @@ inline fn validateFilterContext(comptime T: type, context: anytype, comptime des
                 else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
         },
+        // separate error for optionals
         .optional => @compileError("Expected non-optional type, but found `" ++ @typeName(ContextType) ++ "`. Either pass in null or unwrap the optional."),
         else => {
             if (descriptor.must_be_ptr) {
@@ -1853,7 +1854,6 @@ inline fn validateSelectContext(comptime T: type, comptime TOther: type, context
                 else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
         },
-        .optional => @compileError("Expected single item pointer, but found `" ++ @typeName(ContextType) ++ "`. Either pass in null or unwrap the optional."),
         else => @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
     }
 }
