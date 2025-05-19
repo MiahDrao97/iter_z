@@ -54,12 +54,24 @@ pub fn build(b: *std.Build) void {
 }
 ```
 
-## Previous Releases
+## Other Releases
+
+### Main
+The main branch is generally unstable, intended to change as the Zig language evolves.
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
+```
 
 ### v0.1.1
-Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in function bodies and args before the API was adapted to use the static dispatch
-pattern with context objects. The leap from 0.1.1 to 0.2.0 contains primarily API changes and the ability to create an iterator from a `MultiArrayList`
-as well as the removal of some public functions.
+Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in function bodies and args before the API was adapted to use the static
+dispatch pattern with context objects. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
+`MultiArrayList`. Some public functions present in this release were removed in 0.2.0, such as the methods on `AnonymousIterable(T)` (besides `iter()`)
+and the quick-sort function in `util.zig`.
+
+Fetch it with the following command if you wish to use the old API:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.1.1.tar.gz
+```
 
 ## Iter(T) Methods
 
