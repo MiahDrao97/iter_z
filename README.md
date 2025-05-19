@@ -444,9 +444,9 @@ while (ordered.next()) |x| {
 
 ### Any
 Peek at the next element with or without a filter.
-The filter context is exactly like the one in `where()`:
-A pointer whose child type defines the method `fn filter(@This(), T) bool`.
-Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
+It does not need to be a pointer since it's not being stored as a member of structure.
+Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
 const ZeroRemainder = struct {
     divisor: u32,
@@ -460,7 +460,7 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 // peek without filter
 _ = iter.any(null); // 1
 // peek with filter
-_ = iter.any(&ZeroRemainder{ .divisor = 2 }); // 2
+_ = iter.any(ZeroRemainder{ .divisor = 2 }); // 2
 
 // iter hasn't moved
 _ = iter.next(); // 1
@@ -470,9 +470,9 @@ _ = iter.next(); // 1
 Calls `next()` until an element fulfills the given filter condition or returns null if none are found/iteration is over.
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
-The `context` is exactly like the one in `where()`:
-A pointer whose child type defines the method `fn filter(@This(), T) bool`.
-Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
+It does not need to be a pointer since it's not being stored as a member of structure.
+Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 
 NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
@@ -490,13 +490,13 @@ test "filterNext()" {
 
     const filter: ZeroRemainder = .{ .divisor = 2 };
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(&filter, &moved));
+    try testing.expectEqual(2, iter.filterNext(filter, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
 
-    try testing.expectEqual(null, iter.filterNext(&filter, &moved));
+    try testing.expectEqual(null, iter.filterNext(filter, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(&filter, &moved));
+    try testing.expectEqual(null, iter.filterNext(filter, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 ```
@@ -563,9 +563,9 @@ try testing.expect(i == 3);
 Count the number of elements in your iterator with or without a filter.
 This differs from `len()` because it will count the exact number of remaining elements with all transformations applied. Scrolls back in place.
 
-The filter context is exactly like the one in `where()`:
-A pointer whose child type defines the method `fn filter(@This(), T) bool`.
-Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
+It does not need to be a pointer since it's not being stored as a member of structure.
+Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
@@ -586,8 +586,8 @@ _ = iter.count(&isEven{}); // 2
 
 ### All
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
-The filter context is exactly like the one in `where()`:
-A pointer whose child type defines the method `fn filter(@This(), T) bool` filter applied.
+The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
+It does not need to be a pointer since it's not being stored as a member of structure.
 ```zig
 const isEven = struct {
     pub fn filter(_: @This(), item: u32) bool {
@@ -602,9 +602,9 @@ _ = iter.all(&isEven{}); // true
 ### Single Or Null
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 
-The filter context is exactly like the one in `where()`:
-A pointer whose child type defines the method `fn filter(@This(), T) bool`.
-Since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
+The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
+It does not need to be a pointer since it's not being stored as a member of structure.
+Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u8) = .from("1");
 _ = iter.singleOrNull(null); // '1'
@@ -618,6 +618,10 @@ _ = iter.singleOrNull(null); // null
 
 ### Single
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
+
+The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
+It does not need to be a pointer since it's not being stored as a member of structure.
+Also, since this filter is optional, you may also pass in `null` or void literal `{}` to use no filter.
 ```zig
 var iter: Iter(u8) = .from("1");
 _ = iter.single(null); // '1'
@@ -630,10 +634,11 @@ _ = iter.single(null); // error.NoElementsFound
 ```
 
 ### Contains
-Pass in a comparer function. Returns true if any element returns `.eq`. Scrolls back in place.
+Pass in a comparer context. Returns true if any element returns `.eq`. Scrolls back in place.
+`context` must define the method `fn compare(@This(), T, T) std.math.Order`.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.contains(1, iter_z.autoCompare(u8), {}); // true
+_ = iter.contains(1, iter_z.autoCompare(u8)); // true
 ```
 
 ### Enumerate To Buffer
