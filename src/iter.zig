@@ -1,7 +1,9 @@
 const std = @import("std");
-pub const util = @import("util.zig");
 const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
+const Fn = std.builtin.Type.Fn;
+const assert = std.debug.assert;
+pub const util = @import("util.zig");
 
 pub const Ordering = enum { asc, desc };
 
@@ -377,6 +379,41 @@ fn ConcatIterable(comptime T: type) type {
     };
 }
 
+/// Whether or not the context is owned by the iterator
+pub const ContextOwnership = union(enum) {
+    /// No ownership; the context is locally scoped or owned by something else
+    none,
+    /// Owned by the iterator, and this allocator will destroy the context on `deinit()`
+    owned: Allocator,
+};
+
+fn ContextIterable(comptime T: type) type {
+    return struct {
+        context: *const anyopaque,
+        iter: *anyopaque,
+        v_table: *const ContextVTable,
+        ownership: Ownership,
+
+        const Ownership = union(enum) {
+            none,
+            owns_context: Allocator,
+            owns_iter: Allocator,
+            owns_both: Allocator,
+        };
+
+        const ContextVTable = struct {
+            next_fn: *const fn (*const anyopaque, *anyopaque) ?T,
+            prev_fn: *const fn (*const anyopaque, *anyopaque) ?T,
+            get_index_fn: *const fn (*anyopaque) ?usize,
+            set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
+            reset_fn: *const fn (*anyopaque) void,
+            len_fn: *const fn (*anyopaque) usize,
+            clone_fn: *const fn (*const anyopaque, *anyopaque, *const ContextVTable, Ownership, Allocator) Allocator.Error!Iter(T),
+            deinit_fn: *const fn (*const anyopaque, *anyopaque, Ownership) void,
+        };
+    };
+}
+
 /// This struct is an iterator that offers some basic filtering and transformations.
 pub fn Iter(comptime T: type) type {
     return struct {
@@ -386,6 +423,7 @@ pub fn Iter(comptime T: type) type {
             slice: SliceIterable(T),
             concatenated: ConcatIterable(T),
             anonymous: AnonymousIterable(T),
+            context: ContextIterable(T),
             empty: void,
         };
 
@@ -403,6 +441,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| return c.next(),
                 .anonymous => |a| return a.v_table.next_fn(a.ptr),
+                .context => |c| return c.v_table.next_fn(c.context, c.iter),
                 .empty => return null,
             }
         }
@@ -420,6 +459,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| return c.prev(),
                 .anonymous => |a| return a.v_table.prev_fn(a.ptr),
+                .context => |c| return c.v_table.prev_fn(c.context, c.iter),
                 .empty => return null,
             }
         }
@@ -429,6 +469,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| s.idx = index,
                 .anonymous => |a| try a.v_table.set_index_fn(a.ptr, index),
+                .context => |c| return c.v_table.set_index_fn(c.iter, index),
                 else => return error.NoIndexing,
             }
         }
@@ -439,6 +480,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |*s| s.idx = 0,
                 .concatenated => |*c| c.reset(),
                 .anonymous => |a| a.v_table.reset_fn(a.ptr),
+                .context => |c| c.v_table.reset_fn(c.iter),
                 .empty => {},
             }
         }
@@ -456,6 +498,17 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.scroll(offset),
                 .anonymous => |a| a.v_table.scroll_fn(a.ptr, offset),
+                .context => |c| {
+                    if (offset > 0) {
+                        for (0..@bitCast(offset)) |_| {
+                            _ = c.v_table.next_fn(c.context, c.iter) orelse break;
+                        }
+                    } else if (offset < 0) {
+                        for (0..@abs(offset)) |_| {
+                            _ = c.v_table.prev_fn(c.context, c.iter) orelse break;
+                        }
+                    }
+                },
                 else => {},
             }
         }
@@ -463,12 +516,12 @@ pub fn Iter(comptime T: type) type {
         /// Determine which index/offset the iterator is on. (If not null, then caller can use `setIndex()`.)
         ///
         /// Generally, indexing is only available on iterators that are directly made from slices or transformed from the former with a `select()` call.
-        /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`),
-        /// indexing is no longer feasible.
+        /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`), indexing is no longer feasible.
         pub fn getIndex(self: Self) ?usize {
             switch (self.variant) {
                 .slice => |s| return s.idx,
                 .anonymous => |a| return a.v_table.get_index_fn(a.ptr),
+                .context => |c| return c.v_table.get_index_fn(c.iter),
                 else => return null,
             }
         }
@@ -495,6 +548,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |c| return try c.cloneToIter(allocator),
                 .anonymous => |a| return try a.v_table.clone_fn(a.ptr, allocator),
+                .context => |c| return try c.v_table.clone_fn(c.context, c.iter, c.v_table, c.ownership, allocator),
                 .empty => return self,
             }
         }
@@ -515,6 +569,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |s| return s.elements.len,
                 .concatenated => |c| return c.len(),
                 .anonymous => |a| return a.v_table.len_fn(a.ptr),
+                .context => |c| return c.v_table.len_fn(c.iter),
                 .empty => return 0,
             }
         }
@@ -536,6 +591,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 .concatenated => |*c| c.deinit(),
                 .anonymous => |a| a.v_table.deinit_fn(a.ptr),
+                .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
                 .empty => {},
             }
             self.* = empty;
@@ -712,146 +768,192 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
-        /// Each element returned from `next()` will go through the `transform` function.
+        /// - `context` must be a pointer to a type that defines the method: `fn transform(@This(), T) TOther`.
+        /// - `ownership` indicates whether or not `context` is owned by this iterator.
+        ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
+        ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
         ///
-        /// A pointer has to be made in this case since we're creating a pseudo-closure.
-        /// Don't forget to deinit.
+        /// Context example:
+        /// ```zig
+        /// const Multiplier = struct {
+        ///     factor: u32,
+        ///     pub fn transform(self: @This(), item: u32) u32 {
+        ///         return self.factor * item;
+        ///     }
+        /// };
+        /// ```
         pub fn select(
-            self: *Self,
-            allocator: Allocator,
+            self: *Iter(T),
             comptime TOther: type,
-            transform: fn (T, anytype) TOther,
-            args: anytype,
-        ) Allocator.Error!Iter(TOther) {
-            return try createTransformedIter(T, TOther, transform, args, self, allocator);
-        }
-
-        /// Transform an iterator of type `T` to type `TOther`.
-        /// Each element returned from `next()` will go through the `transform` function.
-        ///
-        /// WARN : The args are stored as a static threadlocal container variable, which lets us get away with not allocating memory.
-        /// Keep in mind that the stored args is replaced when you call a new `selectStatic()`.
-        pub fn selectStatic(
-            self: *Self,
-            comptime TOther: type,
-            transform: fn (T, anytype) TOther,
-            args: anytype,
+            context_ptr: anytype,
+            ownership: ContextOwnership,
         ) Iter(TOther) {
-            const ArgsType = @TypeOf(args);
+            validateSelectContext(T, TOther, context_ptr);
+            const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
             const ctx = struct {
-                threadlocal var ctx_args: ArgsType = undefined;
-
-                fn implNext(impl: *anyopaque) ?TOther {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    if (self_ptr.next()) |x| {
-                        return transform(x, ctx_args);
+                fn implNext(c: *const anyopaque, inner: *anyopaque) ?TOther {
+                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    if (inner_iter.next()) |x| {
+                        return c_ptr.transform(x);
                     }
                     return null;
                 }
 
-                fn implPrev(impl: *anyopaque) ?TOther {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    if (self_ptr.prev()) |x| {
-                        return transform(x, ctx_args);
+                fn implPrev(c: *const anyopaque, inner: *anyopaque) ?TOther {
+                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    if (inner_iter.prev()) |x| {
+                        return c_ptr.transform(x);
                     }
                     return null;
                 }
 
-                fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    try self_ptr.setIndex(to);
+                fn implGetIndex(inner: *anyopaque) ?usize {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    return inner_iter.getIndex();
                 }
 
-                fn implReset(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.reset();
+                fn implSetIndex(inner: *anyopaque, index: usize) error{NoIndexing}!void {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    try inner_iter.setIndex(index);
                 }
 
-                fn implScroll(impl: *anyopaque, offset: isize) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.scroll(offset);
+                fn implReset(inner: *anyopaque) void {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    inner_iter.reset();
                 }
 
-                fn implGetIndex(impl: *anyopaque) ?usize {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return self_ptr.getIndex();
+                fn implLen(inner: *anyopaque) usize {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    return inner_iter.len();
                 }
 
-                fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return try cloneTransformedIter(T, TOther, transform, ctx_args, self_ptr.*, alloc);
+                fn implClone(
+                    c: *const anyopaque,
+                    inner: *anyopaque,
+                    v_table: *const ContextIterable(TOther).ContextVTable,
+                    owning: ContextIterable(TOther).Ownership,
+                    allocator: Allocator,
+                ) Allocator.Error!Iter(TOther) {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
+                    errdefer allocator.destroy(iter_clone);
+                    iter_clone.* = inner_iter.*;
+                    return Iter(TOther){
+                        .variant = Iter(TOther).Variant{
+                            .context = ContextIterable(TOther){
+                                .context = switch (owning) {
+                                    .owns_context, .owns_both => blk: {
+                                        const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                                        const c_clone: *ContextType = try allocator.create(ContextType);
+                                        c_clone.* = c_ptr.*;
+                                        break :blk c_clone;
+                                    },
+                                    else => c,
+                                },
+                                .v_table = v_table,
+                                .iter = iter_clone,
+                                .ownership = switch (owning) {
+                                    .owns_context, .owns_both => .{ .owns_both = allocator },
+                                    else => .{ .owns_iter = allocator },
+                                },
+                            },
+                        },
+                    };
                 }
 
-                fn implLen(impl: *anyopaque) usize {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return self_ptr.len();
-                }
-
-                fn implDeinit(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.deinit();
+                fn implDeinit(
+                    c: *const anyopaque,
+                    inner: *anyopaque,
+                    owning: ContextIterable(TOther).Ownership,
+                ) void {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    inner_iter.deinit();
+                    switch (owning) {
+                        .owns_iter => |alloc| alloc.destroy(inner_iter),
+                        .owns_context => |alloc| {
+                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                            alloc.destroy(c_ptr);
+                        },
+                        .owns_both => |alloc| {
+                            alloc.destroy(inner_iter);
+                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                            alloc.destroy(c_ptr);
+                        },
+                        else => {},
+                    }
                 }
             };
-            ctx.ctx_args = args;
-
-            const transformed: AnonymousIterable(TOther) = .{
-                .ptr = self,
-                .v_table = &.{
-                    .next_fn = &ctx.implNext,
-                    .prev_fn = &ctx.implPrev,
-                    .set_index_fn = &ctx.implSetIndex,
-                    .reset_fn = &ctx.implReset,
-                    .scroll_fn = &ctx.implScroll,
-                    .get_index_fn = &ctx.implGetIndex,
-                    .clone_fn = &ctx.implClone,
-                    .len_fn = &ctx.implLen,
-                    .deinit_fn = &ctx.implDeinit,
+            return Iter(TOther){
+                .variant = Iter(TOther).Variant{
+                    .context = ContextIterable(TOther){
+                        .context = context_ptr,
+                        .iter = self,
+                        .v_table = &ContextIterable(TOther).ContextVTable{
+                            .next_fn = &ctx.implNext,
+                            .prev_fn = &ctx.implPrev,
+                            .get_index_fn = &ctx.implGetIndex,
+                            .set_index_fn = &ctx.implSetIndex,
+                            .reset_fn = &ctx.implReset,
+                            .len_fn = &ctx.implLen,
+                            .clone_fn = &ctx.implClone,
+                            .deinit_fn = &ctx.implDeinit,
+                        },
+                        .ownership = switch (ownership) {
+                            .none => .none,
+                            .owned => |alloc| .{ .owns_context = alloc },
+                        },
+                    },
                 },
             };
-            return transformed.iter();
         }
 
         /// Returns a filtered iterator, using `self` as a source.
-        /// Don't forget to call `deinit()` since this leverages a quasi-closure.
         ///
-        /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred to prevent memory allocation.
-        pub fn where(
-            self: *Self,
-            allocator: Allocator,
-            filter: fn (T, anytype) bool,
-            args: anytype,
-        ) Allocator.Error!Self {
-            return try createFilteredFromIter(T, allocator, self, filter, args);
-        }
-
-        /// Returns a filtered iterator, using `self` as a source.
-        /// To prevent allocating memory, the arguments are stored as a threadlocal static.
-        /// This is for one-time use or for filtering when `args` are void.
-        /// Subsequent calls to this method overwrite `args`.
+        /// - `context` must be a *pointer* to a type that defines the method: `fn filter(@This(), T) bool`.
+        ///   That pointer will be stored as a type-erased pointer, hybridizing static and dynamic dispatch.
+        /// - `ownership` indicates whether or not `context` is owned by this iterator.
+        ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
+        ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
         ///
-        /// NOTE : If simply needing to iterate with a filter, `filterNext(...)` is preferred.
-        pub fn whereStatic(self: *Self, filter: fn (T, anytype) bool, args: anytype) Self {
-            const ArgsType = @TypeOf(args);
+        /// Context example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
+        pub fn where(self: *Self, context_ptr: anytype, ownership: ContextOwnership) Self {
+            assert(validateFilterContext(T, context_ptr, Descriptor{ .required = true, .must_be_ptr = true }) == .exists);
+            const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
             const ctx = struct {
-                threadlocal var ctx_args: ArgsType = undefined;
-
-                fn implNext(impl: *anyopaque) ?T {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    while (self_ptr.next()) |x| {
-                        if (filter(x, ctx_args)) {
+                fn implNext(c: *const anyopaque, inner: *anyopaque) ?T {
+                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    while (inner_iter.next()) |x| {
+                        if (c_ptr.filter(x)) {
                             return x;
                         }
                     }
                     return null;
                 }
 
-                fn implPrev(impl: *anyopaque) ?T {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    while (self_ptr.prev()) |x| {
-                        if (filter(x, ctx_args)) {
+                fn implPrev(c: *const anyopaque, inner: *anyopaque) ?T {
+                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    while (inner_iter.prev()) |x| {
+                        if (c_ptr.filter(x)) {
                             return x;
                         }
                     }
+                    return null;
+                }
+
+                fn implGetIndex(_: *anyopaque) ?usize {
                     return null;
                 }
 
@@ -859,60 +961,94 @@ pub fn Iter(comptime T: type) type {
                     return error.NoIndexing;
                 }
 
-                fn implReset(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.reset();
+                fn implReset(inner: *anyopaque) void {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    inner_iter.reset();
                 }
 
-                fn implScroll(impl: *anyopaque, offset: isize) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    if (offset > 0) {
-                        for (0..@bitCast(offset)) |_| {
-                            _ = self_ptr.next();
-                        }
-                    } else if (offset < 0) {
-                        for (0..@abs(offset)) |_| {
-                            _ = self_ptr.prev();
-                        }
+                fn implLen(inner: *anyopaque) usize {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    return inner_iter.len();
+                }
+
+                fn implClone(
+                    c: *const anyopaque,
+                    inner: *anyopaque,
+                    v_table: *const ContextIterable(T).ContextVTable,
+                    owning: ContextIterable(T).Ownership,
+                    allocator: Allocator,
+                ) Allocator.Error!Iter(T) {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
+                    errdefer allocator.destroy(iter_clone);
+                    iter_clone.* = inner_iter.*;
+                    return Iter(T){
+                        .variant = Variant{
+                            .context = ContextIterable(T){
+                                .context = switch (owning) {
+                                    .owns_context, .owns_both => blk: {
+                                        const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                                        const c_clone: *ContextType = try allocator.create(ContextType);
+                                        c_clone.* = c_ptr.*;
+                                        break :blk c_clone;
+                                    },
+                                    else => c,
+                                },
+                                .v_table = v_table,
+                                .iter = iter_clone,
+                                .ownership = switch (owning) {
+                                    .owns_context, .owns_both => .{ .owns_both = allocator },
+                                    else => .{ .owns_iter = allocator },
+                                },
+                            },
+                        },
+                    };
+                }
+
+                fn implDeinit(
+                    c: *const anyopaque,
+                    inner: *anyopaque,
+                    owning: ContextIterable(T).Ownership,
+                ) void {
+                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
+                    inner_iter.deinit();
+                    switch (owning) {
+                        .owns_iter => |alloc| alloc.destroy(inner_iter),
+                        .owns_context => |alloc| {
+                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                            alloc.destroy(c_ptr);
+                        },
+                        .owns_both => |alloc| {
+                            alloc.destroy(inner_iter);
+                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
+                            alloc.destroy(c_ptr);
+                        },
+                        else => {},
                     }
                 }
-
-                fn implGetIndex(_: *anyopaque) ?usize {
-                    return null;
-                }
-
-                fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return try cloneFilteredFromIter(T, allocator, self_ptr.*, filter, ctx_args);
-                }
-
-                fn implLen(impl: *anyopaque) usize {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    return self_ptr.len();
-                }
-
-                fn implDeinit(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.deinit();
-                }
             };
-            ctx.ctx_args = args;
-
-            const filtered: AnonymousIterable(T) = .{
-                .ptr = self,
-                .v_table = &.{
-                    .next_fn = &ctx.implNext,
-                    .prev_fn = &ctx.implPrev,
-                    .set_index_fn = &ctx.implSetIndex,
-                    .reset_fn = &ctx.implReset,
-                    .scroll_fn = &ctx.implScroll,
-                    .get_index_fn = &ctx.implGetIndex,
-                    .clone_fn = &ctx.implClone,
-                    .len_fn = &ctx.implLen,
-                    .deinit_fn = &ctx.implDeinit,
+            return Self{
+                .variant = Variant{
+                    .context = ContextIterable(T){
+                        .context = context_ptr,
+                        .iter = self,
+                        .v_table = &ContextIterable(T).ContextVTable{
+                            .next_fn = &ctx.implNext,
+                            .prev_fn = &ctx.implPrev,
+                            .get_index_fn = &ctx.implGetIndex,
+                            .set_index_fn = &ctx.implSetIndex,
+                            .reset_fn = &ctx.implReset,
+                            .len_fn = &ctx.implLen,
+                            .clone_fn = &ctx.implClone,
+                            .deinit_fn = &ctx.implDeinit,
+                        },
+                        .ownership = switch (ownership) {
+                            .none => .none,
+                            .owned => |alloc| .{ .owns_context = alloc },
+                        },
+                    },
                 },
             };
-            return filtered.iter();
         }
 
         /// Enumerates into `buf`, starting at `self`'s current `next()` call.
@@ -953,7 +1089,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             // just the right size: return our buffer
-            if (i == self.len()) {
+            if (i == buf.len) {
                 return buf;
             }
 
@@ -968,39 +1104,88 @@ pub fn Iter(comptime T: type) type {
             return try allocator.dupe(T, buf[0..i]);
         }
 
-        /// Enumerates into new sorted slice.
+        /// Enumerates into new sorted slice. This uses an unstable sorting algorithm.
+        /// If stable sorting is required, use `toSortedSliceOwnedStable()`.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
         pub fn toSortedSliceOwned(
             self: *Self,
             allocator: Allocator,
-            comparer: fn (T, T) std.math.Order,
+            context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
+            validateCompareContext(T, context);
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
+            const sort_ctx: SortContext(T, @TypeOf(context)) = .{
+                .slice = slice,
+                .ctx = context,
+                .ordering = ordering,
+            };
+            std.sort.heap(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
+            return slice;
+        }
 
-            util.quickSort(T, slice, comparer, ordering);
+        /// Enumerates into new sorted slice, using a stable sorting algorithm.
+        /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
+        /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+        ///
+        /// Caller owns the resulting slice.
+        pub fn toSortedSliceOwnedStable(
+            self: *Self,
+            allocator: Allocator,
+            context: anytype,
+            ordering: Ordering,
+        ) Allocator.Error![]T {
+            validateCompareContext(T, context);
+            const slice: []T = try self.enumerateToOwnedSlice(allocator);
+            const sort_ctx: SortContext(T, @TypeOf(context)) = .{
+                .slice = slice,
+                .ctx = context,
+                .ordering = ordering,
+            };
+            std.sort.insertion(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
             return slice;
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
+        /// This makes use of an unstable sorting algorith. If stable sorting is required, use `orderByStable()`.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderBy(
             self: *Self,
             allocator: Allocator,
-            comparer: fn (T, T) std.math.Order,
+            context: anytype,
             ordering: Ordering,
         ) Allocator.Error!Self {
-            const slice: []T = try self.toSortedSliceOwned(allocator, comparer, ordering);
+            const slice: []T = try self.toSortedSliceOwned(allocator, context, ordering);
             return fromSliceOwned(allocator, slice, null);
         }
 
-        /// Determine if the sequence contains any element with a given filter (or pass in null to simply peek at the next element).
+        /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
+        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+        ///
+        /// This iterator needs its underlying slice freed by calling `deinit()`.
+        pub fn orderByStable(
+            self: *Self,
+            allocator: Allocator,
+            context: anytype,
+            ordering: Ordering,
+        ) Allocator.Error!Self {
+            const slice: []T = try self.toSortedSliceOwnedStable(allocator, context, ordering);
+            return fromSliceOwned(allocator, slice, null);
+        }
+
+        /// Determine if the sequence contains any element with a given filter context (or pass in null to simply peek at the next element).
         /// Always scrolls back in place.
-        pub fn any(self: *Self, filter: ?fn (T, anytype) bool, args: anytype) ?T {
+        ///
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        pub fn any(self: *Self, context: anytype) ?T {
+            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
             if (self.len() == 0) {
                 return null;
             }
@@ -1010,8 +1195,8 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |n| {
                 scroll_amt -= 1;
-                if (filter) |filter_fn| {
-                    if (filter_fn(n, args)) {
+                if (ctx_type == .exists) {
+                    if (context.filter(n)) {
                         return n;
                     }
                     continue;
@@ -1022,34 +1207,58 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Find the next element that fulfills a given filter.
-        /// This does move the iterator forward, which is reported in the out parameter `moved_forward`.
-        ///
+        /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
+        ///
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn filterNext(
             self: *Self,
-            filter: fn (T, anytype) bool,
-            args: anytype,
+            context: anytype,
             moved_forward: *usize,
         ) ?T {
+            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = false }) == .exists);
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
                 moved += 1;
-                if (filter(n, args)) {
+                if (context.filter(n)) {
                     return n;
                 }
             }
             return null;
         }
 
-        /// Ensure there is exactly 1 or 0 elements that match the given `filter`.
+        /// Ensure there is exactly 1 or 0 elements that matches the passed-in filter.
+        /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
+        /// Will scroll back in place.
         ///
-        /// Will scroll back in place
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn singleOrNull(
             self: *Self,
-            filter: ?fn (T, anytype) bool,
-            args: anytype,
+            context: anytype,
         ) error{MultipleElementsFound}!?T {
+            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
+
             if (self.len() == 0) {
                 return null;
             }
@@ -1060,8 +1269,8 @@ pub fn Iter(comptime T: type) type {
             var found: ?T = null;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (filter) |filter_fn| {
-                    if (filter_fn(x, args)) {
+                if (ctx_type == .exists) {
+                    if (context.filter(x)) {
                         if (found != null) {
                             return error.MultipleElementsFound;
                         } else {
@@ -1080,15 +1289,27 @@ pub fn Iter(comptime T: type) type {
             return found;
         }
 
-        /// Ensure there is exactly 1 element that matches the passed-in `filter`.
+        /// Ensure there is exactly 1 element that matches the passed-in filter.
+        /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
+        /// Will scroll back in place.
         ///
-        /// Will scroll back in place
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
         pub fn single(
             self: *Self,
-            filter: ?fn (T, anytype) bool,
-            args: anytype,
+            context: anytype,
         ) error{ NoElementsFound, MultipleElementsFound }!T {
-            return try self.singleOrNull(filter, args) orelse return error.NoElementsFound;
+            _ = validateFilterContext(T, context, .optional);
+            return try self.singleOrNull(context) orelse return error.NoElementsFound;
         }
 
         /// Run `action` for each element in the iterator
@@ -1119,29 +1340,40 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Determine if this iterator contains a specific `item`.
-        /// Uses the `comparer` function to determine if any element returns `.equal_to`.
+        /// `context` must define the method: `fn compare(@This(), T, T) std.math.Order`.
         ///
         /// Scrolls back in place.
-        pub fn contains(self: *Self, item: T, comparer: fn (T, T) std.math.Order) bool {
-            const ctx = struct {
-                // not worried about this static local because it doesn't create an iterator
-                threadlocal var ctx_item: T = undefined;
+        pub fn contains(self: *Self, item: T, context: anytype) bool {
+            validateCompareContext(T, context);
+            const ComparerContext = struct {
+                ctx_item: T,
 
-                fn filter(x: T, _: anytype) bool {
-                    return switch (comparer(ctx_item, x)) {
+                pub fn filter(ctx: @This(), x: T) bool {
+                    return switch (context.compare(ctx.ctx_item, x)) {
                         .eq => true,
                         else => false,
                     };
                 }
             };
-            ctx.ctx_item = item;
-            return self.any(ctx.filter, {}) != null;
+            return self.any(ComparerContext{ .ctx_item = item }) != null;
         }
 
-        /// Count the number of filtered items or simply count the items remaining.
+        /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
+        /// If you do not wish to apply a filter, pass in `null` or void literal `{}` to `context`.
         ///
-        /// Scrolls back in place.
-        pub fn count(self: *Self, filter: ?fn (T, anytype) bool, args: anytype) usize {
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
+        pub fn count(self: *Self, context: anytype) usize {
+            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
             if (self.len() == 0) {
                 return 0;
             }
@@ -1152,8 +1384,8 @@ pub fn Iter(comptime T: type) type {
             var result: usize = 0;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (filter) |filter_fn| {
-                    if (filter_fn(x, args)) {
+                if (ctx_type == .exists) {
+                    if (context.filter(x)) {
                         result += 1;
                     }
                 } else {
@@ -1163,10 +1395,21 @@ pub fn Iter(comptime T: type) type {
             return result;
         }
 
-        /// Determine whether or not all elements fulfill a given filter.
+        /// Determine whether or not all elements fulfill a given filter. Scrolls back in place.
         ///
-        /// Scrolls back in place.
-        pub fn all(self: *Self, filter: fn (T, anytype) bool, args: anytype) bool {
+        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// Example:
+        /// ```zig
+        /// fn Ctx(comptime T: type) type {
+        ///     return struct {
+        ///         pub fn filter(_: @This(), item: T) bool {
+        ///             return true;
+        ///         }
+        ///     };
+        /// }
+        /// ```
+        pub fn all(self: *Self, context: anytype) bool {
+            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = false }) == .exists);
             if (self.len() == 0) {
                 return true;
             }
@@ -1176,7 +1419,7 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (!filter(x, args)) {
+                if (!context.filter(x)) {
                     return false;
                 }
             }
@@ -1186,28 +1429,30 @@ pub fn Iter(comptime T: type) type {
         /// Fold the iterator into a single value.
         /// - `self`: method receiver (non-const pointer)
         /// - `TOther` is the return type
+        /// - `context` must define the method `fn accumulate(@This(), TOther, T) TOther`
         /// - `init` is the starting value of the accumulator
-        /// - `mut` is the function that takes in the accumulator, the current item, and `args`. The returned value is then assigned to the accumulator.
-        /// - `args` are the additional arguments passed in. Pass in void literal `{}` if none are used.
         pub fn fold(
             self: *Self,
             comptime TOther: type,
+            context: anytype,
             init: TOther,
-            mut: fn (TOther, T, anytype) TOther,
-            args: anytype,
         ) TOther {
+            validateAccumulatorContext(T, TOther, context);
             var result: TOther = init;
             while (self.next()) |x| {
-                result = mut(result, x, args);
+                result = context.accumulate(result, x);
             }
             return result;
         }
 
         /// Calls `fold`, using the first element as `init`.
         /// Note that this returns null if the iterator is empty or at the end.
-        pub fn reduce(self: *Self, mut: fn (T, T, anytype) T, args: anytype) ?T {
+        ///
+        /// `context` must define the method `fn accumulate(@This(), T, T) T`
+        pub fn reduce(self: *Self, context: anytype) ?T {
+            validateAccumulatorContext(T, T, context);
             const init: T = self.next() orelse return null;
-            return self.fold(T, init, mut, args);
+            return self.fold(T, context, init);
         }
 
         /// Reverse the direction of the iterator.
@@ -1400,22 +1645,6 @@ pub fn Iter(comptime T: type) type {
     };
 }
 
-fn IterClosure(comptime T: type, comptime TArgs: type) type {
-    return struct {
-        iter: *Iter(T),
-        args: TArgs,
-        allocator: Allocator,
-    };
-}
-
-fn CloneIterArgs(comptime T: type, comptime TArgs: type) type {
-    return struct {
-        iter: Iter(T),
-        args: TArgs,
-        allocator: Allocator,
-    };
-}
-
 fn CloneIter(comptime T: type) type {
     return struct {
         iter: Iter(T),
@@ -1423,460 +1652,100 @@ fn CloneIter(comptime T: type) type {
     };
 }
 
-fn cloneTransformedIter(
-    comptime T: type,
-    comptime TOther: type,
-    transform: fn (T, anytype) TOther,
-    args: anytype,
-    iter: Iter(T),
-    allocator: Allocator,
-) Allocator.Error!Iter(TOther) {
-    const ArgsType = @TypeOf(args);
-    const ptr: *CloneIterArgs(T, ArgsType) = try allocator.create(CloneIterArgs(T, ArgsType));
-    ptr.* = .{
-        .iter = iter,
-        .args = args,
-        .allocator = allocator,
-    };
-
-    const ctx = struct {
-        fn implNext(impl: *anyopaque) ?TOther {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            if (self_ptr.iter.next()) |x| {
-                return transform(x, self_ptr.args);
-            }
-            return null;
-        }
-
-        fn implPrev(impl: *anyopaque) ?TOther {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            if (self_ptr.iter.prev()) |x| {
-                return transform(x, self_ptr.args);
-            }
-            return null;
-        }
-
-        fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            try self_ptr.iter.setIndex(to);
-        }
-
-        fn implReset(impl: *anyopaque) void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.reset();
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.scroll(offset);
-        }
-
-        fn implGetIndex(impl: *anyopaque) ?usize {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.getIndex();
-        }
-
-        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return try cloneTransformedIter(T, TOther, transform, self_ptr.args, self_ptr.iter, alloc);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.len();
-        }
-
-        fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.deinit();
-            self_ptr.allocator.destroy(self_ptr);
-        }
-    };
-
-    const clone: AnonymousIterable(TOther) = .{
-        .ptr = ptr,
-        .v_table = &.{
-            .next_fn = &ctx.implNext,
-            .prev_fn = &ctx.implPrev,
-            .reset_fn = &ctx.implReset,
-            .scroll_fn = &ctx.implScroll,
-            .get_index_fn = &ctx.implGetIndex,
-            .set_index_fn = &ctx.implSetIndex,
-            .clone_fn = &ctx.implClone,
-            .len_fn = &ctx.implLen,
-            .deinit_fn = &ctx.implDeinit,
-        },
-    };
-    return clone.iter();
-}
-
-fn createTransformedIter(
-    comptime T: type,
-    comptime TOther: type,
-    transform: fn (T, anytype) TOther,
-    args: anytype,
-    iter: *Iter(T),
-    allocator: Allocator,
-) Allocator.Error!Iter(TOther) {
-    const ArgsType = @TypeOf(args);
-    const ptr: *IterClosure(T, ArgsType) = try allocator.create(IterClosure(T, ArgsType));
-    ptr.* = .{
-        .iter = iter,
-        .args = args,
-        .allocator = allocator,
-    };
-
-    const ctx = struct {
-        fn implNext(impl: *anyopaque) ?TOther {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            if (self_ptr.iter.next()) |x| {
-                return transform(x, self_ptr.args);
-            }
-            return null;
-        }
-
-        fn implPrev(impl: *anyopaque) ?TOther {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            if (self_ptr.iter.prev()) |x| {
-                return transform(x, self_ptr.args);
-            }
-            return null;
-        }
-
-        fn implSetIndex(impl: *anyopaque, to: usize) error{NoIndexing}!void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            try self_ptr.iter.setIndex(to);
-        }
-
-        fn implReset(impl: *anyopaque) void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.reset();
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.scroll(offset);
-        }
-
-        fn implGetIndex(impl: *anyopaque) ?usize {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.getIndex();
-        }
-
-        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(TOther) {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return try cloneTransformedIter(T, TOther, transform, self_ptr.args, self_ptr.iter.*, alloc);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.len();
-        }
-
-        fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.deinit();
-            self_ptr.allocator.destroy(self_ptr);
-        }
-    };
-
-    const clone: AnonymousIterable(TOther) = .{
-        .ptr = ptr,
-        .v_table = &.{
-            .next_fn = &ctx.implNext,
-            .prev_fn = &ctx.implPrev,
-            .reset_fn = &ctx.implReset,
-            .scroll_fn = &ctx.implScroll,
-            .get_index_fn = &ctx.implGetIndex,
-            .set_index_fn = &ctx.implSetIndex,
-            .clone_fn = &ctx.implClone,
-            .len_fn = &ctx.implLen,
-            .deinit_fn = &ctx.implDeinit,
-        },
-    };
-    return clone.iter();
-}
-
-fn createFilteredFromIter(
-    comptime T: type,
-    allocator: Allocator,
-    iter: *Iter(T),
-    filter: fn (T, anytype) bool,
-    args: anytype,
-) Allocator.Error!Iter(T) {
-    const ArgsType = @TypeOf(args);
-    const ptr: *IterClosure(T, ArgsType) = try allocator.create(IterClosure(T, ArgsType));
-    ptr.* = .{
-        .iter = iter,
-        .allocator = allocator,
-        .args = args,
-    };
-
-    const ctx = struct {
-        fn implNext(impl: *anyopaque) ?T {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            while (self_ptr.iter.next()) |x| {
-                if (filter(x, self_ptr.args)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implPrev(impl: *anyopaque) ?T {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            while (self_ptr.iter.prev()) |x| {
-                if (filter(x, self_ptr.args)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implSetIndex(_: *anyopaque, _: usize) error{NoIndexing}!void {
-            return error.NoIndexing;
-        }
-
-        fn implReset(impl: *anyopaque) void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.reset();
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            if (offset > 0) {
-                for (0..@bitCast(offset)) |_| {
-                    _ = self_ptr.iter.next();
-                }
-            } else if (offset < 0) {
-                for (0..@bitCast(@abs(offset))) |_| {
-                    _ = self_ptr.iter.prev();
-                }
-            }
-        }
-
-        fn implGetIndex(_: *anyopaque) ?usize {
-            return null;
-        }
-
-        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return try cloneFilteredFromIter(T, alloc, self_ptr.iter.*, filter, self_ptr.args);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.len();
-        }
-
-        fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.deinit();
-            self_ptr.allocator.destroy(self_ptr);
-        }
-
-        fn implDeinitAsClone(impl: *anyopaque) void {
-            const clone_ptr: *IterClosure(T, ArgsType) = @ptrCast(@alignCast(impl));
-            clone_ptr.allocator.destroy(clone_ptr);
-        }
-    };
-
-    const clone: AnonymousIterable(T) = .{
-        .ptr = ptr,
-        .v_table = &.{
-            .next_fn = &ctx.implNext,
-            .prev_fn = &ctx.implPrev,
-            .set_index_fn = &ctx.implSetIndex,
-            .reset_fn = &ctx.implReset,
-            .scroll_fn = &ctx.implScroll,
-            .get_index_fn = &ctx.implGetIndex,
-            .clone_fn = &ctx.implClone,
-            .len_fn = &ctx.implLen,
-            .deinit_fn = &ctx.implDeinit,
-        },
-    };
-    return clone.iter();
-}
-
-fn cloneFilteredFromIter(
-    comptime T: type,
-    allocator: Allocator,
-    iter: Iter(T),
-    filter: fn (T, anytype) bool,
-    args: anytype,
-) Allocator.Error!Iter(T) {
-    const ArgsType = @TypeOf(args);
-    const ptr: *CloneIterArgs(T, ArgsType) = try allocator.create(CloneIterArgs(T, ArgsType));
-    ptr.* = .{
-        .iter = iter,
-        .allocator = allocator,
-        .args = args,
-    };
-
-    const ctx = struct {
-        fn implNext(impl: *anyopaque) ?T {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            while (self_ptr.iter.next()) |x| {
-                if (filter(x, self_ptr.args)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implPrev(impl: *anyopaque) ?T {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            while (self_ptr.iter.prev()) |x| {
-                if (filter(x, self_ptr.args)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implSetIndex(_: *anyopaque, _: usize) error{NoIndexing}!void {
-            return error.NoIndexing;
-        }
-
-        fn implReset(impl: *anyopaque) void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.reset();
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            if (offset > 0) {
-                for (0..@bitCast(offset)) |_| {
-                    _ = self_ptr.iter.next();
-                }
-            } else if (offset < 0) {
-                for (0..@bitCast(@abs(offset))) |_| {
-                    _ = self_ptr.iter.prev();
-                }
-            }
-        }
-
-        fn implGetIndex(_: *anyopaque) ?usize {
-            return null;
-        }
-
-        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return try cloneFilteredFromIter(T, alloc, self_ptr.iter, filter, self_ptr.args);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            return self_ptr.iter.len();
-        }
-
-        fn implDeinit(impl: *anyopaque) void {
-            const self_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            self_ptr.iter.deinit();
-            self_ptr.allocator.destroy(self_ptr);
-        }
-
-        fn implDeinitAsClone(impl: *anyopaque) void {
-            const clone_ptr: *CloneIterArgs(T, ArgsType) = @ptrCast(@alignCast(impl));
-            clone_ptr.allocator.destroy(clone_ptr);
-        }
-    };
-
-    const clone: AnonymousIterable(T) = .{
-        .ptr = ptr,
-        .v_table = &.{
-            .next_fn = &ctx.implNext,
-            .prev_fn = &ctx.implPrev,
-            .set_index_fn = &ctx.implSetIndex,
-            .reset_fn = &ctx.implReset,
-            .scroll_fn = &ctx.implScroll,
-            .get_index_fn = &ctx.implGetIndex,
-            .clone_fn = &ctx.implClone,
-            .len_fn = &ctx.implLen,
-            .deinit_fn = &ctx.implDeinit,
-        },
-    };
-    return clone.iter();
-}
-
 /// Generate an auto-sum function, assuming elements are a numeric type (excluding enums).
 /// Args are not evaluated in this function.
 ///
 /// Take note that this function performs saturating addition.
 /// Rather than integer overflow, the sum returns `T`'s max value.
-pub fn autoSum(comptime T: type) fn (T, T, anytype) T {
+pub inline fn autoSum(comptime T: type) AutoSumContext(T) {
+    return .{};
+}
+
+fn AutoSumContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn sum(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     return a +| b;
                 }
-            }.sum;
+            };
         },
         else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
 }
 
 /// Generate an auto-min function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
-pub fn autoMin(comptime T: type) fn (T, T, anytype) T {
+pub inline fn autoMin(comptime T: type) AutoMinContext(T) {
+    return .{};
+}
+
+fn AutoMinContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn min(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (a < b) {
                         return a;
                     }
                     return b;
                 }
-            }.min;
+            };
         },
         .@"enum" => {
             return struct {
-                fn min(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (@intFromEnum(a) < @intFromEnum(b)) {
                         return a;
                     }
                     return b;
                 }
-            }.min;
+            };
         },
         else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
 }
 
 /// Generate an auto-max function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
-pub fn autoMax(comptime T: type) fn (T, T, anytype) T {
+pub inline fn autoMax(comptime T: type) AutoMaxContext(T) {
+    return .{};
+}
+
+fn AutoMaxContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn max(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (a > b) {
                         return a;
                     }
                     return b;
                 }
-            }.max;
+            };
         },
         .@"enum" => {
             return struct {
-                fn max(a: T, b: T, _: anytype) T {
+                pub fn accumulate(_: @This(), a: T, b: T) T {
                     if (@intFromEnum(a) > @intFromEnum(b)) {
                         return a;
                     }
                     return b;
                 }
-            }.max;
+            };
         },
         else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
     }
 }
 
-/// Generates a simple comparer function for a numeric or enum type `T`.
-pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
+/// Generates a simple comparer for a numeric or enum type `T`.
+pub inline fn autoCompare(comptime T: type) AutoCompareContext(T) {
+    return .{};
+}
+
+fn AutoCompareContext(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {
             return struct {
-                fn compare(a: T, b: T) std.math.Order {
+                pub fn compare(_: @This(), a: T, b: T) std.math.Order {
                     if (a < b) {
                         return .lt;
                     } else if (a > b) {
@@ -1884,11 +1753,11 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
                     }
                     return .eq;
                 }
-            }.compare;
+            };
         },
         .@"enum" => {
             return struct {
-                fn compare(a: T, b: T) std.math.Order {
+                pub fn compare(_: @This(), a: T, b: T) std.math.Order {
                     if (@intFromEnum(a) < @intFromEnum(b)) {
                         return .lt;
                     } else if (@intFromEnum(a) > @intFromEnum(b)) {
@@ -1896,8 +1765,148 @@ pub fn autoCompare(comptime T: type) fn (T, T) std.math.Order {
                     }
                     return .eq;
                 }
-            }.compare;
+            };
         },
-        else => @compileError("Cannot generate auto-compare function with non-numeric type '" ++ @typeName(T) ++ "'."),
+        else => @compileError("Cannot generate auto-compare context with non-numeric type '" ++ @typeName(T) ++ "'."),
+    }
+}
+
+fn SortContext(comptime T: type, comptime TContext: type) type {
+    return struct {
+        ctx: TContext,
+        slice: []T,
+        ordering: Ordering,
+
+        pub fn lessThan(self: @This(), a: T, b: T) bool {
+            const comparison: std.math.Order = self.ctx.compare(a, b);
+            return switch (self.ordering) {
+                .asc => comparison == .lt,
+                .desc => comparison == .gt,
+            };
+        }
+    };
+}
+
+const CtxType = enum { exists, none };
+const Descriptor = struct {
+    required: bool,
+    must_be_ptr: bool,
+
+    const optional: Descriptor = .{ .required = false, .must_be_ptr = false };
+};
+
+inline fn validateFilterContext(comptime T: type, context: anytype, comptime descriptor: Descriptor) CtxType {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .null, .void => {
+            if (descriptor.required) {
+                @compileError("Context is not optional. Expected a type defines a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            return .none;
+        },
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .one => {
+                    return validateFilterContext(T, context.*, Descriptor{ .must_be_ptr = false, .required = true });
+                },
+                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+            }
+        },
+        // separate error for optionals
+        .optional => @compileError("Expected non-optional type, but found `" ++ @typeName(ContextType) ++ "`. Either pass in null or unwrap the optional."),
+        else => {
+            if (descriptor.must_be_ptr) {
+                @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`");
+            }
+            if (!std.meta.hasMethod(ContextType, "filter")) {
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "filter"))).@"fn";
+            if (method_info.params.len != 2 or method_info.params[1].type != T) {
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            if (method_info.return_type != bool) {
+                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
+            }
+            return .exists;
+        },
+    }
+}
+
+inline fn validateSelectContext(comptime T: type, comptime TOther: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .one => {
+                    const PtrType = ptr.child;
+                    if (!std.meta.hasMethod(PtrType, "transform")) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                    }
+                    const method_info: Fn = @typeInfo(@TypeOf(@field(PtrType, "transform"))).@"fn";
+                    if (method_info.params.len != 2 or method_info.params[1].type != T) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                    }
+                    if (method_info.return_type != TOther) {
+                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+                    }
+                },
+                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+            }
+        },
+        else => @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
+    }
+}
+
+inline fn validateAccumulatorContext(comptime T: type, comptime TOther: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .one => validateAccumulatorContext(T, TOther, context.*),
+                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
+            }
+        },
+        else => {
+            if (!std.meta.hasMethod(ContextType, "accumulate")) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "accumulate"))).@"fn";
+            // zig fmt: off
+            if (method_info.params.len != 3
+                or method_info.params[1].type != TOther
+                or method_info.params[2].type != T
+            ) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++  "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+            // zig fmt: on
+            if (method_info.return_type != TOther) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+            }
+        }
+    }
+}
+
+inline fn validateCompareContext(comptime T: type, context: anytype) void {
+    const ContextType = @TypeOf(context);
+    switch (@typeInfo(ContextType)) {
+        .pointer => validateCompareContext(T, context.*),
+        else => {
+            if (!std.meta.hasMethod(ContextType, "compare")) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "compare"))).@"fn";
+            // zig fmt: off
+            if (method_info.params.len != 3
+                or method_info.params[1].type != T
+                or method_info.params[2].type != T
+            ) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
+            }
+            // zig fmt: on
+            if (method_info.return_type != std.math.Order) {
+                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
+            }
+        }
     }
 }
