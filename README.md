@@ -176,7 +176,9 @@ _ = clone2.next(); // 1
 ```
 
 ### `deinit()`
-Free any memory owned by the iterator. Generally, this is a no-op except when an iterator owns a slice or is a clone. However, `deinit()` will turn an iterator into `.empty`, so be aware of that behavior.
+Free any memory owned by the iterator. Generally, this is a no-op except when an iterator owns or is a clone.
+However, `deinit()` will assign an iterator into `.empty`, so be aware of that behavior.
+It can be redundantly called as well.
 ```zig
 const allocator = @import("std").testing.allocator;
 
@@ -247,8 +249,11 @@ while (iter.next()) |x| {
 ### `fromMulti()`
 Initialize an `Iter(T)` from a `MultiArrayList(T)`.
 Keep in mind that the resulting iterator does not own the backing list (and more specifically, it only has a copy to the list, not a const pointer).
-Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering and cloning (the list, not the iterator).
-The recommended course of action for both of these is to order and clone the list directly and then initialize a new iterator from the ordered/cloned list afterward.
+Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering.
+The recommended course of action for both of these is to order the list directly and then initialize a new iterator from the ordered list afterward.
+
+`clone()` does not allocate additional memory since the iterator does not own the list. It merely clones the iterator, not the list itself.
+Consequently, `deinit()` will not free the list, and is virtually a no-op since there is no memory to cleanup (still assigns the iterator to `empty`).
 ```zig
 const S = struct {
     tag: usize,
@@ -771,7 +776,7 @@ _ = iter.reduce(Sum{}); // 6
 ```
 
 ### `reverse()`
-Reverses the direction of iteration and indexing (if applicable)
+Reverses the direction of iteration and indexing (if applicable).
 It's as if the end of a slice where its beginning, and its beginning is the end.
 ```zig
 test "reverse" {
