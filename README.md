@@ -6,7 +6,7 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 
 The main type is `Iter(T)`, which comes with several methods and queries.
 
-The latest release is `v0.2.0`, which leverages Zig 0.14.0.
+The latest release is `v0.2.1`, which leverages Zig 0.14.1.
 
 ## Use This Package
 In your build.zig.zon, add the following dependency:
@@ -16,7 +16,7 @@ In your build.zig.zon, add the following dependency:
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
-            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.0.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -64,7 +64,7 @@ zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 
 ### v0.1.1
 Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in function bodies and args before the API was adapted to use the static
-dispatch pattern with context objects. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
+dispatch pattern with context types. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
 `MultiArrayList`. Some public functions present in this release were removed in 0.2.0, such as the methods on `AnonymousIterable(T)` (besides `iter()`)
 and the quick-sort function in `util.zig`.
 
@@ -255,22 +255,20 @@ const S = struct {
     str: []const u8,
 };
 
-{
-    var list: MultiArrayList(S) = .empty;
-    defer list.deinit(testing.allocator);
-    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+var list: MultiArrayList(S) = .empty;
+defer list.deinit(testing.allocator);
+try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
 
-    var iter: Iter(S) = .fromMulti(list);
+var iter: Iter(S) = .fromMulti(list);
 
-    var expected_tag: usize = 1;
-    while (iter.next()) |s| : (expected_tag += 1) {
-        try testing.expectEqual(expected_tag, s.tag);
-    }
-    expected_tag = 2;
-    while (iter.prev()) |s| : (expected_tag -= 1) {
-        try testing.expectEqual(expected_tag, s.tag);
-    }
+var expected_tag: usize = 1;
+while (iter.next()) |s| : (expected_tag += 1) {
+    try testing.expectEqual(expected_tag, s.tag);
+}
+expected_tag = 2;
+while (iter.prev()) |s| : (expected_tag -= 1) {
+    try testing.expectEqual(expected_tag, s.tag);
 }
 ```
 
@@ -351,9 +349,8 @@ Takes in two arguments after the method receiver: `context_ptr` and `ownership`.
 `context_ptr` must be a pointer whose child type has the following method: `fn transform(@This(), T) TOther`.
 That pointer may optionally be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }` for `ownership`.
 If so, be sure to call `deinit()` after you are done.
-Otherwise, pass in `.none` if `context_ptr` points to something locally scoped or a constant value.
-
-The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
+Otherwise, pass in `.none` if `context_ptr` points to something locally scoped or static.
+The context is stored as a type-erased const pointer.
 ```zig
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -424,10 +421,10 @@ If you simply need to iterate with a filter, use `filterNext(...)`.
 
 Like `select()`, this function takes in 2 arguments: `context_ptr` and `ownership`.
 `context_ptr` must be a pointer whose child type defines the following method: `fn filter(@This(), T) bool`.
-`ownership` can either take in `.none` if `context_ptr` points to something locally scoped or a constant,
+`ownership` can either take in `.none` if `context_ptr` points to something locally scoped or static,
 or it can be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }`.
 
-The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
+The context is stored as a type-erased const pointer.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
@@ -613,10 +610,11 @@ var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, &Print
 var i: usize = 0;
 var test_failed: bool = false;
 
-// action to perform on every element
-// another action to be executed on error
-// whether or not to break on error
-// args
+// Parameters:
+// - action to perform on every element
+// - another action to be executed on error
+// - whether or not to break on error
+// - args
 iter.forEach(ctx.action, ctx.onErr, true, .{ &i, &test_failed, testing.allocator });
 
 try testing.expect(!test_failed);

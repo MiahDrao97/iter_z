@@ -331,6 +331,9 @@ pub fn Iter(comptime T: type) type {
         else => false,
     };
     return struct {
+        /// Which iterator implementation we're using
+        variant: Variant,
+
         const Variant = union(enum) {
             slice: SliceIterable(T),
             multi_arr_list: if (multi_arr_list_allowed) MultiArrayListIterable(T) else void,
@@ -339,8 +342,6 @@ pub fn Iter(comptime T: type) type {
             context: ContextIterable(T),
             empty: void,
         };
-
-        variant: Variant,
 
         /// Get the next element
         pub fn next(self: *Iter(T)) ?T {
@@ -741,10 +742,11 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
-        /// - `context` must be a pointer to a type that defines the method: `fn transform(@This(), T) TOther`.
+        /// - `context_ptr` must be a pointer to a type that defines the method: `fn transform(@This(), T) TOther`.
+        ///   It's stored as a type-erased pointer.
         /// - `ownership` indicates whether or not `context` is owned by this iterator.
-        ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
-        ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
+        ///   If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
+        ///   Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
         ///
         /// Context example:
         /// ```zig
@@ -884,11 +886,11 @@ pub fn Iter(comptime T: type) type {
 
         /// Returns a filtered iterator, using `self` as a source.
         ///
-        /// - `context` must be a *pointer* to a type that defines the method: `fn filter(@This(), T) bool`.
-        ///   That pointer will be stored as a type-erased pointer, hybridizing static and dynamic dispatch.
+        /// - `context_ptr` must be a *pointer* to a type that defines the method: `fn filter(@This(), T) bool`.
+        ///   That pointer will be stored as a type-erased pointer.
         /// - `ownership` indicates whether or not `context` is owned by this iterator.
-        ///    If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
-        ///    Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
+        ///   If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
+        ///   Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
         ///
         /// Context example:
         /// ```zig
