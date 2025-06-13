@@ -574,7 +574,7 @@ pub fn Iter(comptime T: type) type {
                 .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
                 .empty => {},
             }
-            self.* = empty;
+            self.* = .empty;
         }
 
         /// Default iterator that has no underlying source. It has 0 elements, and `next()` always returns null.
@@ -645,7 +645,7 @@ pub fn Iter(comptime T: type) type {
         /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
         pub fn concat(sources: []Iter(T)) Iter(T) {
             if (sources.len == 0) {
-                return empty;
+                return .empty;
             } else if (sources.len == 1) {
                 return sources[0];
             }
@@ -694,54 +694,35 @@ pub fn Iter(comptime T: type) type {
         pub fn fromOther(allocator: Allocator, other: anytype, length: usize) Allocator.Error!Iter(T) {
             comptime {
                 var OtherType = @TypeOf(other);
-                var is_ptr: bool = false;
                 switch (@typeInfo(OtherType)) {
-                    .pointer => |ptr| {
-                        OtherType = ptr.child;
-                        is_ptr = true;
-                    },
+                    .pointer => |ptr| OtherType = ptr.child,
                     else => {},
                 }
-
                 if (!std.meta.hasMethod(OtherType, "next")) {
-                    @compileError(@typeName(OtherType) ++ " does not define a method called 'next'.");
+                    @compileError(@typeName(OtherType) ++ " does not define a method called `next()`.");
                 }
-
-                const method = @field(OtherType, "next");
-                switch (@typeInfo(@TypeOf(method))) {
-                    .@"fn" => |next_fn| {
-                        if (next_fn.return_type != ?T) {
-                            @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
-                        }
-                        if (next_fn.params.len != 1 and is_ptr and next_fn.params[0] != @TypeOf(*OtherType)) {
-                            @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not take in 0 parameters after the method receiver.");
-                        } else if (next_fn.params.len != 1 and !is_ptr and next_fn.params[0] != @TypeOf(OtherType)) {
-                            @compileError("next() method on type '" ++ @typeName(OtherType) ++ "' does not take in 0 parameters after the method receiver.");
-                        }
-                    },
-                    else => unreachable,
+                const method_info: Fn = @typeInfo(@TypeOf(@field(OtherType, "next"))).@"fn";
+                if (method_info.params.len != 1 or method_info.return_type != ?T) {
+                    @compileError("`next()` method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
                 }
             }
+
             if (length == 0) {
-                return empty;
+                return .empty;
             }
             const buf: []T = try allocator.alloc(T, length);
             errdefer allocator.free(buf);
 
             var i: usize = 0;
-            while (@as(?T, other.next())) |x| {
+            while (@as(?T, other.next())) |x| : (i += 1) {
                 if (i >= length) break;
-
                 buf[i] = x;
-                i += 1;
             }
-
             // if we over-estimated our length
             if (i < length) {
                 if (allocator.resize(buf, i)) {
                     return fromSliceOwned(allocator, buf, null);
                 }
-
                 defer allocator.free(buf);
                 return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
             }
