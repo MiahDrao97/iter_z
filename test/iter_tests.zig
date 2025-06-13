@@ -9,6 +9,10 @@ const SplitIterator = std.mem.SplitIterator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const MultiArrayList = std.MultiArrayList;
+const autoCompare = iter_z.autoCompare;
+const autoSum = iter_z.autoSum;
+const autoMin = iter_z.autoMin;
+const autoMax = iter_z.autoMax;
 
 const IsEven = struct {
     pub fn filter(_: IsEven, num: u8) bool {
@@ -325,7 +329,7 @@ test "orderBy" {
     const nums = [_]u8{ 2, 5, 7, 1, 6, 4, 3 };
 
     var inner: Iter(u8) = .from(&nums);
-    var iter: Iter(u8) = try inner.orderBy(testing.allocator, iter_z.autoCompare(u8), .asc);
+    var iter: Iter(u8) = try inner.orderBy(testing.allocator, autoCompare(u8), .asc);
     defer iter.deinit();
 
     var i: usize = 0;
@@ -337,7 +341,7 @@ test "orderBy" {
     try testing.expect(i == 7);
 
     var inner2: Iter(u8) = .from(&nums);
-    var iter2 = try inner2.orderBy(testing.allocator, iter_z.autoCompare(u8), .desc);
+    var iter2 = try inner2.orderBy(testing.allocator, autoCompare(u8), .desc);
     defer iter2.deinit();
 
     while (iter2.next()) |x| {
@@ -733,7 +737,7 @@ test "from other" {
 
         pub fn filter(self: @This(), s: []const u8) bool {
             var inner_iter: Iter(u8) = .from(s);
-            return !inner_iter.contains(self.char, iter_z.autoCompare(u8));
+            return !inner_iter.contains(self.char, autoCompare(u8));
         }
     };
 
@@ -875,15 +879,15 @@ test "iter with optionals" {
 }
 test "reduce auto sum" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(6, iter.reduce(iter_z.autoSum(u8)));
+    try testing.expectEqual(6, iter.reduce(autoSum(u8)));
 }
 test "reduce auto min" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(1, iter.reduce(iter_z.autoMin(u8)));
+    try testing.expectEqual(1, iter.reduce(autoMin(u8)));
 }
 test "reduce auto max" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(3, iter.reduce(iter_z.autoMax(u8)));
+    try testing.expectEqual(3, iter.reduce(autoMax(u8)));
 }
 test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
