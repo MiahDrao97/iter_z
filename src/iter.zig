@@ -1,12 +1,10 @@
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-const MultiArrayList = std.MultiArrayList;
-const Fn = std.builtin.Type.Fn;
-const assert = std.debug.assert;
-const DoublyLinkedList = std.DoublyLinkedList;
-pub const util = @import("util.zig");
-
-pub const Ordering = enum { asc, desc };
+//! iter_z namespace:
+//! - `Iter(T)`: primary iterator interface
+//! - `VTable(T)`: functions used by `AnonymousIterable(T)`
+//! - `AnonymousIterable(T)`: extensible structure that uses `VTable(T)` and converts to `Iter(T)`
+//! - `Ordering`: `asc` or `desc`, which are used when sorting
+//! - `ContextOwnership`: used by `select()` or `where()` to denote the context pointer should be owned by the iterator or not
+//! - auto contexts: `autoCompare(T)`, `autoSum(T)`, `autoMin(T)`, `autoMax(T)`
 
 /// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
 pub fn VTable(comptime T: type) type {
@@ -185,7 +183,7 @@ fn MultiArrayListIterable(comptime T: type) type {
         idx: usize = 0,
 
         /// Initialize from a multi array list
-        pub fn init(list: MultiArrayList(T)) @This() {
+        fn init(list: MultiArrayList(T)) @This() {
             return .{ .list = list };
         }
     };
@@ -659,7 +657,7 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Merge several sources into one, except this resulting iterator owns `sources`.
+        /// Merge several sources into one, and this resulting iterator owns `sources`.
         ///
         /// Be sure to call `deinit()` to free.
         pub fn concatOwned(allocator: Allocator, sources: []Iter(T)) Iter(T) {
@@ -1726,6 +1724,9 @@ fn AutoCompareContext(comptime T: type) type {
     }
 }
 
+/// Sort ascending or descending
+pub const Ordering = enum { asc, desc };
+
 fn SortContext(comptime T: type, comptime TContext: type) type {
     return struct {
         ctx: TContext,
@@ -1865,3 +1866,10 @@ inline fn validateCompareContext(comptime T: type, context: anytype) void {
         }
     }
 }
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const MultiArrayList = std.MultiArrayList;
+const Fn = std.builtin.Type.Fn;
+const assert = std.debug.assert;
+pub const util = @import("util.zig");

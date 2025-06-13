@@ -297,7 +297,7 @@ while (iter.next()) |x| {
 ### `concat()`
 Concatenate any number of iterators into 1.
 It will iterate in the same order the iterators were passed in.
-Keep in mind that the resulting iterator does not own these sources, so caller must `deinit()` the sources invidually afterward.
+Keep in mind that the resulting iterator does not own these sources, so caller may need to `deinit()` the sources invidually afterward.
 ```zig
 var chain = [_]Iter(u8){
     .from(&[_]u8{ 1, 2, 3 }),
