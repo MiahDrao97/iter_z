@@ -1025,14 +1025,12 @@ pub fn Iter(comptime T: type) type {
         /// Also scrolls back 1 if we run out of space so that the next element on `self` will be the one that encountered the `NoSpaceLeft` error.
         pub fn enumerateToBuffer(self: *Iter(T), buf: []T) error{NoSpaceLeft}![]T {
             var i: usize = 0;
-            while (self.next()) |x| {
+            while (self.next()) |x| : (i += 1) {
                 if (i >= buf.len) {
                     self.scroll(-1);
                     return error.NoSpaceLeft;
                 }
-
                 buf[i] = x;
-                i += 1;
             }
             return buf[0..i];
         }
@@ -1046,23 +1044,18 @@ pub fn Iter(comptime T: type) type {
             const buf: []T = try allocator.alloc(T, self.len());
 
             var i: usize = 0;
-            while (self.next()) |x| {
+            while (self.next()) |x| : (i += 1) {
                 buf[i] = x;
-                i += 1;
             }
-
             // just the right size: return our buffer
             if (i == buf.len) {
                 return buf;
             }
-
             // try to resize first
             if (allocator.resize(buf, i)) {
                 return buf;
             }
-
             defer allocator.free(buf);
-
             // pair buf down to final slice
             return try allocator.dupe(T, buf[0..i]);
         }

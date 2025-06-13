@@ -188,25 +188,34 @@ test "does the context seg-fault?" {
     try testing.expectEqual(null, clone.next());
 }
 test "enumerateToOwnedSlice" {
-    var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
-    var iter: Iter(u8) = inner.where(&IsEven{}, .none);
+    {
+        var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
+        var iter: Iter(u8) = inner.where(&IsEven{}, .none);
 
-    try testing.expect(iter.len() == 3);
+        try testing.expect(iter.len() == 3);
 
-    var i: usize = 0;
-    while (iter.next()) |x| {
-        try testing.expect(x == 2);
-        i += 1;
+        var i: usize = 0;
+        while (iter.next()) |x| {
+            try testing.expect(x == 2);
+            i += 1;
+        }
+
+        try testing.expect(i == 1);
+
+        iter.reset();
+        const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
+        defer testing.allocator.free(slice);
+
+        try testing.expectEqual(1, slice.len);
+        try testing.expect(slice[0] == 2);
     }
+    {
+        var iter: Iter(u8) = .empty;
+        const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
+        defer testing.allocator.free(slice);
 
-    try testing.expect(i == 1);
-
-    iter.reset();
-    const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
-    defer testing.allocator.free(slice);
-
-    try testing.expectEqual(1, slice.len);
-    try testing.expect(slice[0] == 2);
+        try testing.expectEqual(0, slice.len);
+    }
 }
 test "empty" {
     var iter: Iter(u8) = .empty;
@@ -797,23 +806,32 @@ test "append" {
     try testing.expectEqual(8, i);
 }
 test "enumerate to buffer" {
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var buf1: [8]u8 = undefined;
+    {
+        var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+        var buf1: [8]u8 = undefined;
 
-    const result: []u8 = try iter.enumerateToBuffer(&buf1);
-    for (result, 1..) |x, i| {
-        try testing.expectEqual(i, x);
+        const result: []u8 = try iter.enumerateToBuffer(&buf1);
+        for (result, 1..) |x, i| {
+            try testing.expectEqual(i, x);
+        }
+
+        iter.reset();
+        var buf2: [4]u8 = undefined;
+
+        try testing.expectError(error.NoSpaceLeft, iter.enumerateToBuffer(&buf2));
+        for (&buf2, 1..) |x, i| {
+            return testing.expectEqual(i, x);
+        }
+
+        try testing.expectEqual(5, iter.next());
     }
+    {
+        var iter: Iter(u8) = .empty;
+        var buf: [10]u8 = undefined;
 
-    iter.reset();
-    var buf2: [4]u8 = undefined;
-
-    try testing.expectError(error.NoSpaceLeft, iter.enumerateToBuffer(&buf2));
-    for (&buf2, 1..) |x, i| {
-        return testing.expectEqual(i, x);
+        const result: []u8 = try iter.enumerateToBuffer(&buf);
+        try testing.expectEqual(0, result.len);
     }
-
-    try testing.expectEqual(5, iter.next());
 }
 test "set index" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
