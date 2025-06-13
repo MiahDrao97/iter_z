@@ -1124,7 +1124,7 @@ pub fn Iter(comptime T: type) type {
                 .ctx = context,
                 .ordering = ordering,
             };
-            std.sort.heap(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
+            std.mem.sortUnstable(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
             return slice;
         }
 
@@ -1147,7 +1147,7 @@ pub fn Iter(comptime T: type) type {
                 .ctx = context,
                 .ordering = ordering,
             };
-            std.sort.insertion(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
+            std.mem.sort(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
             return slice;
         }
 
@@ -1309,7 +1309,7 @@ pub fn Iter(comptime T: type) type {
             context: anytype,
         ) error{ NoElementsFound, MultipleElementsFound }!T {
             _ = validateFilterContext(T, context, .optional);
-            return try self.singleOrNull(context) orelse return error.NoElementsFound;
+            return try self.singleOrNull(context) orelse error.NoElementsFound;
         }
 
         /// Run `action` for each element in the iterator
@@ -1653,7 +1653,6 @@ fn CloneIter(comptime T: type) type {
 }
 
 /// Generate an auto-sum function, assuming elements are a numeric type (excluding enums).
-/// Args are not evaluated in this function.
 ///
 /// Take note that this function performs saturating addition.
 /// Rather than integer overflow, the sum returns `T`'s max value.
@@ -1674,7 +1673,7 @@ fn AutoSumContext(comptime T: type) type {
     }
 }
 
-/// Generate an auto-min function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
+/// Generate an auto-min function, assuming elements are a numeric type (including enums).
 pub inline fn autoMin(comptime T: type) AutoMinContext(T) {
     return .{};
 }
@@ -1705,7 +1704,7 @@ fn AutoMinContext(comptime T: type) type {
     }
 }
 
-/// Generate an auto-max function, assuming elements are a numeric type (including enums). Args are not evaluated in this function.
+/// Generate an auto-max function, assuming elements are a numeric type (including enums).
 pub inline fn autoMax(comptime T: type) AutoMaxContext(T) {
     return .{};
 }
