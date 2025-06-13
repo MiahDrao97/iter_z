@@ -945,7 +945,8 @@ test "multi array list" {
     }
 
     var clone: Iter(S) = try iter.clone(testing.allocator);
-    // defer clone.deinit();
+    // also don't TECHNICALLY need to deinit this since it doesn't really clone anything
+    defer clone.deinit();
 
     _ = iter.next();
     try testing.expectEqualStrings("AAA", clone.next().?.str);

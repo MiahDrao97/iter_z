@@ -183,10 +183,8 @@ fn MultiArrayListIterable(comptime T: type) type {
         /// Current index
         idx: usize = 0,
 
-        const Self = @This();
-
         /// Initialize from a multi array list
-        pub fn init(list: MultiArrayList(T)) Self {
+        pub fn init(list: MultiArrayList(T)) @This() {
             return .{ .list = list };
         }
     };
@@ -622,11 +620,12 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Create an iterator for a multi-array list. Keep in mind that the iterator does not own the backing list.
+        /// Calls to `clone()` and `deinit()` are no-ops.
         pub fn fromMulti(list: MultiArrayList(T)) Iter(T) {
             if (comptime multi_arr_list_allowed) {
                 return .{
                     .variant = Variant{
-                        .multi_arr_list = .init(list),
+                        .multi_arr_list = MultiArrayListIterable(T).init(list),
                     },
                 };
             }
