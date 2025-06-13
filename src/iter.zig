@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
 const Fn = std.builtin.Type.Fn;
 const assert = std.debug.assert;
+const DoublyLinkedList = std.DoublyLinkedList;
 pub const util = @import("util.zig");
 
 pub const Ordering = enum { asc, desc };
@@ -45,7 +46,7 @@ pub fn AnonymousIterable(comptime T: type) type {
         /// Convert to `Iter(T)`
         pub fn iter(self: Self) Iter(T) {
             return .{
-                .variant = Iter(T).Variant{ .anonymous = self },
+                .variant = Variant(T){ .anonymous = self },
             };
         }
     };
@@ -134,7 +135,7 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
                 fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
                     const self_ptr: *Self = @ptrCast(@alignCast(impl));
                     return .{
-                        .variant = Iter(T).Variant{
+                        .variant = Variant(T){
                             .slice = SliceIterable(T){
                                 .allocator = alloc,
                                 .elements = try alloc.dupe(T, self_ptr.elements),
@@ -258,7 +259,7 @@ fn ConcatIterable(comptime T: type) type {
                 success_counter += 1;
             }
             return .{
-                .variant = .{
+                .variant = Variant(T){
                     .concatenated = ConcatIterable(T){
                         .sources = sources_cpy,
                         .idx = self.idx,
@@ -323,25 +324,31 @@ fn ContextIterable(comptime T: type) type {
     };
 }
 
-/// This struct is an iterator that offers some basic filtering and transformations.
-pub fn Iter(comptime T: type) type {
+fn Variant(comptime T: type) type {
     const multi_arr_list_allowed: bool = switch (@typeInfo(T)) {
         .@"struct" => true,
         .@"union" => |u| if (u.tag_type) |_| true else false,
         else => false,
     };
+    return union(enum) {
+        slice: SliceIterable(T),
+        multi_arr_list: if (multi_arr_list_allowed) MultiArrayListIterable(T) else void,
+        concatenated: ConcatIterable(T),
+        anonymous: AnonymousIterable(T),
+        context: ContextIterable(T),
+        empty: void,
+
+        inline fn multiArrListAllowed() bool {
+            return multi_arr_list_allowed;
+        }
+    };
+}
+
+/// This struct is an iterator that offers some basic filtering and transformations.
+pub fn Iter(comptime T: type) type {
     return struct {
         /// Which iterator implementation we're using
-        variant: Variant,
-
-        const Variant = union(enum) {
-            slice: SliceIterable(T),
-            multi_arr_list: if (multi_arr_list_allowed) MultiArrayListIterable(T) else void,
-            concatenated: ConcatIterable(T),
-            anonymous: AnonymousIterable(T),
-            context: ContextIterable(T),
-            empty: void,
-        };
+        variant: Variant(T),
 
         /// Get the next element
         pub fn next(self: *Iter(T)) ?T {
@@ -354,7 +361,7 @@ pub fn Iter(comptime T: type) type {
                     return s.elements[s.idx];
                 },
                 .multi_arr_list => |*m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         if (m.idx >= m.list.len) {
                             return null;
                         }
@@ -382,7 +389,7 @@ pub fn Iter(comptime T: type) type {
                     return s.elements[s.idx];
                 },
                 .multi_arr_list => |*m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         if (m.idx == 0) {
                             return null;
                         } else if (m.idx > m.list.len) {
@@ -405,7 +412,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| s.idx = index,
                 .multi_arr_list => |*m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         m.idx = index;
                     } else unreachable;
                 },
@@ -420,7 +427,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| s.idx = 0,
                 .multi_arr_list => |*m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         m.idx = 0;
                     } else unreachable;
                 },
@@ -443,7 +450,7 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 .multi_arr_list => |*m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         const new_idx: isize = @as(isize, @bitCast(m.idx)) + offset;
                         if (new_idx < 0) {
                             m.idx = 0;
@@ -477,7 +484,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |s| return s.idx,
                 .multi_arr_list => |m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         return m.idx;
                     } else unreachable;
                 },
@@ -494,7 +501,7 @@ pub fn Iter(comptime T: type) type {
                     // if we have an allocator saved on the struct, we know we own the slice
                     if (s.allocator) |_| {
                         return .{
-                            .variant = Variant{
+                            .variant = Variant(T){
                                 .slice = SliceIterable(T){
                                     .elements = try allocator.dupe(T, s.elements),
                                     .idx = s.idx,
@@ -508,7 +515,7 @@ pub fn Iter(comptime T: type) type {
                     return self;
                 },
                 .multi_arr_list => {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         // does not own the MultiArrayList
                         return self;
                     } else unreachable;
@@ -535,7 +542,7 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |s| return s.elements.len,
                 .multi_arr_list => |m| {
-                    if (comptime multi_arr_list_allowed) {
+                    if (Variant(T).multiArrListAllowed()) {
                         return m.list.len;
                     } else unreachable;
                 },
@@ -561,7 +568,7 @@ pub fn Iter(comptime T: type) type {
                         alloc.free(s.elements);
                     }
                 },
-                .multi_arr_list => if (comptime multi_arr_list_allowed) {} else unreachable, // does not own the list; so another no-op
+                .multi_arr_list => if (Variant(T).multiArrListAllowed()) {} else unreachable, // does not own the list; so another no-op
                 .concatenated => |*c| c.deinit(),
                 .anonymous => |a| a.v_table.deinit_fn(a.ptr),
                 .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
@@ -577,7 +584,7 @@ pub fn Iter(comptime T: type) type {
         /// The iterator does not own `slice`, however, and so a `deinit()` call is not neccesary.
         pub fn from(slice: []const T) Iter(T) {
             return .{
-                .variant = Variant{
+                .variant = Variant(T){
                     .slice = SliceIterable(T){
                         .elements = slice,
                     },
@@ -593,7 +600,7 @@ pub fn Iter(comptime T: type) type {
             on_deinit: ?*const fn ([]T) void,
         ) Iter(T) {
             return .{
-                .variant = Variant{
+                .variant = Variant(T){
                     .slice = SliceIterable(T){
                         .elements = slice,
                         .on_deinit = on_deinit,
@@ -623,9 +630,9 @@ pub fn Iter(comptime T: type) type {
         /// Create an iterator for a multi-array list. Keep in mind that the iterator does not own the backing list.
         /// Calls to `clone()` and `deinit()` are no-ops.
         pub fn fromMulti(list: MultiArrayList(T)) Iter(T) {
-            if (comptime multi_arr_list_allowed) {
+            if (Variant(T).multiArrListAllowed()) {
                 return .{
-                    .variant = Variant{
+                    .variant = Variant(T){
                         .multi_arr_list = MultiArrayListIterable(T).init(list),
                     },
                 };
@@ -644,7 +651,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             return .{
-                .variant = Variant{
+                .variant = Variant(T){
                     .concatenated = ConcatIterable(T){
                         .sources = sources,
                     },
@@ -657,7 +664,7 @@ pub fn Iter(comptime T: type) type {
         /// Be sure to call `deinit()` to free.
         pub fn concatOwned(allocator: Allocator, sources: []Iter(T)) Iter(T) {
             return .{
-                .variant = Variant{
+                .variant = Variant(T){
                     .concatenated = ConcatIterable(T){
                         .sources = sources,
                         .allocator = allocator,
@@ -816,7 +823,7 @@ pub fn Iter(comptime T: type) type {
                     errdefer allocator.destroy(iter_clone);
                     iter_clone.* = inner_iter.*;
                     return Iter(TOther){
-                        .variant = Iter(TOther).Variant{
+                        .variant = Variant(TOther){
                             .context = ContextIterable(TOther){
                                 .context = switch (owning) {
                                     .owns_context, .owns_both => blk: {
@@ -861,7 +868,7 @@ pub fn Iter(comptime T: type) type {
                 }
             };
             return Iter(TOther){
-                .variant = Iter(TOther).Variant{
+                .variant = Variant(TOther){
                     .context = ContextIterable(TOther){
                         .context = context_ptr,
                         .iter = self,
@@ -958,7 +965,7 @@ pub fn Iter(comptime T: type) type {
                     errdefer allocator.destroy(iter_clone);
                     iter_clone.* = inner_iter.*;
                     return Iter(T){
-                        .variant = Variant{
+                        .variant = Variant(T){
                             .context = ContextIterable(T){
                                 .context = switch (owning) {
                                     .owns_context, .owns_both => blk: {
@@ -1003,7 +1010,7 @@ pub fn Iter(comptime T: type) type {
                 }
             };
             return Iter(T){
-                .variant = Variant{
+                .variant = Variant(T){
                     .context = ContextIterable(T){
                         .context = context_ptr,
                         .iter = self,
