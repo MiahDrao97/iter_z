@@ -255,24 +255,64 @@ while (iter.prev()) |s| : (expected_tag -= 1) {
 ```
 
 ### `fromOther()`
-Initialize an `Iter(T)` from any ptr, provided its child type defines a `next()` method that returns `?T`.
+Take any pointer, given that its child type has a method called `next()` that takes no params apart from the receiver and returns `?T`.
 
 Unfortunately, we can only rely on the existence of a `next()` method.
-So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and lazily fill it as we call `next()`.
-Keep in mind: `length` may be larger/smaller than the number of times `ptr.next()` may return.
-Even so, `len()` will return a length greater than or equal to the number of times the resulting `Iter(T)` will return.
+So to get all the functionality in `Iter(T)` from another iterator, we lazily fill `buf` as we call `next()`.
+Keep in mind: Length of `buf` may be larger/smaller than the number of times `ptr.next()` may return.
+Even so, `iter.len()` will return the length of the buffer, which represents the maximum number of items returned from `iter.next()`.
+
+Params:
+    - backing buffer
+    - ptr to other iterator
+    - ownership of the ptr (if `.owned`, then will be destroyed by `alloc` on `deinit()`)
+```zig
+const std = @import("std");
+const testing = std.testing;
+const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
+
+var dictionary: HashMap = .empty;
+defer dictionary.deinit(testing.allocator);
+
+try dictionary.put(testing.allocator, "blarf", 1);
+try dictionary.put(testing.allocator, "asdf", 2);
+try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+var dict_iter: HashMap.Iterator = dictionary.iterator();
+var buf: [3]HashMap.Entry = undefined;
+var iter: Iter(HashMap.Entry) = .fromOther(&buf, &dict_iter, .none);
+// no deinit() call technically necessary, since no memory is owned by `iter` in this case
+
+try testing.expectEqual(1, iter.next().?.value_ptr.*);
+try testing.expectEqual(2, iter.next().?.value_ptr.*);
+try testing.expectEqual(3, iter.next().?.value_ptr.*);
+try testing.expectEqual(null, iter.next());
+
+var clone: Iter(HashMap.Entry) = try iter.cloneReset(testing.allocator);
+defer clone.deinit();
+
+try testing.expectEqual(1, clone.next().?.value_ptr.*);
+```
+
+### `fromOtherAlloc()`
+Allocator-equivalent of `fromOther()`:
+Initialize an `Iter(T)` from any ptr, provided its child type defines a `next()` method that returns `?T`.
+
+We allocate a `length`-sized buffer and lazily fill it as we call `next()`.
+Again, keep in mind: the buffer length may be larger/smaller than the number of times `ptr.next()` may return.
+Even so, `iter.len()` will return the length of the buffer, which represents the maximum number of items returned from `iter.next()`.
 
 Params:
     - allocator,
     - ptr to other iterator
-    - length of iteration
+    - max length of iteration
     - ownership of the ptr (if `.owned`, then will be destroyed by `allocator` on `deinit()`)
 ```zig
 const allocator = @import("std").testing.allocator;
 const str = "this,is,a,string,to,split";
 var split_iter = std.mem.splitAny(u8, str, ",");
 
-var iter: Iter([]const u8) = try .fromOther(allocator, &split_iter, split_iter.buffer.len, .none);
+var iter: Iter([]const u8) = try .fromOtherAlloc(allocator, &split_iter, split_iter.buffer.len, .none);
 defer iter.deinit(); // must free
 
 while (iter.next()) |x| {

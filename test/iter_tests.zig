@@ -689,11 +689,11 @@ test "owned slice iterator w/ args" {
     // make sure OG iterator is still where we expect
     try testing.expectEqualStrings("asdf", iter.next().?);
 }
-test "from other" {
+test "from other alloc" {
     const str = "this,is,a,string,to,split";
     var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");
 
-    var iter: Iter([]const u8) = try .fromOther(testing.allocator, &split_iter, split_iter.buffer.len, .none);
+    var iter: Iter([]const u8) = try .fromOtherAlloc(testing.allocator, &split_iter, split_iter.buffer.len, .none);
     defer iter.deinit();
 
     try testing.expectEqual(str.len, iter.len());
@@ -756,7 +756,7 @@ test "from other" {
     try testing.expectEqualStrings("this", iter.prev().?);
     try testing.expectEqual(null, iter.prev());
 }
-test "from other - scroll first" {
+test "from other alloc - scroll first" {
     const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
     {
         var dictionary: HashMap = .empty;
@@ -767,7 +767,7 @@ test "from other - scroll first" {
         try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
         var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        var iter: Iter(HashMap.Entry) = try .fromOtherAlloc(testing.allocator, &dict_iter, dictionary.count(), .none);
         defer iter.deinit();
 
         try testing.expectEqual(3, iter.scroll(2).next().?.value_ptr.*);
@@ -785,7 +785,7 @@ test "from other - scroll first" {
         try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
         var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        var iter: Iter(HashMap.Entry) = try .fromOtherAlloc(testing.allocator, &dict_iter, dictionary.count(), .none);
         defer iter.deinit();
 
         try testing.expectEqual(null, iter.scroll(5).next());
@@ -799,7 +799,7 @@ test "from other - scroll first" {
         try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
         var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        var iter: Iter(HashMap.Entry) = try .fromOtherAlloc(testing.allocator, &dict_iter, dictionary.count(), .none);
         defer iter.deinit();
 
         try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
@@ -813,7 +813,7 @@ test "from other - scroll first" {
         try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
         var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        var iter: Iter(HashMap.Entry) = try .fromOtherAlloc(testing.allocator, &dict_iter, dictionary.count(), .none);
         defer iter.deinit();
 
         // since we capped off the length at 3, we shouldn't see this fourth value
@@ -824,7 +824,7 @@ test "from other - scroll first" {
         try testing.expectEqual(null, iter.next());
     }
 }
-test "from other owned" {
+test "from other alloc - owned" {
     const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
     var dictionary: HashMap = .empty;
     defer dictionary.deinit(testing.allocator);
@@ -836,7 +836,7 @@ test "from other owned" {
     const dict_iter: *HashMap.Iterator = try testing.allocator.create(HashMap.Iterator);
     dict_iter.* = dictionary.iterator();
 
-    var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, dict_iter, dictionary.count(), .owned);
+    var iter: Iter(HashMap.Entry) = try .fromOtherAlloc(testing.allocator, dict_iter, dictionary.count(), .owned);
     defer iter.deinit();
 
     try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
@@ -845,6 +845,51 @@ test "from other owned" {
     defer clone.deinit();
 
     try testing.expectEqual(1, clone.next().?.value_ptr.*);
+}
+test "from other" {
+    const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var buf: [3]HashMap.Entry = undefined;
+        var iter: Iter(HashMap.Entry) = .fromOther(&buf, &dict_iter, .none);
+        // no deinit() call necessary
+
+        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
+
+        var clone: Iter(HashMap.Entry) = try iter.cloneReset(testing.allocator);
+        defer clone.deinit();
+
+        try testing.expectEqual(1, clone.next().?.value_ptr.*);
+    }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        const dict_iter: *HashMap.Iterator = try testing.allocator.create(HashMap.Iterator);
+        dict_iter.* = dictionary.iterator();
+
+        var buf: [3]HashMap.Entry = undefined;
+        var iter: Iter(HashMap.Entry) = .fromOther(&buf, dict_iter, .{ .owned = testing.allocator });
+        defer iter.deinit();
+
+        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
+
+        var clone: Iter(HashMap.Entry) = try iter.cloneReset(testing.allocator);
+        defer clone.deinit();
+
+        try testing.expectEqual(1, clone.next().?.value_ptr.*);
+    }
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
