@@ -123,29 +123,6 @@ iter.scroll(1); // move next() 1 time
 iter.scroll(-1); // move prev() 1 time
 ```
 
-### `setIndex()`
-Set the index of the iterator if it supports indexing. This is only true for iterators created directly from slices.
-```zig
-var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-
-// note this only works because the above iterator is created directly from a slice.
-try iter.setIndex(2);
-_ = iter.next(); // 3
-```
-
-### `getIndex()`
-Determine if the iterator supports indexing (and consequently has an index).
-```zig
-const iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.getIndex(); // 0
-
-var chain = [_]Iter(u8){ iter, .from(&[_]u8{ 4, 5, 6 }) };
-// see more info on concat() down below
-const concat_iter: Iter(u8) = .concat(&chain);
-_ = concat_iter.getIndex(); // null
-_ = concat_iter.setIndex(2); // error.NoIndexing
-```
-
 ### `len()`
 Maximum length an iterator can be. Generally, it's the same number of elements returned by `next()`, but this length is obscured after undergoing certain transformations such as `where()`.
 ```zig
@@ -776,7 +753,7 @@ _ = iter.reduce(Sum{}); // 6
 ```
 
 ### `reverse()`
-Reverses the direction of iteration and indexing (if applicable).
+Reverses the direction of iteration. However, you will likely want to also `reset()` the iterator if you reverse before calling `next()`.
 It's as if the end of a slice where its beginning, and its beginning is the end.
 ```zig
 test "reverse" {
@@ -787,10 +764,8 @@ test "reverse" {
     // reset the reversed iterator to set the original to the end of its sequence
     reversed.reset();
 
-    // length should be equal, but indexes reversed
+    // length should be equal
     try testing.expectEqual(3, reversed.len());
-    // 3 is now at index 0, where it is actually index 2 on the original and the slice
-    try testing.expectEqual(0, reversed.getIndex());
 
     try testing.expectEqual(3, reversed.next().?);
     try testing.expectEqual(2, reversed.next().?);
@@ -893,11 +868,10 @@ pub fn VTable(comptime T: type) type {
         /// Reset the iterator the beginning
         reset_fn: *const fn (*anyopaque) void,
         /// Scroll to a relative offset from the iterator's current offset
-        scroll_fn: *const fn (*anyopaque, isize) void,
-        /// Get the index of the iterator, if availalble. Certain transformations obscure this (such as filtering) and this will be null
-        get_index_fn: *const fn (*anyopaque) ?usize,
-        /// Set the index if indexing is supported. Otherwise, should return `error.NoIndexing`
-        set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        /// If left null, a default implementation will be used:
+        ///     If `isize` is positive, will call `next()` X times or until enumeration is over.
+        ///     If `isize` is negative, will call `prev()` X times or until enumeration reaches the beginning.
+        scroll_fn: ?*const fn (*anyopaque, isize) void = null,
         /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
         clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
         /// Get the maximum number of elements that an iterator will return.

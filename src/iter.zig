@@ -16,11 +16,10 @@ pub fn VTable(comptime T: type) type {
         /// Reset the iterator the beginning
         reset_fn: *const fn (*anyopaque) void,
         /// Scroll to a relative offset from the iterator's current offset
-        scroll_fn: *const fn (*anyopaque, isize) void,
-        /// Get the index of the iterator, if availalble. Certain transformations obscure this (such as filtering) and this will be null
-        get_index_fn: *const fn (*anyopaque) ?usize,
-        /// Set the index if indexing is supported. Otherwise, should return `error.NoIndexing`
-        set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
+        /// If left null, a default implementation will be used:
+        ///     If `isize` is positive, will call `next()` X times or until enumeration is over.
+        ///     If `isize` is negative, will call `prev()` X times or until enumeration reaches the beginning.
+        scroll_fn: ?*const fn (*anyopaque, isize) void = null,
         /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
         clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
         /// Get the maximum number of elements that an iterator will return.
@@ -105,11 +104,6 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
                     return self_ptr.elements[self_ptr.idx];
                 }
 
-                fn implSetIndex(impl: *anyopaque, index: usize) error{NoIndexing}!void {
-                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    self_ptr.idx = index;
-                }
-
                 fn implReset(impl: *anyopaque) void {
                     const self_ptr: *Self = @ptrCast(@alignCast(impl));
                     self_ptr.idx = 0;
@@ -123,11 +117,6 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
                     } else {
                         self_ptr.idx = @bitCast(new_idx);
                     }
-                }
-
-                fn implGetIndex(impl: *anyopaque) ?usize {
-                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    return self_ptr.idx;
                 }
 
                 fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
@@ -161,10 +150,8 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
                 .v_table = &.{
                     .next_fn = &ctx.implNext,
                     .prev_fn = &ctx.implPrev,
-                    .set_index_fn = &ctx.implSetIndex,
                     .reset_fn = &ctx.implReset,
                     .scroll_fn = &ctx.implScroll,
-                    .get_index_fn = &ctx.implGetIndex,
                     .clone_fn = &ctx.implClone,
                     .len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,
@@ -312,8 +299,6 @@ fn ContextIterable(comptime T: type) type {
         const ContextVTable = struct {
             next_fn: *const fn (*const anyopaque, *anyopaque) ?T,
             prev_fn: *const fn (*const anyopaque, *anyopaque) ?T,
-            get_index_fn: *const fn (*anyopaque) ?usize,
-            set_index_fn: *const fn (*anyopaque, usize) error{NoIndexing}!void,
             reset_fn: *const fn (*anyopaque) void,
             len_fn: *const fn (*anyopaque) usize,
             clone_fn: *const fn (*const anyopaque, *anyopaque, *const ContextVTable, Ownership, Allocator) Allocator.Error!Iter(T),
@@ -405,21 +390,6 @@ pub fn Iter(comptime T: type) type {
             }
         }
 
-        /// Set the index to any place
-        pub fn setIndex(self: *Iter(T), index: usize) error{NoIndexing}!void {
-            switch (self.variant) {
-                .slice => |*s| s.idx = index,
-                .multi_arr_list => |*m| {
-                    if (Variant(T).multiArrListAllowed()) {
-                        m.idx = index;
-                    } else unreachable;
-                },
-                .anonymous => |a| try a.v_table.set_index_fn(a.ptr, index),
-                .context => |c| return c.v_table.set_index_fn(c.iter, index),
-                else => return error.NoIndexing,
-            }
-        }
-
         /// Reset the iterator to its first element.
         pub fn reset(self: *Iter(T)) void {
             switch (self.variant) {
@@ -458,7 +428,21 @@ pub fn Iter(comptime T: type) type {
                     } else unreachable;
                 },
                 .concatenated => |*c| c.scroll(offset),
-                .anonymous => |a| a.v_table.scroll_fn(a.ptr, offset),
+                .anonymous => |a| {
+                    if (a.v_table.scroll_fn) |exec_scroll| {
+                        exec_scroll(a.ptr, offset);
+                    } else {
+                        if (offset > 0) {
+                            for (0..@bitCast(offset)) |_| {
+                                _ = a.v_table.next_fn(a.ptr) orelse break;
+                            }
+                        } else if (offset < 0) {
+                            for (0..@abs(offset)) |_| {
+                                _ = a.v_table.prev_fn(a.ptr) orelse break;
+                            }
+                        }
+                    }
+                },
                 .context => |c| {
                     if (offset > 0) {
                         for (0..@bitCast(offset)) |_| {
@@ -471,24 +455,6 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 else => {},
-            }
-        }
-
-        /// Determine which index/offset the iterator is on. (If not null, then caller can use `setIndex()`.)
-        ///
-        /// Generally, indexing is only available on iterators that are directly made from slices or transformed from the former with a `select()` call.
-        /// When the returned set of elements varies from the original length (like filtered down from `where()` or increased with `concat()`), indexing is no longer feasible.
-        pub fn getIndex(self: Iter(T)) ?usize {
-            switch (self.variant) {
-                .slice => |s| return s.idx,
-                .multi_arr_list => |m| {
-                    if (Variant(T).multiArrListAllowed()) {
-                        return m.idx;
-                    } else unreachable;
-                },
-                .anonymous => |a| return a.v_table.get_index_fn(a.ptr),
-                .context => |c| return c.v_table.get_index_fn(c.iter),
-                else => return null,
             }
         }
 
@@ -770,16 +736,6 @@ pub fn Iter(comptime T: type) type {
                     return null;
                 }
 
-                fn implGetIndex(inner: *anyopaque) ?usize {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    return inner_iter.getIndex();
-                }
-
-                fn implSetIndex(inner: *anyopaque, index: usize) error{NoIndexing}!void {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    try inner_iter.setIndex(index);
-                }
-
                 fn implReset(inner: *anyopaque) void {
                     const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
                     inner_iter.reset();
@@ -854,8 +810,6 @@ pub fn Iter(comptime T: type) type {
                         .v_table = &ContextIterable(TOther).ContextVTable{
                             .next_fn = &ctx.implNext,
                             .prev_fn = &ctx.implPrev,
-                            .get_index_fn = &ctx.implGetIndex,
-                            .set_index_fn = &ctx.implSetIndex,
                             .reset_fn = &ctx.implReset,
                             .len_fn = &ctx.implLen,
                             .clone_fn = &ctx.implClone,
@@ -912,14 +866,6 @@ pub fn Iter(comptime T: type) type {
                         }
                     }
                     return null;
-                }
-
-                fn implGetIndex(_: *anyopaque) ?usize {
-                    return null;
-                }
-
-                fn implSetIndex(_: *anyopaque, _: usize) error{NoIndexing}!void {
-                    return error.NoIndexing;
                 }
 
                 fn implReset(inner: *anyopaque) void {
@@ -996,8 +942,6 @@ pub fn Iter(comptime T: type) type {
                         .v_table = &ContextIterable(T).ContextVTable{
                             .next_fn = &ctx.implNext,
                             .prev_fn = &ctx.implPrev,
-                            .get_index_fn = &ctx.implGetIndex,
-                            .set_index_fn = &ctx.implSetIndex,
                             .reset_fn = &ctx.implReset,
                             .len_fn = &ctx.implLen,
                             .clone_fn = &ctx.implClone,
@@ -1410,7 +1354,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Reverse the direction of the iterator.
-        /// Essentially swaps `prev()` and `next()` as well indexes (if applicable).
+        /// Essentially swaps `prev()` and `next()`.
         pub fn reverse(self: *Iter(T)) Iter(T) {
             const ctx = struct {
                 fn implNext(impl: *anyopaque) ?T {
@@ -1423,41 +1367,12 @@ pub fn Iter(comptime T: type) type {
                     return self_ptr.next();
                 }
 
-                fn implSetIndex(impl: *anyopaque, offset: usize) error{NoIndexing}!void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    switch (self_ptr.variant) {
-                        .slice => |*s| s.idx = s.elements.len -| offset,
-                        else => return error.NoIndexing,
-                    }
-                }
-
                 fn implReset(impl: *anyopaque) void {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
                     switch (self_ptr.variant) {
                         .slice => |*s| s.idx = s.elements.len,
                         .empty => {},
                         else => while (self_ptr.next()) |_| {},
-                    }
-                }
-
-                fn implScroll(impl: *anyopaque, offset: isize) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    if (offset > 0) {
-                        for (0..@bitCast(offset)) |_| {
-                            _ = self_ptr.prev();
-                        }
-                    } else if (offset < 0) {
-                        for (0..@abs(offset)) |_| {
-                            _ = self_ptr.next();
-                        }
-                    }
-                }
-
-                fn implGetIndex(impl: *anyopaque) ?usize {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    switch (self_ptr.variant) {
-                        .slice => |s| return s.elements.len -| s.idx,
-                        else => return null,
                     }
                 }
 
@@ -1470,10 +1385,7 @@ pub fn Iter(comptime T: type) type {
                         .v_table = &.{
                             .next_fn = &implNextAsClone,
                             .prev_fn = &implPrevAsClone,
-                            .set_index_fn = &implSetIndexAsClone,
                             .reset_fn = &implResetAsClone,
-                            .scroll_fn = &implScrollAsClone,
-                            .get_index_fn = &implGetIndexAsClone,
                             .clone_fn = &implCloneAsClone,
                             .len_fn = &implLenAsClone,
                             .deinit_fn = &implDeinitAsClone,
@@ -1497,41 +1409,12 @@ pub fn Iter(comptime T: type) type {
                     return clone_ptr.iter.next();
                 }
 
-                fn implSetIndexAsClone(impl: *anyopaque, offset: usize) error{NoIndexing}!void {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
-                    switch (clone_ptr.iter.variant) {
-                        .slice => |*s| s.idx = s.elements.len -| offset,
-                        else => return error.NoIndexing,
-                    }
-                }
-
                 fn implResetAsClone(impl: *anyopaque) void {
                     const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
                     switch (clone_ptr.iter.variant) {
                         .slice => |*s| s.idx = s.elements.len,
                         .empty => {},
                         else => while (clone_ptr.iter.next()) |_| {},
-                    }
-                }
-
-                fn implScrollAsClone(impl: *anyopaque, offset: isize) void {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
-                    if (offset > 0) {
-                        for (0..@bitCast(offset)) |_| {
-                            _ = clone_ptr.iter.prev();
-                        }
-                    } else if (offset < 0) {
-                        for (0..@abs(offset)) |_| {
-                            _ = clone_ptr.iter.next();
-                        }
-                    }
-                }
-
-                fn implGetIndexAsClone(impl: *anyopaque) ?usize {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
-                    switch (clone_ptr.iter.variant) {
-                        .slice => |s| return s.elements.len -| s.idx,
-                        else => return null,
                     }
                 }
 
@@ -1544,10 +1427,7 @@ pub fn Iter(comptime T: type) type {
                         .v_table = &.{
                             .next_fn = &implNextAsClone,
                             .prev_fn = &implPrevAsClone,
-                            .set_index_fn = &implSetIndexAsClone,
                             .reset_fn = &implResetAsClone,
-                            .scroll_fn = &implScrollAsClone,
-                            .get_index_fn = &implGetIndexAsClone,
                             .clone_fn = &implCloneAsClone,
                             .len_fn = &implLenAsClone,
                             .deinit_fn = &implDeinitAsClone,
@@ -1577,10 +1457,7 @@ pub fn Iter(comptime T: type) type {
                 .v_table = &.{
                     .next_fn = &ctx.implNext,
                     .prev_fn = &ctx.implPrev,
-                    .set_index_fn = &ctx.implSetIndex,
                     .reset_fn = &ctx.implReset,
-                    .scroll_fn = &ctx.implScroll,
-                    .get_index_fn = &ctx.implGetIndex,
                     .clone_fn = &ctx.implClone,
                     .len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,

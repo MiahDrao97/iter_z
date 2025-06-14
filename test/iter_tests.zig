@@ -263,7 +263,6 @@ test "concat" {
         var new_iter: Iter(u8) = iter.where(&IsEven{}, .none);
 
         try testing.expectEqual(9, new_iter.len());
-        try testing.expect(new_iter.getIndex() == null);
 
         i = 0;
         while (new_iter.next()) |x| {
@@ -833,21 +832,6 @@ test "enumerate to buffer" {
         try testing.expectEqual(0, result.len);
     }
 }
-test "set index" {
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-
-    try iter.setIndex(2);
-    try testing.expectEqual(3, iter.next());
-
-    var buffer: [1]u8 = undefined;
-    var transformed: Iter([]const u8) = iter.select([]const u8, &NumToString{ .buf = &buffer }, .none);
-
-    try transformed.setIndex(5);
-    try testing.expectEqualStrings("6", transformed.next().?);
-
-    var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
-    try testing.expectError(error.NoIndexing, filtered.setIndex(0));
-}
 test "allocator mix n match" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
     var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
@@ -919,9 +903,8 @@ test "reverse reset" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var reversed: Iter(u8) = iter.reverseReset();
 
-    // length should be equal, but indexes reversed
+    // length should be equal
     try testing.expectEqual(3, reversed.len());
-    try testing.expectEqual(0, reversed.getIndex());
 
     try testing.expectEqual(3, reversed.next().?);
     try testing.expectEqual(2, reversed.next().?);
@@ -936,12 +919,6 @@ test "reverse reset" {
     try testing.expectEqual(3, reversed_clone.next().?);
     try testing.expectEqual(2, reversed_clone.next().?);
     try testing.expectEqual(1, reversed_clone.next().?);
-    try testing.expectEqual(null, reversed_clone.next());
-
-    // again, indexes are reversed
-    reversed.setIndex(0) catch unreachable;
-    try testing.expectEqual(3, reversed.next().?);
-    // clone should not have changed
     try testing.expectEqual(null, reversed_clone.next());
 }
 test "multi array list" {
@@ -973,6 +950,4 @@ test "multi array list" {
     _ = iter.next();
     try testing.expectEqualStrings("AAA", clone.next().?.str);
     try testing.expectEqualStrings("BBB", clone.next().?.str);
-    try testing.expectEqual(1, iter.getIndex());
-    try testing.expectEqual(2, clone.getIndex());
 }
