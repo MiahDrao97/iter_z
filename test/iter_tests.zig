@@ -804,6 +804,25 @@ test "from other - scroll first" {
 
         try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
     }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        defer iter.deinit();
+
+        // since we capped off the length at 3, we shouldn't see this fourth value
+        try dictionary.put(testing.allocator, "neverseethis", 4);
+
+        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
+        try testing.expectEqual(3, iter.next().?.value_ptr.*); // value repeats, which is expected
+        try testing.expectEqual(null, iter.next());
+    }
 }
 test "from other owned" {
     const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
