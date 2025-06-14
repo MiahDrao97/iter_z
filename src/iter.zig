@@ -3,7 +3,7 @@
 //! - `VTable(T)`: functions used by `AnonymousIterable(T)`
 //! - `AnonymousIterable(T)`: extensible structure that uses `VTable(T)` and converts to `Iter(T)`
 //! - `Ordering`: `asc` or `desc`, which are used when sorting
-//! - `ContextOwnership`: used by `select()` or `where()` to denote the context pointer should be owned by the iterator or not
+//! - `ContextOwnership`: used by `select()`, `where()`, `fromOther()`, and `fromOtherAlloc()` to denote the context pointer should be owned by the iterator or not
 //! - auto contexts: `autoCompare(T)`, `autoSum(T)`, `autoMin(T)`, `autoMax(T)`
 
 /// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
@@ -1715,6 +1715,12 @@ pub fn Iter(comptime T: type) type {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
                     switch (self_ptr.variant) {
                         .slice => |*s| s.idx = s.elements.len,
+                        .multi_arr_list => |*m| {
+                            if (Variant(T).multiArrListAllowed()) {
+                                m.idx = m.list.len;
+                            } else unreachable;
+                        },
+                        .other => |*o| o.iter_idx = o.buf.len,
                         .empty => {},
                         else => while (self_ptr.next()) |_| {},
                     }
@@ -1757,6 +1763,12 @@ pub fn Iter(comptime T: type) type {
                     const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
                     switch (clone_ptr.iter.variant) {
                         .slice => |*s| s.idx = s.elements.len,
+                        .multi_arr_list => |*m| {
+                            if (Variant(T).multiArrListAllowed()) {
+                                m.idx = m.list.len;
+                            } else unreachable;
+                        },
+                        .other => |*o| o.iter_idx = o.buf.len,
                         .empty => {},
                         else => while (clone_ptr.iter.next()) |_| {},
                     }

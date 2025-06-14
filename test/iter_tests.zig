@@ -407,7 +407,7 @@ test "single/single or null" {
 
     try testing.expectError(error.NoElementsFound, iter.single(null));
 
-    result = try iter.singleOrNull(null);
+    result = try iter.singleOrNull({});
     try testing.expect(result == null);
 
     iter.deinit();
@@ -890,6 +890,21 @@ test "from other" {
 
         try testing.expectEqual(1, clone.next().?.value_ptr.*);
     }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var buf: [3]HashMap.Entry = undefined;
+        var iter: Iter(HashMap.Entry) = .fromOther(&buf, &dict_iter, .none);
+
+        var reversed: Iter(HashMap.Entry) = iter.reverseReset();
+        try testing.expectEqual(3, reversed.next().?.value_ptr.*);
+    }
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
@@ -1067,30 +1082,45 @@ test "multi array list" {
         tag: usize,
         str: []const u8,
     };
+    {
+        var list: MultiArrayList(S) = .empty;
+        defer list.deinit(testing.allocator);
+        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
 
-    var list: MultiArrayList(S) = .empty;
-    defer list.deinit(testing.allocator);
-    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+        var iter: Iter(S) = .fromMulti(list);
 
-    var iter: Iter(S) = .fromMulti(list);
+        var expected_tag: usize = 1;
+        while (iter.next()) |s| : (expected_tag += 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
+        expected_tag = 2;
+        while (iter.prev()) |s| : (expected_tag -= 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
 
-    var expected_tag: usize = 1;
-    while (iter.next()) |s| : (expected_tag += 1) {
-        try testing.expectEqual(expected_tag, s.tag);
+        var clone: Iter(S) = try iter.clone(testing.allocator);
+        // also don't TECHNICALLY need to deinit this since it doesn't really clone anything
+        defer clone.deinit();
+
+        _ = iter.next();
+        try testing.expectEqualStrings("AAA", clone.next().?.str);
+        try testing.expectEqualStrings("BBB", clone.next().?.str);
     }
-    expected_tag = 2;
-    while (iter.prev()) |s| : (expected_tag -= 1) {
-        try testing.expectEqual(expected_tag, s.tag);
+    {
+        var list: MultiArrayList(S) = .empty;
+        defer list.deinit(testing.allocator);
+        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+
+        var iter: Iter(S) = .fromMulti(list);
+        var reversed: Iter(S) = iter.reverseReset();
+
+        var expected_tag: usize = 2;
+        while (reversed.next()) |s| : (expected_tag -= 1) {
+            try testing.expectEqual(expected_tag, s.tag);
+        }
     }
-
-    var clone: Iter(S) = try iter.clone(testing.allocator);
-    // also don't TECHNICALLY need to deinit this since it doesn't really clone anything
-    defer clone.deinit();
-
-    _ = iter.next();
-    try testing.expectEqualStrings("AAA", clone.next().?.str);
-    try testing.expectEqualStrings("BBB", clone.next().?.str);
 }
 test "pagination with scroll + take" {
     {
