@@ -176,6 +176,98 @@ fn MultiArrayListIterable(comptime T: type) type {
     };
 }
 
+fn AppendedIterable(comptime T: type) type {
+    return struct {
+        iter_a: *Iter(T),
+        iter_b: *Iter(T),
+        current: enum { a, b } = .a,
+        allocator: ?Allocator = null,
+
+        const Self = @This();
+
+        fn next(self: *Self) ?T {
+            switch (self.current) {
+                .a => {
+                    if (self.iter_a.next()) |x| {
+                        return x;
+                    }
+                    self.current = .b;
+                    return self.next();
+                },
+                .b => return self.iter_b.next(),
+            }
+        }
+
+        fn prev(self: *Self) ?T {
+            switch (self.current) {
+                .a => return self.iter_a.prev(),
+                .b => {
+                    if (self.iter_b.prev()) |y| {
+                        return y;
+                    }
+                    self.current = .a;
+                    return self.prev();
+                }
+            }
+        }
+
+        fn reset(self: *Self) void {
+            self.iter_a.reset();
+            self.iter_b.reset();
+            self.current = .a;
+        }
+
+        fn scroll(self: *Self, offset: isize) void {
+            if (offset > 0) {
+                for (0..@bitCast(offset)) |_| {
+                    _ = self.next() orelse break;
+                }
+            } else if (offset < 0) {
+                for (0..@abs(offset)) |_| {
+                    _ = self.prev() orelse break;
+                }
+            }
+        }
+
+        fn len(self: Self) usize {
+            return self.iter_a.len() + self.iter_b.len();
+        }
+
+        fn clone(self: Self, alloc: Allocator) Allocator.Error!Iter(T) {
+            const a_clone: *Iter(T) = try alloc.create(Iter(T));
+            errdefer alloc.destroy(a_clone);
+
+            a_clone.* = try self.iter_a.clone(alloc);
+            errdefer a_clone.deinit();
+
+            const b_clone: *Iter(T) = try alloc.create(Iter(T));
+            errdefer alloc.destroy(b_clone);
+
+            b_clone.* = try self.iter_b.clone(alloc);
+
+            return Iter(T){
+                .variant = Variant(T){
+                    .appended = AppendedIterable(T){
+                        .iter_a = a_clone,
+                        .iter_b = b_clone,
+                        .allocator = alloc,
+                    },
+                },
+            };
+        }
+
+        fn deinit(self: *Self) void {
+            self.iter_a.deinit();
+            self.iter_b.deinit();
+            if (self.allocator) |alloc| {
+                alloc.destroy(self.iter_a);
+                alloc.destroy(self.iter_b);
+            }
+            self.* = undefined;
+        }
+    };
+}
+
 fn ConcatIterable(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -229,7 +321,7 @@ fn ConcatIterable(comptime T: type) type {
             }
         }
 
-        fn cloneToIter(self: Self, allocator: Allocator) Allocator.Error!Iter(T) {
+        fn clone(self: Self, allocator: Allocator) Allocator.Error!Iter(T) {
             var success_counter: usize = 0;
             const sources_cpy: []Iter(T) = try allocator.alloc(Iter(T), self.sources.len);
             errdefer {
@@ -317,6 +409,7 @@ fn Variant(comptime T: type) type {
         slice: SliceIterable(T),
         multi_arr_list: if (multi_arr_list_allowed) MultiArrayListIterable(T) else void,
         concatenated: ConcatIterable(T),
+        appended: AppendedIterable(T),
         anonymous: AnonymousIterable(T),
         context: ContextIterable(T),
         empty: void,
@@ -353,7 +446,7 @@ pub fn Iter(comptime T: type) type {
                     }
                     unreachable;
                 },
-                .concatenated => |*c| return c.next(),
+                inline .concatenated, .appended => |*x| return x.next(),
                 .anonymous => |a| return a.v_table.next_fn(a.ptr),
                 .context => |c| return c.v_table.next_fn(c.context, c.iter),
                 .empty => return null,
@@ -383,7 +476,7 @@ pub fn Iter(comptime T: type) type {
                     }
                     unreachable;
                 },
-                .concatenated => |*c| return c.prev(),
+                inline .concatenated, .appended => |*x| return x.prev(),
                 .anonymous => |a| return a.v_table.prev_fn(a.ptr),
                 .context => |c| return c.v_table.prev_fn(c.context, c.iter),
                 .empty => return null,
@@ -399,7 +492,7 @@ pub fn Iter(comptime T: type) type {
                         m.idx = 0;
                     } else unreachable;
                 },
-                .concatenated => |*c| c.reset(),
+                inline .concatenated, .appended => |*x| x.reset(),
                 .anonymous => |a| a.v_table.reset_fn(a.ptr),
                 .context => |c| c.v_table.reset_fn(c.iter),
                 .empty => {},
@@ -427,7 +520,7 @@ pub fn Iter(comptime T: type) type {
                         }
                     } else unreachable;
                 },
-                .concatenated => |*c| c.scroll(offset),
+                inline .concatenated, .appended => |*x| x.scroll(offset),
                 .anonymous => |a| {
                     if (a.v_table.scroll_fn) |exec_scroll| {
                         exec_scroll(a.ptr, offset);
@@ -484,7 +577,7 @@ pub fn Iter(comptime T: type) type {
                         return self;
                     } else unreachable;
                 },
-                .concatenated => |c| return try c.cloneToIter(allocator),
+                inline .concatenated, .appended => |x| return try x.clone(allocator),
                 .anonymous => |a| return try a.v_table.clone_fn(a.ptr, allocator),
                 .context => |c| return try c.v_table.clone_fn(c.context, c.iter, c.v_table, c.ownership, allocator),
                 .empty => return self,
@@ -510,7 +603,7 @@ pub fn Iter(comptime T: type) type {
                         return m.list.len;
                     } else unreachable;
                 },
-                .concatenated => |c| return c.len(),
+                inline .concatenated, .appended => |x| return x.len(),
                 .anonymous => |a| return a.v_table.len_fn(a.ptr),
                 .context => |c| return c.v_table.len_fn(c.iter),
                 .empty => return 0,
@@ -533,7 +626,7 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 .multi_arr_list => if (Variant(T).multiArrListAllowed()) {} else unreachable, // does not own the list; so another no-op
-                .concatenated => |*c| c.deinit(),
+                inline .concatenated, .appended => |*x| x.deinit(),
                 .anonymous => |a| a.v_table.deinit_fn(a.ptr),
                 .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
                 .empty => {},
@@ -608,12 +701,6 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
         pub fn concat(sources: []Iter(T)) Iter(T) {
-            if (sources.len == 0) {
-                return .empty;
-            } else if (sources.len == 1) {
-                return sources[0];
-            }
-
             return .{
                 .variant = Variant(T){
                     .concatenated = ConcatIterable(T){
@@ -637,16 +724,18 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Append `self` to `other`, resulting in a new concatenated iterator.
-        ///
-        /// Simply creates a 2-length slice and calls `concatOwned()`.
-        /// Be sure to free said slice by calling `deinit()`.
-        pub fn append(self: Iter(T), allocator: Allocator, other: Iter(T)) Allocator.Error!Iter(T) {
-            const chain: []Iter(T) = try allocator.alloc(Iter(T), 2);
-            chain[0] = self;
-            chain[1] = other;
-
-            return concatOwned(allocator, chain);
+        /// Append `self` to `other`, resulting in a new iterator.
+        /// Note that on `deinit()`, both `self` and `other` will also be deinitialized.
+        /// If that is undesired behavior, you may want to clone them beforehand.
+        pub fn append(self: *Iter(T), other: *Iter(T)) Iter(T) {
+            return Iter(T){
+                .variant = Variant(T){
+                    .appended = AppendedIterable(T){
+                        .iter_a = self,
+                        .iter_b = other,
+                    },
+                },
+            };
         }
 
         /// Take any type, given that it has a method called `next()` that takes no params apart from the receiver and returns `?T`.
@@ -954,6 +1043,35 @@ pub fn Iter(comptime T: type) type {
                     },
                 },
             };
+        }
+
+        /// Skip `amt` enumerations.
+        /// Returns `self` to potentially chain onto a different call.
+        pub fn skip(self: *Iter(T), amt: usize) *Iter(T) {
+            self.scroll(@bitCast(amt));
+            return self;
+        }
+
+        /// Take `buf.len` and return new iterator from that buffer.
+        pub fn take(self: *Iter(T), buf: []T) Iter(T) {
+            const result: []T = self.enumerateToBuffer(buf) catch buf;
+            return from(result);
+        }
+
+        /// Take `amt` elements, allocating a slice owned by the returned iterator to store the results
+        pub fn takeAlloc(self: *Iter(T), allocator: Allocator, amt: usize) Allocator.Error!Iter(T) {
+            const buf: []T = try allocator.alloc(T, @min(amt, self.len()));
+            errdefer allocator.free(buf);
+
+            const result: []T = self.enumerateToBuffer(buf) catch buf;
+            if (result.len < buf.len) {
+                if (allocator.resize(buf, result.len)) {
+                    return fromSliceOwned(allocator, buf, null);
+                }
+                defer allocator.free(buf);
+                return fromSliceOwned(allocator, try allocator.dupe(T, result), null);
+            }
+            return fromSliceOwned(allocator, result, null);
         }
 
         /// Enumerates into `buf`, starting at `self`'s current `next()` call.

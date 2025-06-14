@@ -790,7 +790,8 @@ test "append" {
     try testing.expectEqual(2, result);
 
     // we interrupt this iteration to abruptly append it to another
-    var appended: Iter(u8) = try iter.append(testing.allocator, .from(&try util.range(u8, 5, 4)));
+    var iter_2: Iter(u8) = .from(&try util.range(u8, 5, 4));
+    var appended: Iter(u8) = iter.append(&iter_2);
     defer appended.deinit();
 
     try testing.expectEqual(8, appended.len());
@@ -801,8 +802,17 @@ test "append" {
         i += 1;
         try testing.expectEqual(i, x);
     }
-
     try testing.expectEqual(8, i);
+
+    while (appended.prev()) |y| : (i -= 1) {
+        try testing.expectEqual(i, y);
+    }
+
+    var clone: Iter(u8) = try appended.clone(testing.allocator);
+    defer clone.deinit();
+
+    try testing.expectEqual(1, clone.next().?);
+    try testing.expectEqual(1, appended.next().?);
 }
 test "enumerate to buffer" {
     {
