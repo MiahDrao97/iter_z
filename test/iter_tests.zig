@@ -9,9 +9,13 @@ const SplitIterator = std.mem.SplitIterator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const MultiArrayList = std.MultiArrayList;
+const autoCompare = iter_z.autoCompare;
+const autoSum = iter_z.autoSum;
+const autoMin = iter_z.autoMin;
+const autoMax = iter_z.autoMax;
 
-const isEven = struct {
-    pub fn filter(_: isEven, num: u8) bool {
+const IsEven = struct {
+    pub fn filter(_: IsEven, num: u8) bool {
         return num % 2 == 0;
     }
 };
@@ -152,7 +156,7 @@ test "cloneReset" {
 }
 test "where" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var filtered: Iter(u8) = iter.where(&isEven{}, .none);
+    var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
 
     var clone: Iter(u8) = try filtered.clone(testing.allocator);
     defer clone.deinit();
@@ -184,25 +188,34 @@ test "does the context seg-fault?" {
     try testing.expectEqual(null, clone.next());
 }
 test "enumerateToOwnedSlice" {
-    var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
-    var iter: Iter(u8) = inner.where(&isEven{}, .none);
+    {
+        var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
+        var iter: Iter(u8) = inner.where(&IsEven{}, .none);
 
-    try testing.expect(iter.len() == 3);
+        try testing.expect(iter.len() == 3);
 
-    var i: usize = 0;
-    while (iter.next()) |x| {
-        try testing.expect(x == 2);
-        i += 1;
+        var i: usize = 0;
+        while (iter.next()) |x| {
+            try testing.expect(x == 2);
+            i += 1;
+        }
+
+        try testing.expect(i == 1);
+
+        iter.reset();
+        const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
+        defer testing.allocator.free(slice);
+
+        try testing.expectEqual(1, slice.len);
+        try testing.expect(slice[0] == 2);
     }
+    {
+        var iter: Iter(u8) = .empty;
+        const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
+        defer testing.allocator.free(slice);
 
-    try testing.expect(i == 1);
-
-    iter.reset();
-    const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
-    defer testing.allocator.free(slice);
-
-    try testing.expectEqual(1, slice.len);
-    try testing.expect(slice[0] == 2);
+        try testing.expectEqual(0, slice.len);
+    }
 }
 test "empty" {
     var iter: Iter(u8) = .empty;
@@ -210,7 +223,7 @@ test "empty" {
     try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
 
-    var next_iter = iter.where(&isEven{}, .none);
+    var next_iter = iter.where(&IsEven{}, .none);
 
     try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
@@ -247,7 +260,7 @@ test "concat" {
 
         iter.reset();
 
-        var new_iter: Iter(u8) = iter.where(&isEven{}, .none);
+        var new_iter: Iter(u8) = iter.where(&IsEven{}, .none);
 
         try testing.expectEqual(9, new_iter.len());
         try testing.expect(new_iter.getIndex() == null);
@@ -325,7 +338,7 @@ test "orderBy" {
     const nums = [_]u8{ 2, 5, 7, 1, 6, 4, 3 };
 
     var inner: Iter(u8) = .from(&nums);
-    var iter: Iter(u8) = try inner.orderBy(testing.allocator, iter_z.autoCompare(u8), .asc);
+    var iter: Iter(u8) = try inner.orderBy(testing.allocator, autoCompare(u8), .asc);
     defer iter.deinit();
 
     var i: usize = 0;
@@ -337,7 +350,7 @@ test "orderBy" {
     try testing.expect(i == 7);
 
     var inner2: Iter(u8) = .from(&nums);
-    var iter2 = try inner2.orderBy(testing.allocator, iter_z.autoCompare(u8), .desc);
+    var iter2 = try inner2.orderBy(testing.allocator, autoCompare(u8), .desc);
     defer iter2.deinit();
 
     while (iter2.next()) |x| {
@@ -351,7 +364,7 @@ test "any" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
-    var result: ?u8 = iter.any(&isEven{});
+    var result: ?u8 = iter.any(IsEven{});
     try testing.expect(result == null);
 
     // should have scrolled back
@@ -429,7 +442,7 @@ test "clone" {
 }
 test "clone with where static" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var outer: Iter(u8) = iter.where(&isEven{}, .none);
+    var outer: Iter(u8) = iter.where(&IsEven{}, .none);
 
     var result: ?u8 = outer.next();
     try testing.expectEqual(2, result);
@@ -733,7 +746,7 @@ test "from other" {
 
         pub fn filter(self: @This(), s: []const u8) bool {
             var inner_iter: Iter(u8) = .from(s);
-            return !inner_iter.contains(self.char, iter_z.autoCompare(u8));
+            return !inner_iter.contains(self.char, autoCompare(u8));
         }
     };
 
@@ -793,23 +806,32 @@ test "append" {
     try testing.expectEqual(8, i);
 }
 test "enumerate to buffer" {
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var buf1: [8]u8 = undefined;
+    {
+        var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+        var buf1: [8]u8 = undefined;
 
-    const result: []u8 = try iter.enumerateToBuffer(&buf1);
-    for (result, 1..) |x, i| {
-        try testing.expectEqual(i, x);
+        const result: []u8 = try iter.enumerateToBuffer(&buf1);
+        for (result, 1..) |x, i| {
+            try testing.expectEqual(i, x);
+        }
+
+        iter.reset();
+        var buf2: [4]u8 = undefined;
+
+        try testing.expectError(error.NoSpaceLeft, iter.enumerateToBuffer(&buf2));
+        for (&buf2, 1..) |x, i| {
+            return testing.expectEqual(i, x);
+        }
+
+        try testing.expectEqual(5, iter.next());
     }
+    {
+        var iter: Iter(u8) = .empty;
+        var buf: [10]u8 = undefined;
 
-    iter.reset();
-    var buf2: [4]u8 = undefined;
-
-    try testing.expectError(error.NoSpaceLeft, iter.enumerateToBuffer(&buf2));
-    for (&buf2, 1..) |x, i| {
-        return testing.expectEqual(i, x);
+        const result: []u8 = try iter.enumerateToBuffer(&buf);
+        try testing.expectEqual(0, result.len);
     }
-
-    try testing.expectEqual(5, iter.next());
 }
 test "set index" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
@@ -823,12 +845,12 @@ test "set index" {
     try transformed.setIndex(5);
     try testing.expectEqualStrings("6", transformed.next().?);
 
-    var filtered: Iter(u8) = iter.where(&isEven{}, .none);
+    var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
     try testing.expectError(error.NoIndexing, filtered.setIndex(0));
 }
 test "allocator mix n match" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var filtered: Iter(u8) = iter.where(&isEven{}, .none);
+    var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
 
     var arena: ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -846,7 +868,7 @@ test "allocator mix n match" {
     var clone4 = try iter.clone(arena2.allocator());
     defer clone4.deinit();
 
-    var filtered2 = clone4.where(&isEven{}, .none);
+    var filtered2 = clone4.where(&IsEven{}, .none);
 
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();
@@ -854,13 +876,13 @@ test "allocator mix n match" {
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(isEven{}, &moved));
+    try testing.expectEqual(2, iter.filterNext(IsEven{}, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements
 
-    try testing.expectEqual(null, iter.filterNext(isEven{}, &moved));
+    try testing.expectEqual(null, iter.filterNext(IsEven{}, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(isEven{}, &moved));
+    try testing.expectEqual(null, iter.filterNext(IsEven{}, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 test "iter with optionals" {
@@ -875,15 +897,15 @@ test "iter with optionals" {
 }
 test "reduce auto sum" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(6, iter.reduce(iter_z.autoSum(u8)));
+    try testing.expectEqual(6, iter.reduce(autoSum(u8)));
 }
 test "reduce auto min" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(1, iter.reduce(iter_z.autoMin(u8)));
+    try testing.expectEqual(1, iter.reduce(autoMin(u8)));
 }
 test "reduce auto max" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    try testing.expectEqual(3, iter.reduce(iter_z.autoMax(u8)));
+    try testing.expectEqual(3, iter.reduce(autoMax(u8)));
 }
 test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -928,60 +950,29 @@ test "multi array list" {
         str: []const u8,
     };
 
-    {
-        var list: MultiArrayList(S) = .empty;
-        defer list.deinit(testing.allocator);
-        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+    var list: MultiArrayList(S) = .empty;
+    defer list.deinit(testing.allocator);
+    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
 
-        var iter: Iter(S) = try .fromMulti(testing.allocator, list);
-        defer iter.deinit();
+    var iter: Iter(S) = .fromMulti(list);
 
-        var expected_tag: usize = 1;
-        while (iter.next()) |s| : (expected_tag += 1) {
-            try testing.expectEqual(expected_tag, s.tag);
-        }
-        expected_tag = 2;
-        while (iter.prev()) |s| : (expected_tag -= 1) {
-            try testing.expectEqual(expected_tag, s.tag);
-        }
-
-        var clone: Iter(S) = try iter.clone(testing.allocator);
-        defer clone.deinit();
-
-        _ = iter.next();
-        try testing.expectEqualStrings("AAA", clone.next().?.str);
-        try testing.expectEqualStrings("BBB", clone.next().?.str);
-        try testing.expectEqual(1, iter.getIndex());
-        try testing.expectEqual(2, clone.getIndex());
+    var expected_tag: usize = 1;
+    while (iter.next()) |s| : (expected_tag += 1) {
+        try testing.expectEqual(expected_tag, s.tag);
     }
-    // use locally scoped iterable
-    {
-        var list: MultiArrayList(S) = .empty;
-        defer list.deinit(testing.allocator);
-        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
-
-        var iterable: iter_z.MultiArrayListIterable(S) = .init(list);
-        var iter: Iter(S) = iterable.iter();
-        // don't need to deinit
-
-        var expected_tag: usize = 1;
-        while (iter.next()) |s| : (expected_tag += 1) {
-            try testing.expectEqual(expected_tag, s.tag);
-        }
-        expected_tag = 2;
-        while (iter.prev()) |s| : (expected_tag -= 1) {
-            try testing.expectEqual(expected_tag, s.tag);
-        }
-
-        var clone: Iter(S) = try iter.clone(testing.allocator);
-        defer clone.deinit();
-
-        _ = iter.next();
-        try testing.expectEqualStrings("AAA", clone.next().?.str);
-        try testing.expectEqualStrings("BBB", clone.next().?.str);
-        try testing.expectEqual(1, iter.getIndex());
-        try testing.expectEqual(2, clone.getIndex());
+    expected_tag = 2;
+    while (iter.prev()) |s| : (expected_tag -= 1) {
+        try testing.expectEqual(expected_tag, s.tag);
     }
+
+    var clone: Iter(S) = try iter.clone(testing.allocator);
+    // also don't TECHNICALLY need to deinit this since it doesn't really clone anything
+    defer clone.deinit();
+
+    _ = iter.next();
+    try testing.expectEqualStrings("AAA", clone.next().?.str);
+    try testing.expectEqualStrings("BBB", clone.next().?.str);
+    try testing.expectEqual(1, iter.getIndex());
+    try testing.expectEqual(2, clone.getIndex());
 }

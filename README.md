@@ -6,7 +6,7 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 
 The main type is `Iter(T)`, which comes with several methods and queries.
 
-The latest release is `v0.2.0`, which leverages Zig 0.14.0.
+The latest release is `v0.2.1`, which leverages Zig 0.14.1.
 
 ## Use This Package
 In your build.zig.zon, add the following dependency:
@@ -16,7 +16,7 @@ In your build.zig.zon, add the following dependency:
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
-            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.0.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -64,7 +64,7 @@ zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 
 ### v0.1.1
 Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in function bodies and args before the API was adapted to use the static
-dispatch pattern with context objects. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
+dispatch pattern with context types. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
 `MultiArrayList`. Some public functions present in this release were removed in 0.2.0, such as the methods on `AnonymousIterable(T)` (besides `iter()`)
 and the quick-sort function in `util.zig`.
 
@@ -75,7 +75,7 @@ zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.1.1.tar.gz
 
 ## Iter(T) Methods
 
-### Next
+### `next()`
 Standard iterator method: Returns next element or null if iteration is over.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -84,7 +84,7 @@ while (iter.next()) |x| {
 }
 ```
 
-### Prev
+### `prev()`
 Returns previous element or null if at the beginning.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -98,7 +98,7 @@ _ = iter.prev(); // 2
 _ = iter.prev(); // 1
 ```
 
-### Reset
+### `reset()`
 Reset the iterator to the beginning.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -114,7 +114,7 @@ while (iter.next()) |x| {
 }
 ```
 
-### Scroll
+### `scroll()`
 Scroll left or right by a given offset (negative is left; positive is right).
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -123,7 +123,7 @@ iter.scroll(1); // move next() 1 time
 iter.scroll(-1); // move prev() 1 time
 ```
 
-### Set Index
+### `setIndex()`
 Set the index of the iterator if it supports indexing. This is only true for iterators created directly from slices.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -133,7 +133,7 @@ try iter.setIndex(2);
 _ = iter.next(); // 3
 ```
 
-### Get Index
+### `getIndex()`
 Determine if the iterator supports indexing (and consequently has an index).
 ```zig
 const iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -146,14 +146,14 @@ _ = concat_iter.getIndex(); // null
 _ = concat_iter.setIndex(2); // error.NoIndexing
 ```
 
-### Len
+### `len()`
 Maximum length an iterator can be. Generally, it's the same number of elements returned by `next()`, but this length is obscured after undergoing certain transformations such as `where()`.
 ```zig
 const iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.len(); // length is 3
 ```
 
-### Clone
+### `clone()`
 Clone an iterator. This requires creating a new pointer that copies all the data from the cloned iterator. Be sure to call `deinit()`.
 Also, note the method `cloneReset()`, which is a call to clone an iterator and call `reset()` on the clone.
 ```zig
@@ -175,8 +175,10 @@ _ = iter.next(); // 3
 _ = clone2.next(); // 1
 ```
 
-### Deinit
-Free any memory owned by the iterator. Generally, this is a no-op except when an iterator owns a slice or is a clone. However, `deinit()` will turn an iterator into `.empty`, so be aware of that behavior.
+### `deinit()`
+Free any memory owned by the iterator. Generally, this is a no-op except when an iterator owns or is a clone.
+However, `deinit()` will assign an iterator into `.empty`, so be aware of that behavior.
+It can be redundantly called as well.
 ```zig
 const allocator = @import("std").testing.allocator;
 
@@ -191,7 +193,9 @@ iter.deinit();
 _ = iter.next(); // null
 ```
 
-## Empty
+## Instantiation
+
+### `empty`
 Default iterator with 0 length that always returns `null` on `next()` and `prev()`.
 All calls to `deinit()` turn to into an empty instance.
 ```zig
@@ -200,16 +204,14 @@ _ = iter.next(); // null
 _ = iter.len(); // 0
 ```
 
-## Instantiation
-
-### From
+### `from()`
 Initializes an `Iter(T)` from a slice. It does not own the slice, and will not affect it while iterating.
 There are examples of this function all over this document.
 
-### From Slice Owned
+### `fromSliceOwned()`
 Initializes an `Iter(T)` from a slice, except it owns the slice.
 As a result, calling `deinit()` will free the slice.
-Also, on optional action may be passed in that will be called on the slice when the iterator is deinitialized.
+Also, an optional action may be passed in that will be called on the slice when the iterator is deinitialized.
 This is useful for individually freeing memory for each element.
 ```zig
 const allocator = @import("std").testing.allocator;
@@ -244,61 +246,38 @@ while (iter.next()) |x| {
 }
 ```
 
-### From Multi
+### `fromMulti()`
 Initialize an `Iter(T)` from a `MultiArrayList(T)`.
 Keep in mind that the resulting iterator does not own the backing list (and more specifically, it only has a copy to the list, not a const pointer).
-Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering and cloning (the list, not the iterator).
-The recommended course of action for both of these is to order and clone the list directly and then initialize a new iterator from the ordered/cloned list afterward.
+Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering.
+The recommended course of action for both of these is to order the list directly and then initialize a new iterator from the ordered list afterward.
 
-There are 2 ways to initialize an iterator from a `MultiArrayList(T)`. One requires no additional allocation, but is limited to local scopes, whereas the other can be safely returned from a function.
+`clone()` does not allocate additional memory since the iterator does not own the list. It merely clones the iterator, not the list itself.
+Consequently, `deinit()` will not free the list, and is virtually a no-op since there is no memory to cleanup (still assigns the iterator to `empty`).
 ```zig
 const S = struct {
     tag: usize,
     str: []const u8,
 };
 
-// `fromMulti()` initialization, which allocates a pointer to the implementation of `Iter(T)`
-{
-    var list: MultiArrayList(S) = .empty;
-    defer list.deinit(testing.allocator);
-    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
+var list: MultiArrayList(S) = .empty;
+defer list.deinit(testing.allocator);
+try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
+try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
 
-    var iter: Iter(S) = try .fromMulti(testing.allocator, list);
-    defer iter.deinit();
+var iter: Iter(S) = .fromMulti(list);
 
-    var expected_tag: usize = 1;
-    while (iter.next()) |s| : (expected_tag += 1) {
-        try testing.expectEqual(expected_tag, s.tag);
-    }
-    expected_tag = 2;
-    while (iter.prev()) |s| : (expected_tag -= 1) {
-        try testing.expectEqual(expected_tag, s.tag);
-    }
+var expected_tag: usize = 1;
+while (iter.next()) |s| : (expected_tag += 1) {
+    try testing.expectEqual(expected_tag, s.tag);
 }
-// use locally scoped iterable
-{
-    var list: MultiArrayList(S) = .empty;
-    defer list.deinit(testing.allocator);
-    try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-    try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
-
-    var iterable: iter_z.MultiArrayListIterable(S) = .init(list);
-    var iter: Iter(S) = iterable.iter();
-    // don't need to deinit
-
-    var expected_tag: usize = 1;
-    while (iter.next()) |s| : (expected_tag += 1) {
-        try testing.expectEqual(expected_tag, s.tag);
-    }
-    expected_tag = 2;
-    while (iter.prev()) |s| : (expected_tag -= 1) {
-        try testing.expectEqual(expected_tag, s.tag);
-    }
+expected_tag = 2;
+while (iter.prev()) |s| : (expected_tag -= 1) {
+    try testing.expectEqual(expected_tag, s.tag);
 }
 ```
 
-### From Other
+### `fromOther()`
 Initialize an `Iter(T)` from any object, provided it has a `next()` method that returns `?T`.
 Unfortunately, it's not very efficient since we have to enumerate the whole thing to a slice and return an `Iter(T)` that owns that slice.
 However, this gives you access to query methods from iterators returned from other libraries.
@@ -315,10 +294,10 @@ while (iter.next()) |x| {
 }
 ```
 
-### Concat
+### `concat()`
 Concatenate any number of iterators into 1.
 It will iterate in the same order the iterators were passed in.
-Keep in mind that the resulting iterator does not own these sources, so caller must `deinit()` the sources invidually afterward.
+Keep in mind that the resulting iterator does not own these sources, so caller may need to `deinit()` the sources invidually afterward.
 ```zig
 var chain = [_]Iter(u8){
     .from(&[_]u8{ 1, 2, 3 }),
@@ -332,7 +311,7 @@ while (iter.next()) |x| {
 }
 ```
 
-### Concat Owned
+### `concatOwned()`
 Just like `concat()`, except the resulting iterator owns the iterators and slice passed in.
 ```zig
 const allocator = @import("std").testing.allocator;
@@ -353,7 +332,7 @@ while (iter.next()) |x| {
 ## Queries
 These are the queries currently available on `Iter(T)`:
 
-### Append
+### `append()`
 Essentially is a simplified call of `concatOwned()`, which merges two iterators into 1.
 ```zig
 const iter_a: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -368,16 +347,15 @@ while (iter.next()) |x| {
 }
 ```
 
-### Select
+### `select()`
 Transform the elements in your iterator from one type `T` to another `TOther`.
 Takes in two arguments after the method receiver: `context_ptr` and `ownership`.
 
 `context_ptr` must be a pointer whose child type has the following method: `fn transform(@This(), T) TOther`.
 That pointer may optionally be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }` for `ownership`.
 If so, be sure to call `deinit()` after you are done.
-Otherwise, pass in `.none` if `context_ptr` points to something locally scoped or a constant value.
-
-The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
+Otherwise, pass in `.none` if `context_ptr` points to something locally scoped or static.
+The context is stored as a type-erased const pointer.
 ```zig
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -442,16 +420,16 @@ while (strings.next()) |maybe_str| {
 }
 ```
 
-### Where
+### `where()`
 Filter the elements in your iterator, creating a new iterator with only those elements.
 If you simply need to iterate with a filter, use `filterNext(...)`.
 
 Like `select()`, this function takes in 2 arguments: `context_ptr` and `ownership`.
 `context_ptr` must be a pointer whose child type defines the following method: `fn filter(@This(), T) bool`.
-`ownership` can either take in `.none` if `context_ptr` points to something locally scoped or a constant,
+`ownership` can either take in `.none` if `context_ptr` points to something locally scoped or static,
 or it can be owned by the iterator if you pass in `ContextOwnership{ .owned = allocator }`.
 
-The context is stored as a type-erased const pointer, which combines the static dispatch of the context with dynamic dispatch techniques.
+The context is stored as a type-erased const pointer.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
@@ -499,7 +477,7 @@ while (evens.next()) |x| {
 }
 ```
 
-### Order By
+### `orderBy()`
 Pass in a comparer function to order your iterator in ascending or descending order (unstable sorting).
 Keep in mind that this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
 Stable sorting is available via `orderByStable()`.
@@ -531,7 +509,7 @@ while (ordered.next()) |x| {
 }
 ```
 
-### Any
+### `any()`
 Peek at the next element with or without a filter.
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
@@ -555,7 +533,7 @@ _ = iter.any(ZeroRemainder{ .divisor = 2 }); // 2
 _ = iter.next(); // 1
 ```
 
-### Filter Next
+### `filterNext()`
 Calls `next()` until an element fulfills the given filter condition or returns null if none are found/iteration is over.
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
@@ -590,7 +568,7 @@ test "filterNext()" {
 }
 ```
 
-### For Each
+### `forEach()`
 Execute an action over the elements of your iterator.
 Optionally pass in an action when an error is occurred and determine if iteration should break when an error is encountered.
 ```zig
@@ -637,10 +615,11 @@ var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, &Print
 var i: usize = 0;
 var test_failed: bool = false;
 
-// action to perform on every element
-// another action to be executed on error
-// whether or not to break on error
-// args
+// Parameters:
+// - action to perform on every element
+// - another action to be executed on error
+// - whether or not to break on error
+// - args
 iter.forEach(ctx.action, ctx.onErr, true, .{ &i, &test_failed, testing.allocator });
 
 try testing.expect(!test_failed);
@@ -648,7 +627,7 @@ try testing.expect(i == 3);
 
 ```
 
-### Count
+### `count()`
 Count the number of elements in your iterator with or without a filter.
 This differs from `len()` because it will count the exact number of remaining elements with all transformations applied. Scrolls back in place.
 
@@ -674,7 +653,7 @@ _ = iter.count(null); // 5
 _ = iter.count(filter); // 2
 ```
 
-### All
+### `all()`
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
@@ -689,7 +668,7 @@ var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
 _ = iter.all(IsEven{}); // true
 ```
 
-### Single Or Null
+### `singleOrNull()`
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
@@ -706,7 +685,7 @@ var iter3: Iter(u8) = .from("");
 _ = iter3.singleOrNull(null); // null
 ```
 
-### Single
+### `single()`
 Determine if exactly 1 element fulfills a condition or is left in the iteration. Scrolls back in place.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@This(), T) bool`.
@@ -723,7 +702,7 @@ var iter3: Iter(u8) = .from("");
 _ = iter3.single(null); // error.NoElementsFound
 ```
 
-### Contains
+### `contains()`
 Pass in a comparer context. Returns true if any element returns `.eq`. Scrolls back in place.
 `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
 ```zig
@@ -731,7 +710,7 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.contains(1, iter_z.autoCompare(u8)); // true
 ```
 
-### Enumerate To Buffer
+### `enumerateToBuffer()`
 Enumerate all elements to a buffer passed in from the current. If you wish to start at the beginning, be sure to call `reset()`. Returns a slice of the buffer.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -744,7 +723,7 @@ var buf2: [2]u8 = undefined;
 var result: []u8 = iter.enumerateToBuffer(&buf2) catch &buf2; // fails, but results are [ 1, 2 ]
 ```
 
-### Enumerate To Owned Slice
+### `enumerateToOwnedSlice()`
 Allocate a slice and enumerate all elements to it from the current offset.
 This will not free the iterator if it owns any memory, so you'll still have to call `deinit()` on it if it does.
 Caller owns the slice. If you wish to start enumerating at the beginning, be sure to call `reset()`.
@@ -756,7 +735,7 @@ const results: []u8 = try iter.enumerateToOwnedSlice(allocator);
 defer allocator.free(results);
 ```
 
-### Fold
+### `fold()`
 Fold the iteration into a single value of a given type.
 An initial value is fed into the context's `accumulate()` method with the current item, and the result is assigned to a collector value.
 That collector value is continued is each subsequent call to `accumulate()` with each element in the iterator, reassigning its value the result until the end of the enumeration.
@@ -779,7 +758,7 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.fold(u16, Sum{}, 0); // 6
 ```
 
-### Reduce
+### `reduce()`
 Calls `fold()`, using the first element as the collector value.
 The return type will be the same as the element type.
 If there are no elements or iteration is over, will return null.
@@ -796,8 +775,8 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.reduce(Sum{}); // 6
 ```
 
-### Reverse
-Reverses the direction of iteration and indexing (if applicable)
+### `reverse()`
+Reverses the direction of iteration and indexing (if applicable).
 It's as if the end of a slice where its beginning, and its beginning is the end.
 ```zig
 test "reverse" {
@@ -820,7 +799,7 @@ test "reverse" {
 }
 ```
 
-### Reverse Reset
+### `reverseReset()`
 Calls `reverse()` and `reset()` on the reversed iterator for ergonomics.
 ```zig
 test "reverse reset" {
