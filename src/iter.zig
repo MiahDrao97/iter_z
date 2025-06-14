@@ -212,8 +212,8 @@ fn AppendedIterable(comptime T: type) type {
         }
 
         fn reset(self: *Self) void {
-            self.iter_a.reset();
-            self.iter_b.reset();
+            _ = self.iter_a.reset();
+            _ = self.iter_b.reset();
             self.current = .a;
         }
 
@@ -304,7 +304,7 @@ fn ConcatIterable(comptime T: type) type {
 
         fn reset(self: *Self) void {
             for (self.sources) |*s| {
-                s.reset();
+                _ = s.reset();
             }
             self.idx = 0;
         }
@@ -484,7 +484,8 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Reset the iterator to its first element.
-        pub fn reset(self: *Iter(T)) void {
+        /// Returns `self`.
+        pub fn reset(self: *Iter(T)) *Iter(T) {
             switch (self.variant) {
                 .slice => |*s| s.idx = 0,
                 .multi_arr_list => |*m| {
@@ -497,10 +498,12 @@ pub fn Iter(comptime T: type) type {
                 .context => |c| c.v_table.reset_fn(c.iter),
                 .empty => {},
             }
+            return self;
         }
 
         /// Scroll forward or backward x.
-        pub fn scroll(self: *Iter(T), offset: isize) void {
+        /// Returns `self`.
+        pub fn scroll(self: *Iter(T), offset: isize) *Iter(T) {
             switch (self.variant) {
                 .slice => |*s| {
                     const new_idx: isize = @as(isize, @bitCast(s.idx)) + offset;
@@ -549,6 +552,7 @@ pub fn Iter(comptime T: type) type {
                 },
                 else => {},
             }
+            return self;
         }
 
         /// Produces a clone of `Iter(T)` (note that it is not reset).
@@ -587,8 +591,7 @@ pub fn Iter(comptime T: type) type {
         /// Creates a clone that is then reset. Does not reset the original iterator.
         pub fn cloneReset(self: Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
             var cpy: Iter(T) = try self.clone(allocator);
-            cpy.reset();
-            return cpy;
+            return cpy.reset().*;
         }
 
         /// Get the length of this iterator.
@@ -827,7 +830,7 @@ pub fn Iter(comptime T: type) type {
 
                 fn implReset(inner: *anyopaque) void {
                     const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    inner_iter.reset();
+                    _ = inner_iter.reset();
                 }
 
                 fn implLen(inner: *anyopaque) usize {
@@ -959,7 +962,7 @@ pub fn Iter(comptime T: type) type {
 
                 fn implReset(inner: *anyopaque) void {
                     const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    inner_iter.reset();
+                    _ = inner_iter.reset();
                 }
 
                 fn implLen(inner: *anyopaque) usize {
@@ -1045,13 +1048,6 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Skip `amt` enumerations.
-        /// Returns `self` to potentially chain onto a different call.
-        pub fn skip(self: *Iter(T), amt: usize) *Iter(T) {
-            self.scroll(@bitCast(amt));
-            return self;
-        }
-
         /// Take `buf.len` and return new iterator from that buffer.
         pub fn take(self: *Iter(T), buf: []T) Iter(T) {
             const result: []T = self.enumerateToBuffer(buf) catch buf;
@@ -1087,7 +1083,7 @@ pub fn Iter(comptime T: type) type {
             var i: usize = 0;
             while (self.next()) |x| : (i += 1) {
                 if (i >= buf.len) {
-                    self.scroll(-1);
+                    _ = self.scroll(-1);
                     return error.NoSpaceLeft;
                 }
                 buf[i] = x;
@@ -1207,7 +1203,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             var scroll_amt: isize = 0;
-            defer self.scroll(scroll_amt);
+            defer _ = self.scroll(scroll_amt);
 
             while (self.next()) |n| {
                 scroll_amt -= 1;
@@ -1280,7 +1276,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             var scroll_amt: isize = 0;
-            defer self.scroll(scroll_amt);
+            defer _ = self.scroll(scroll_amt);
 
             var found: ?T = null;
             while (self.next()) |x| {
@@ -1395,7 +1391,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             var scroll_amt: isize = 0;
-            defer self.scroll(scroll_amt);
+            defer _ = self.scroll(scroll_amt);
 
             var result: usize = 0;
             while (self.next()) |x| {
@@ -1431,7 +1427,7 @@ pub fn Iter(comptime T: type) type {
             }
 
             var scroll_amt: isize = 0;
-            defer self.scroll(scroll_amt);
+            defer _ = self.scroll(scroll_amt);
 
             while (self.next()) |x| {
                 scroll_amt -= 1;
@@ -1588,8 +1584,7 @@ pub fn Iter(comptime T: type) type {
         /// NOTE : This modifies the original iterator, unlike `cloneReset()`, since we're dealing with the same iterator.
         pub fn reverseReset(self: *Iter(T)) Iter(T) {
             var reversed: Iter(T) = self.reverse();
-            reversed.reset();
-            return reversed;
+            return reversed.reset().*;
         }
     };
 }

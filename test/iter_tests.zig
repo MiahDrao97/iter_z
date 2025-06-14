@@ -202,8 +202,7 @@ test "enumerateToOwnedSlice" {
 
         try testing.expect(i == 1);
 
-        iter.reset();
-        const slice: []u8 = try iter.enumerateToOwnedSlice(testing.allocator);
+        const slice: []u8 = try iter.reset().enumerateToOwnedSlice(testing.allocator);
         defer testing.allocator.free(slice);
 
         try testing.expectEqual(1, slice.len);
@@ -258,9 +257,7 @@ test "concat" {
 
         try testing.expectEqual(9, i);
 
-        iter.reset();
-
-        var new_iter: Iter(u8) = iter.where(&IsEven{}, .none);
+        var new_iter: Iter(u8) = iter.reset().where(&IsEven{}, .none);
 
         try testing.expectEqual(9, new_iter.len());
 
@@ -295,8 +292,7 @@ test "concat" {
         try testing.expect(i == 3);
 
         // need to reset before concating...
-        iter.reset();
-        var chain2 = [_]Iter(u8){ iter, .empty };
+        var chain2 = [_]Iter(u8){ iter.reset().*, .empty };
         var iter2: Iter(u8) = .concat(&chain2);
 
         try testing.expect(iter2.len() == 3);
@@ -598,11 +594,8 @@ test "Overlapping select edge cases" {
     result = tripler_clone.next();
     try testing.expectEqual(9, result);
 
-    doubler.reset();
-    tripler.reset();
-
-    var doubler_cpy: Iter(u32) = doubler;
-    var tripler_cpy: Iter(u32) = tripler;
+    var doubler_cpy: Iter(u32) = doubler.reset().*;
+    var tripler_cpy: Iter(u32) = tripler.reset().*;
 
     result = doubler_cpy.next();
     try testing.expectEqual(2, result);
@@ -686,7 +679,7 @@ test "owned slice iterator w/ args" {
     var clone: Iter([]u8) = try iter.cloneReset(allocator);
     defer clone.deinit();
 
-    iter.scroll(1);
+    _ = iter.scroll(1);
 
     // make sure the clone is independent
     try testing.expectEqualStrings("blarf", clone.next().?);
@@ -726,9 +719,7 @@ test "from other" {
     result = iter.next();
     try testing.expect(result == null);
 
-    iter.reset();
-
-    try testing.expect(iter.contains("a", StringCompare{}));
+    try testing.expect(iter.reset().contains("a", StringCompare{}));
     try testing.expect(!iter.contains("blarf", StringCompare{}));
     try testing.expect(iter.contains("this", StringCompare{}));
 
@@ -824,10 +815,8 @@ test "enumerate to buffer" {
             try testing.expectEqual(i, x);
         }
 
-        iter.reset();
         var buf2: [4]u8 = undefined;
-
-        try testing.expectError(error.NoSpaceLeft, iter.enumerateToBuffer(&buf2));
+        try testing.expectError(error.NoSpaceLeft, iter.reset().enumerateToBuffer(&buf2));
         for (&buf2, 1..) |x, i| {
             return testing.expectEqual(i, x);
         }
