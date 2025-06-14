@@ -693,10 +693,10 @@ test "from other" {
     const str = "this,is,a,string,to,split";
     var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");
 
-    var iter: Iter([]const u8) = try .fromOther(testing.allocator, &split_iter, split_iter.buffer.len);
+    var iter: Iter([]const u8) = try .fromOther(testing.allocator, &split_iter, split_iter.buffer.len, .none);
     defer iter.deinit();
 
-    try testing.expectEqual(6, iter.len());
+    try testing.expectEqual(str.len, iter.len());
 
     var result: ?[]const u8 = iter.next();
     try testing.expectEqualStrings("this", result.?);
@@ -742,11 +742,90 @@ test "from other" {
 
     try testing.expectEqual(1, iter.count(StrLength{ .len = 1 }));
     try testing.expectEqual(2, iter.count(StrLength{ .len = 2 }));
-    try testing.expectEqual(6, iter.count(null));
+    try testing.expectEqual(6, iter.count({}));
 
     try testing.expect(iter.all(HasNoChar{ .char = ',' }));
     try testing.expect(!iter.all(StrLength{ .len = 1 }));
     try testing.expect(!iter.all(StrLength{ .len = 2 }));
+
+    try testing.expectEqualStrings("split", iter.scroll(@bitCast(iter.len())).prev().?);
+    try testing.expectEqualStrings("to", iter.prev().?);
+    try testing.expectEqualStrings("string", iter.prev().?);
+    try testing.expectEqualStrings("a", iter.prev().?);
+    try testing.expectEqualStrings("is", iter.prev().?);
+    try testing.expectEqualStrings("this", iter.prev().?);
+    try testing.expectEqual(null, iter.prev());
+}
+test "from other - scroll first" {
+    const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        defer iter.deinit();
+
+        try testing.expectEqual(3, iter.scroll(2).next().?.value_ptr.*);
+        try testing.expectEqual(1, iter.reset().next().?.value_ptr.*);
+        try testing.expectEqual(2, iter.next().?.value_ptr.*);
+        try testing.expectEqual(3, iter.next().?.value_ptr.*);
+        try testing.expectEqual(null, iter.next());
+    }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        defer iter.deinit();
+
+        try testing.expectEqual(null, iter.scroll(5).next());
+    }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count(), .none);
+        defer iter.deinit();
+
+        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
+    }
+}
+test "from other owned" {
+    const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
+    var dictionary: HashMap = .empty;
+    defer dictionary.deinit(testing.allocator);
+
+    try dictionary.put(testing.allocator, "blarf", 1);
+    try dictionary.put(testing.allocator, "asdf", 2);
+    try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+    const dict_iter: *HashMap.Iterator = try testing.allocator.create(HashMap.Iterator);
+    dict_iter.* = dictionary.iterator();
+
+    var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, dict_iter, dictionary.count(), .owned);
+    defer iter.deinit();
+
+    try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
+
+    var clone: Iter(HashMap.Entry) = try iter.cloneReset(testing.allocator);
+    defer clone.deinit();
+
+    try testing.expectEqual(1, clone.next().?.value_ptr.*);
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
@@ -783,7 +862,6 @@ test "append" {
     // we interrupt this iteration to abruptly append it to another
     var iter_2: Iter(u8) = .from(&try util.range(u8, 5, 4));
     var appended: Iter(u8) = iter.append(&iter_2);
-    defer appended.deinit();
 
     try testing.expectEqual(8, appended.len());
 
@@ -949,4 +1027,48 @@ test "multi array list" {
     _ = iter.next();
     try testing.expectEqualStrings("AAA", clone.next().?.str);
     try testing.expectEqualStrings("BBB", clone.next().?.str);
+}
+test "pagination with scroll + take" {
+    {
+        var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
+        var page: [20]u8 = undefined;
+        var page_no: usize = 0;
+        var page_iter: Iter(u8) = full_iter.scroll(@bitCast(page_no * page.len)).take(&page);
+
+        // first page: expecting values 1-20
+        var expected: usize = 1;
+        while (page_iter.next()) |actual| : (expected += 1) {
+            try testing.expectEqual(expected, actual);
+        }
+
+        // second page: expecting values 21-40
+        page_no += 1;
+        page_iter = full_iter.reset().scroll(@bitCast(page_no * page.len)).take(&page);
+        while (page_iter.next()) |actual| : (expected += 1) {
+            try testing.expectEqual(expected, actual);
+        }
+    }
+    // take alloc
+    {
+        const page_size: isize = 20;
+        var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
+        var page_no: isize = 0;
+        var page_iter: Iter(u8) = try full_iter.scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+        defer page_iter.deinit();
+
+        // first page: expecting values 1-20
+        var expected: usize = 1;
+        while (page_iter.next()) |actual| : (expected += 1) {
+            try testing.expectEqual(expected, actual);
+        }
+
+        // third page: expecting values 41-60
+        page_no += 2;
+        expected += page_size;
+        page_iter.deinit();
+        page_iter = try full_iter.reset().scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+        while (page_iter.next()) |actual| : (expected += 1) {
+            try testing.expectEqual(expected, actual);
+        }
+    }
 }

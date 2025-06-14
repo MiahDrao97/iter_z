@@ -501,7 +501,7 @@ pub fn Iter(comptime T: type) type {
             return self;
         }
 
-        /// Scroll forward or backward x.
+        /// Scroll forward or backward `offset`.
         /// Returns `self`.
         pub fn scroll(self: *Iter(T), offset: isize) *Iter(T) {
             switch (self.variant) {
@@ -704,7 +704,11 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
         pub fn concat(sources: []Iter(T)) Iter(T) {
-            return .{
+            if (sources.len == 0) {
+                return .empty;
+            } else if (sources.len == 1) {
+                return sources[0];
+            } else return .{
                 .variant = Variant(T){
                     .concatenated = ConcatIterable(T){
                         .sources = sources,
@@ -727,7 +731,7 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Append `self` to `other`, resulting in a new iterator.
+        /// Append `self` to `other`, resulting in a new iterator that owns both `self` and `other`.
         /// Note that on `deinit()`, both `self` and `other` will also be deinitialized.
         /// If that is undesired behavior, you may want to clone them beforehand.
         pub fn append(self: *Iter(T), other: *Iter(T)) Iter(T) {
@@ -741,26 +745,32 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Take any type, given that it has a method called `next()` that takes no params apart from the receiver and returns `?T`.
-        /// Can use this to transform other iterators into `Iter(T)`.
+        /// Take any pointer, given that its child type has a method called `next()` that takes no params apart from the receiver and returns `?T`.
         ///
         /// Unfortunately, we can only rely on the existence of a `next()` method.
-        /// So to get all the functionality in `Iter(T)` from another iterator, we have to enumerate the results to a new slice that this `Iter(T)` will own.
-        /// Be sure to call `deinit()` after use.
-        pub fn fromOther(allocator: Allocator, other: anytype, length: usize) Allocator.Error!Iter(T) {
-            comptime {
-                var OtherType = @TypeOf(other);
-                switch (@typeInfo(OtherType)) {
-                    .pointer => |ptr| OtherType = ptr.child,
-                    else => {},
-                }
-                if (!std.meta.hasMethod(OtherType, "next")) {
-                    @compileError(@typeName(OtherType) ++ " does not define a method called `next()`.");
-                }
-                const method_info: Fn = @typeInfo(@TypeOf(@field(OtherType, "next"))).@"fn";
-                if (method_info.params.len != 1 or method_info.return_type != ?T) {
-                    @compileError("`next()` method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
-                }
+        /// So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and lazily fill it as we call `next()`.
+        /// Keep in mind: `length` may be larger/smaller than the number of times `ptr.next()` may return.
+        /// Even so, `len()` will return a length greater than or equal to the number of times the resulting `Iter(T)` will return.
+        ///
+        /// Params:
+        ///     - allocator,
+        ///     - ptr to other iterator
+        ///     - length of iteration
+        ///     - ownership of the ptr (if `.owned`, then will be destroyed by `allocator` on `deinit()`)
+        ///
+        /// Be sure to call `deinit()` after use to free the underlying buffer.
+        pub fn fromOther(allocator: Allocator, ptr: anytype, length: usize, ptr_ownership: enum { owned, none }) Allocator.Error!Iter(T) {
+            comptime var OtherType = @TypeOf(ptr);
+            switch (@typeInfo(OtherType)) {
+                .pointer => |p| OtherType = p.child,
+                else => @compileError("Expected pointer type, but found `" ++ @typeName(OtherType) ++ "`"),
+            }
+            if (!std.meta.hasMethod(OtherType, "next")) {
+                @compileError(@typeName(OtherType) ++ " does not define a method called `next()`.");
+            }
+            const method_info: Fn = @typeInfo(@TypeOf(@field(OtherType, "next"))).@"fn";
+            if (method_info.params.len != 1 or method_info.return_type != ?T) {
+                @compileError("`next()` method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
             }
 
             if (length == 0) {
@@ -769,20 +779,192 @@ pub fn Iter(comptime T: type) type {
             const buf: []T = try allocator.alloc(T, length);
             errdefer allocator.free(buf);
 
-            var i: usize = 0;
-            while (@as(?T, other.next())) |x| : (i += 1) {
-                if (i >= length) break;
-                buf[i] = x;
-            }
-            // if we over-estimated our length
-            if (i < length) {
-                if (allocator.resize(buf, i)) {
-                    return fromSliceOwned(allocator, buf, null);
+            const OtherIter = struct {
+                buffer: []T,
+                other_ctx: *OtherType,
+                fill_idx: usize = 0,
+                iter_idx: usize = 0,
+                fin: bool = false,
+                owns_other_ctx: bool,
+                allocator: Allocator,
+
+                const Self = @This();
+
+                pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+                    try writer.print("{{ filled: {d}, idx: {?d}, finished: {}, buffer: [", .{ self.fill_idx, self.iter_idx, self.fin });
+                    if (self.fin) {
+                        for (0..self.fill_idx - 1) |i| {
+                            try writer.print("{any}, ", .{self.buffer[i]});
+                        }
+                    } else {
+                        for (0..self.fill_idx) |i| {
+                            try writer.print("{any}, ", .{self.buffer[i]});
+                        }
+                    }
+                    try writer.print("] }}\n\n", .{});
                 }
-                defer allocator.free(buf);
-                return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
-            }
-            return fromSliceOwned(allocator, buf, null);
+
+                fn implNext(impl: *anyopaque) ?T {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    std.log.debug("Calling next() on other iter: {any}", .{self});
+                    if (self.iter_idx == self.fill_idx) {
+                        if (self.fin) {
+                            return null;
+                        }
+
+                        defer {
+                            self.iter_idx += 1;
+                            self.fill_idx += 1;
+                        }
+                        if (@as(?T, self.other_ctx.next())) |x| {
+                            assert(self.fill_idx < self.buffer.len);
+                            self.buffer[self.fill_idx] = x;
+                            return self.buffer[self.iter_idx];
+                        }
+                        self.fin = true;
+                        return null;
+                    } else if (self.iter_idx < self.fill_idx) {
+                        std.log.debug("next(): Determined that iter index is less than fill index on other iter: {any}", .{self});
+                        if (self.fin and self.iter_idx == self.fill_idx -| 1) {
+                            return null;
+                        }
+                        defer self.iter_idx += 1;
+                        return self.buffer[self.iter_idx];
+                    } else {
+                        defer self.iter_idx += 1;
+                        // the fill index can only be less than the iter index when we've scrolled ahead (past the point we've filled)
+                        while (self.fill_idx <= self.iter_idx and self.fill_idx < self.buffer.len) : (self.fill_idx += 1) {
+                            if (@as(?T, self.other_ctx.next())) |x| {
+                                self.buffer[self.fill_idx] = x;
+                            } else {
+                                self.fin = true;
+                                break;
+                            }
+                        }
+                        std.log.debug("Iter index was greater than fill index. Filled out buffer: {any}", .{self});
+                        if (self.iter_idx <= self.fill_idx) {
+                            return self.buffer[self.iter_idx];
+                        }
+                        return null;
+                    }
+                }
+
+                fn implPrev(impl: *anyopaque) ?T {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    std.log.debug("Calling prev() on other iter: {any}", .{self});
+                    if (self.iter_idx == 0) {
+                        return null;
+                    } else if (self.iter_idx > self.fill_idx) {
+                        if (self.fin) {
+                            // index-wise, the fill index is 2 ahead (should be equal to filled length plus 1)
+                            // Example:
+                            //  We filled 6 spaces, so fill index is going to be equal to 7
+                            //  To get the last element, index should be 5, which is fill_idx - 2;
+                            self.iter_idx = self.fill_idx - 2;
+                            return self.buffer[self.iter_idx];
+                        }
+
+                        // fill it up!
+                        while (self.fill_idx <= self.iter_idx and self.fill_idx < self.buffer.len) : (self.fill_idx += 1) {
+                            if (@as(?T, self.other_ctx.next())) |x| {
+                                self.buffer[self.fill_idx] = x;
+                            } else {
+                                self.fin = true;
+                                break;
+                            }
+                        }
+                        if (self.iter_idx > self.fill_idx) {
+                            self.iter_idx = self.fill_idx;
+                        }
+                        self.iter_idx -= 1;
+                        return self.buffer[self.iter_idx];
+                    } else {
+                        self.iter_idx -= 1;
+                        return self.buffer[self.iter_idx];
+                    }
+                }
+
+                fn implReset(impl: *anyopaque) void {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    self.iter_idx = 0;
+                    std.log.debug("Calling reset() on other iter: {any}", .{self});
+                }
+
+                fn implScroll(impl: *anyopaque, offset: isize) void {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    const new_idx: isize = @as(isize, @bitCast(self.iter_idx)) + offset;
+                    if (new_idx < 0) {
+                        self.iter_idx = 0;
+                    } else {
+                        self.iter_idx = @bitCast(new_idx);
+                    }
+                    std.log.debug("Other iter after scrolling {d}: {any}", .{ offset, self });
+                }
+
+                fn implLen(impl: *anyopaque) usize {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    // this may be larger than the actual number of iterations returned
+                    return self.buffer.len;
+                }
+
+                fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    const self_clone: *Self = try alloc.create(Self);
+                    errdefer alloc.destroy(self_clone);
+
+                    self_clone.* = Self{
+                        .buffer = try alloc.dupe(T, self.buffer),
+                        .other_ctx = self.other_ctx, // no need to clone this since each clone of this iterator has its own buffer
+                        .fin = self.fin,
+                        .fill_idx = self.fill_idx,
+                        .iter_idx = self.iter_idx,
+                        .owns_other_ctx = false, // only one iterator can own the pointer to avoid double-frees
+                        .allocator = alloc,
+                    };
+
+                    return self_clone.iter();
+                }
+
+                fn implDeinit(impl: *anyopaque) void {
+                    const self: *Self = @ptrCast(@alignCast(impl));
+                    self.allocator.free(self.buffer);
+                    if (self.owns_other_ctx) {
+                        self.allocator.destroy(self.other_ctx);
+                    }
+                    self.allocator.destroy(self);
+                }
+
+                fn iter(self: *Self) Iter(T) {
+                    return .{
+                        .variant = Variant(T){
+                            .anonymous = AnonymousIterable(T){
+                                .ptr = self,
+                                .v_table = &VTable(T){
+                                    .next_fn = &implNext,
+                                    .prev_fn = &implPrev,
+                                    .reset_fn = &implReset,
+                                    .scroll_fn = &implScroll,
+                                    .len_fn = &implLen,
+                                    .clone_fn = &implClone,
+                                    .deinit_fn = &implDeinit,
+                                },
+                            },
+                        },
+                    };
+                }
+            };
+
+            const other_iter: *OtherIter = try allocator.create(OtherIter);
+            other_iter.* = .{
+                .buffer = buf,
+                .other_ctx = ptr,
+                .owns_other_ctx = switch (ptr_ownership) {
+                    .owned => true,
+                    .none => false,
+                },
+                .allocator = allocator,
+            };
+            return other_iter.iter();
         }
 
         /// Transform an iterator of type `T` to type `TOther`.

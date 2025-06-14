@@ -255,15 +255,24 @@ while (iter.prev()) |s| : (expected_tag -= 1) {
 ```
 
 ### `fromOther()`
-Initialize an `Iter(T)` from any object, provided it has a `next()` method that returns `?T`.
-Unfortunately, it's not very efficient since we have to enumerate the whole thing to a slice and return an `Iter(T)` that owns that slice.
-However, this gives you access to query methods from iterators returned from other libraries.
+Initialize an `Iter(T)` from any ptr, provided its child type defines a `next()` method that returns `?T`.
+
+Unfortunately, we can only rely on the existence of a `next()` method.
+So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and lazily fill it as we call `next()`.
+Keep in mind: `length` may be larger/smaller than the number of times `ptr.next()` may return.
+Even so, `len()` will return a length greater than or equal to the number of times the resulting `Iter(T)` will return.
+
+Params:
+    - allocator,
+    - ptr to other iterator
+    - length of iteration
+    - ownership of the ptr (if `.owned`, then will be destroyed by `allocator` on `deinit()`)
 ```zig
 const allocator = @import("std").testing.allocator;
 const str = "this,is,a,string,to,split";
 var split_iter = std.mem.splitAny(u8, str, ",");
 
-var iter: Iter([]const u8) = try .fromOther(allocator, &split_iter, split_iter.buffer.len);
+var iter: Iter([]const u8) = try .fromOther(allocator, &split_iter, split_iter.buffer.len, .none);
 defer iter.deinit(); // must free
 
 while (iter.next()) |x| {
