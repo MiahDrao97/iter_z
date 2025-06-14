@@ -26,7 +26,7 @@ In your build.zig.zon, add the following dependency:
 
 Get your hash from the following:
 ```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.0.tar.gz
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
