@@ -1077,6 +1077,54 @@ test "reverse reset" {
     try testing.expectEqual(1, reversed_clone.next().?);
     try testing.expectEqual(null, reversed_clone.next());
 }
+test "reversing and clones" {
+    {
+        var iter: Iter(u8) = .from(&(util.range(u8, 1, 5) catch unreachable));
+        var reversed: Iter(u8) = try iter.reverseCloneReset(testing.allocator);
+        defer reversed.deinit();
+
+        try testing.expectEqual(1, iter.next().?);
+        try testing.expectEqual(5, reversed.next().?);
+
+        try testing.expectEqual(2, iter.next().?);
+        try testing.expectEqual(4, reversed.next().?);
+
+        try testing.expectEqual(3, iter.next().?);
+        try testing.expectEqual(3, reversed.next().?);
+
+        try testing.expectEqual(4, iter.next().?);
+        try testing.expectEqual(2, reversed.next().?);
+
+        try testing.expectEqual(5, iter.next().?);
+        try testing.expectEqual(1, reversed.next().?);
+
+        try testing.expectEqual(null, iter.next());
+        try testing.expectEqual(null, reversed.next());
+    }
+    {
+        var iter: Iter(u8) = .from(&(util.range(u8, 1, 5) catch unreachable));
+        var clone: Iter(u8) = iter.clone(undefined) catch unreachable;
+        var reversed: Iter(u8) = clone.reverseReset();
+
+        try testing.expectEqual(1, iter.next().?);
+        try testing.expectEqual(5, reversed.next().?);
+
+        try testing.expectEqual(2, iter.next().?);
+        try testing.expectEqual(4, reversed.next().?);
+
+        try testing.expectEqual(3, iter.next().?);
+        try testing.expectEqual(3, reversed.next().?);
+
+        try testing.expectEqual(4, iter.next().?);
+        try testing.expectEqual(2, reversed.next().?);
+
+        try testing.expectEqual(5, iter.next().?);
+        try testing.expectEqual(1, reversed.next().?);
+
+        try testing.expectEqual(null, iter.next());
+        try testing.expectEqual(null, reversed.next());
+    }
+}
 test "multi array list" {
     const S = struct {
         tag: usize,

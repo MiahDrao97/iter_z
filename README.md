@@ -100,6 +100,7 @@ _ = iter.prev(); // 1
 
 ### `reset()`
 Reset the iterator to the beginning.
+Returns `self`.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 
@@ -107,7 +108,7 @@ while (iter.next()) |x| {
     // 1, 2, 3
 }
 
-iter.reset();
+_ = iter.reset();
 
 while (iter.next()) |x| {
     // 1, 2, 3
@@ -116,11 +117,12 @@ while (iter.next()) |x| {
 
 ### `scroll()`
 Scroll left or right by a given offset (negative is left; positive is right).
+Returns `self`.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 
-iter.scroll(1); // move next() 1 time
-iter.scroll(-1); // move prev() 1 time
+_ = iter.scroll(1); // move next() 1 time
+_ = iter.scroll(-1); // move prev() 1 time
 ```
 
 ### `len()`
@@ -743,10 +745,8 @@ var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 var buf: [5]u8 = undefined;
 _ = try iter.enumerateToBuffer(&buf); // success!
 
-iter.reset();
-
 var buf2: [2]u8 = undefined;
-var result: []u8 = iter.enumerateToBuffer(&buf2) catch &buf2; // fails, but results are [ 1, 2 ]
+var result: []u8 = iter.reset().enumerateToBuffer(&buf2) catch &buf2; // fails, but results are [ 1, 2 ]
 ```
 
 ### `enumerateToOwnedSlice()`
@@ -804,6 +804,7 @@ _ = iter.reduce(Sum{}); // 6
 ### `reverse()`
 Reverses the direction of iteration. However, you will likely want to also `reset()` the iterator if you reverse before calling `next()`.
 It's as if the end of a slice where its beginning, and its beginning is the end.
+WARN : The reversed iterator points to the original, so they move together. If that is undesired behavior, create a clone and reverse that instead.
 ```zig
 test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -811,7 +812,7 @@ test "reverse" {
     // note that the beginning of the original is the end of the reversed one, thus returning null on `next()` right away.
     try testing.expectEqual(null, reversed.next());
     // reset the reversed iterator to set the original to the end of its sequence
-    reversed.reset();
+    _ = reversed.reset();
 
     // length should be equal
     try testing.expectEqual(3, reversed.len());
@@ -834,6 +835,79 @@ test "reverse reset" {
     try testing.expectEqual(2, reversed.next().?);
     try testing.expectEqual(1, reversed.next().?);
     try testing.expectEqual(null, reversed.next());
+}
+```
+
+### `reverseCloneReset()`
+Calls `reverse()`, then `cloneReset` so that the resulting iterator moves independently of the orignal.
+```zig
+test "reverse clone reset" {
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var reversed: Iter(u8) = try iter.reverseCloneReset(testing.allocator);
+    defer reversed.deinit();
+
+    try testing.expectEqual(1, iter.next().?);
+    try testing.expectEqual(3, reversed.next().?);
+
+    try testing.expectEqual(2, iter.next().?);
+    try testing.expectEqual(2, reversed.next().?);
+
+    try testing.expectEqual(3, iter.next().?);
+    try testing.expectEqual(1, reversed.next().?);
+
+    try testing.expectEqual(null, iter.next());
+    try testing.expectEqual(null, reversed.next());
+}
+```
+
+### `take()`
+Take `buf.len` and return new iterator from that buffer.
+```zig
+test "take()" {
+    var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
+    var page: [20]u8 = undefined;
+    var page_no: usize = 0;
+    var page_iter: Iter(u8) = full_iter.scroll(@bitCast(page_no * page.len)).take(&page);
+
+    // first page: expecting values 1-20
+    var expected: usize = 1;
+    while (page_iter.next()) |actual| : (expected += 1) {
+        try testing.expectEqual(expected, actual);
+    }
+
+    // second page: expecting values 21-40
+    page_no += 1;
+    page_iter = full_iter.reset().scroll(@bitCast(page_no * page.len)).take(&page);
+    while (page_iter.next()) |actual| : (expected += 1) {
+        try testing.expectEqual(expected, actual);
+    }
+}
+```
+
+### `takeAlloc()`
+Similar to `task()`, except allocating memory rather than using a buffer.
+```zig
+test "takeAlloc()" {
+    const page_size: isize = 20;
+    var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
+    var page_no: isize = 0;
+    var page_iter: Iter(u8) = try full_iter.scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+    defer page_iter.deinit();
+
+    // first page: expecting values 1-20
+    var expected: usize = 1;
+    while (page_iter.next()) |actual| : (expected += 1) {
+        try testing.expectEqual(expected, actual);
+    }
+
+    // third page: expecting values 41-60
+    page_no += 2;
+    expected += page_size;
+    page_iter.deinit();
+    page_iter = try full_iter.reset().scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+    while (page_iter.next()) |actual| : (expected += 1) {
+        try testing.expectEqual(expected, actual);
+    }
 }
 ```
 

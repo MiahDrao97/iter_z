@@ -1699,6 +1699,9 @@ pub fn Iter(comptime T: type) type {
 
         /// Reverse the direction of the iterator.
         /// Essentially swaps `prev()` and `next()`.
+        ///
+        /// WARN : The reversed iterator points to the original, so they move together.
+        /// If that is undesired behavior, create a clone and reverse that instead or call `reverseCloneReset()`
         pub fn reverse(self: *Iter(T)) Iter(T) {
             const ctx = struct {
                 fn implNext(impl: *anyopaque) ?T {
@@ -1823,10 +1826,18 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Reverse an iterator and reset (set to the end of its iteration and reversed its direction).
-        /// NOTE : This modifies the original iterator, unlike `cloneReset()`, since we're dealing with the same iterator.
+        /// NOTE : Moving this iterator modifies the original, unlike `cloneReset()`.
+        /// If you wish to have two independent iterators, use `reverseCloneReset()`.
         pub fn reverseReset(self: *Iter(T)) Iter(T) {
             var reversed: Iter(T) = self.reverse();
             return reversed.reset().*;
+        }
+
+        /// Reverse an iterator, clone it, and reset the clone.
+        /// This keeps the reversed iterator independent of the orignal.
+        pub fn reverseCloneReset(self: *Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
+            var reversed: Iter(T) = self.reverse();
+            return try reversed.cloneReset(allocator);
         }
     };
 }
