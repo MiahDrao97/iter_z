@@ -906,6 +906,33 @@ test "from other" {
         try testing.expectEqual(3, reversed.next().?.value_ptr.*);
     }
 }
+test "from other alloc - sketchy trick" {
+    const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
+    const getIter = struct {
+        fn getIter(allocator: Allocator, dictionary: *const HashMap) Allocator.Error!Iter(HashMap.Entry) {
+            var dict_iter: HashMap.Iterator = dictionary.iterator();
+            var iter: Iter(HashMap.Entry) = try .fromOtherAlloc(allocator, &dict_iter, dictionary.count(), .none);
+            // deliberately scroll to the end to force it to fill out the whole buffer
+            std.debug.assert(iter.scroll(@bitCast(iter.len())).next() == null);
+            // even though we have a dangling pointer in this struct on return, it won't matter since we'll never reference it again
+            return iter.reset().*;
+        }
+    }.getIter;
+
+    var dictionary: HashMap = .empty;
+    defer dictionary.deinit(testing.allocator);
+
+    try dictionary.put(testing.allocator, "blarf", 1);
+    try dictionary.put(testing.allocator, "asdf", 2);
+    try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+    var iter: Iter(HashMap.Entry) = try getIter(testing.allocator, &dictionary);
+    defer iter.deinit();
+    try testing.expectEqual(1, iter.next().?.value_ptr.*);
+    try testing.expectEqual(2, iter.next().?.value_ptr.*);
+    try testing.expectEqual(3, iter.next().?.value_ptr.*);
+    try testing.expectEqual(null, iter.next());
+}
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
     chain[0] = .from(&try util.range(u8, 1, 3));

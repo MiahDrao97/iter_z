@@ -416,19 +416,23 @@ fn OtherIterable(comptime T: type) type {
             owns_ctx: struct { deinit_fn: *const fn (*anyopaque, Allocator) void, alloc: Allocator },
             owns_both: struct { deinit_fn: *const fn (*anyopaque, Allocator) void, alloc: Allocator },
         };
-        const log = std.log.scoped(.OtherIterable);
 
         pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            try writer.print("{{ index: {d}, filled: {d}, finished: {}, buffer: [ ", .{ self.iter_idx, self.fill_idx, self.fin });
+            try writer.print("\n{{\n  index: {d},\n  filled: {d},\n  finished: {},\n  buffer: [", .{
+                self.iter_idx,
+                self.fill_idx,
+                self.fin,
+            });
             const end: usize = if (self.fin) self.fill_idx -| 1 else self.fill_idx;
             for (0..end) |i| {
-                try writer.print("{any}, ", .{self.buf[i]});
+                const delim: []const u8 = if (i == end - 1) "\n  " else ",";
+                try writer.print("\n    {any}{s}", .{ self.buf[i], delim });
             }
-            try writer.print("] }}", .{});
+            try writer.print("]\n}}", .{});
         }
 
         fn next(self: *Self) ?T {
-            log.debug("Calling next() on other iter: {any}", .{self});
+            logTrace(.OtherIterable, "Calling next() on other iter: {any}", .{self});
             if (self.iter_idx == self.fill_idx) {
                 if (self.fin) {
                     return null;
@@ -439,60 +443,69 @@ fn OtherIterable(comptime T: type) type {
                     self.fill_idx += 1;
                 }
                 if (self.next_fn(self.other)) |x| {
-                    assert(self.fill_idx < self.buf.len);
+                    if (self.fill_idx >= self.buf.len) {
+                        // in the rare scenario that the buffer length is less than the number of elements in the other iterator
+                        self.fin = true;
+                        return null;
+                    }
                     self.buf[self.fill_idx] = x;
                     return self.buf[self.iter_idx];
                 }
                 self.fin = true;
                 return null;
             } else if (self.iter_idx < self.fill_idx) {
-                std.log.debug("next(): Determined that iter index is less than fill index on other iter: {any}", .{self});
+                logTrace(.OtherIterable, "next(): Determined that iter index is less than fill index on other iter: {any}", .{self});
                 if (self.fin and self.iter_idx == self.fill_idx -| 1) {
                     return null;
                 }
                 defer self.iter_idx += 1;
                 return self.buf[self.iter_idx];
             } else {
-                defer self.iter_idx += 1;
                 // the fill index can only be less than the iter index when we've scrolled ahead (past the point we've filled)
-                while (self.fill_idx <= self.iter_idx and self.fill_idx < self.buf.len) : (self.fill_idx += 1) {
-                    if (self.next_fn(self.other)) |x| {
-                        self.buf[self.fill_idx] = x;
-                    } else {
+                defer self.iter_idx += 1;
+                // zig fmt: off
+                while (!self.fin
+                    and self.fill_idx <= self.iter_idx
+                    and self.fill_idx < self.buf.len
+                ) : (self.fill_idx += 1) {
+                // zig fmt: on
+                    if (self.next_fn(self.other)) |x|
+                        self.buf[self.fill_idx] = x
+                    else
                         self.fin = true;
-                        break;
-                    }
                 }
-                std.log.debug("Iter index was greater than fill index. Filled out buffer: {any}", .{self});
-                if (self.iter_idx <= self.fill_idx) {
-                    return self.buf[self.iter_idx];
-                }
-                return null;
+                logTrace(.OtherIterable, "Iter index was greater than fill index. Filled out buffer: {any}", .{self});
+                return if (self.iter_idx < self.buf.len)
+                    self.buf[self.iter_idx]
+                else
+                    null;
             }
         }
 
         fn prev(self: *Self) ?T {
-            log.debug("Calling prev() on other iter: {any}", .{self});
+            logTrace(.OtherIterable, "Calling prev() on other iter: {any}", .{self});
             if (self.iter_idx == 0) {
                 return null;
             } else if (self.iter_idx > self.fill_idx) {
                 if (self.fin) {
                     // index-wise, the fill index is 2 ahead (should be equal to filled length plus 1)
                     // Example:
-                    //  We filled 6 spaces, so fill index is going to be equal to 7
+                    //  We filled 6 spaces, so fill index is going to be equal to 7 by the time we realize we're done
                     //  To get the last element, index should be 5, which is fill_idx - 2;
                     self.iter_idx = self.fill_idx - 2;
                     return self.buf[self.iter_idx];
                 }
-
                 // fill it up!
-                while (self.fill_idx <= self.iter_idx and self.fill_idx < self.buf.len) : (self.fill_idx += 1) {
-                    if (self.next_fn(self.other)) |x| {
-                        self.buf[self.fill_idx] = x;
-                    } else {
+                // zig fmt: off
+                while (!self.fin
+                    and self.fill_idx <= self.iter_idx
+                    and self.fill_idx < self.buf.len
+                ) : (self.fill_idx += 1) {
+                // zig fmt: on
+                    if (self.next_fn(self.other)) |x|
+                        self.buf[self.fill_idx] = x
+                    else
                         self.fin = true;
-                        break;
-                    }
                 }
                 if (self.iter_idx > self.fill_idx) {
                     self.iter_idx = self.fill_idx;
@@ -512,7 +525,7 @@ fn OtherIterable(comptime T: type) type {
             } else {
                 self.iter_idx = @bitCast(new_idx);
             }
-            log.debug("Other iter after scrolling {d}: {any}", .{ offset, self });
+            logTrace(.OtherIterable, "Other iter after scrolling {d}: {any}", .{ offset, self });
         }
 
         fn reset(self: *Self) void {
@@ -2125,9 +2138,16 @@ inline fn validateOtherIterator(comptime T: type, ptr: anytype) void {
     }
 }
 
+inline fn logTrace(comptime scope: @Type(.enum_literal), comptime log: []const u8, args: anytype) void {
+    if (builtin.is_test and std.log.logEnabled(.debug, scope)) {
+        std.log.scoped(scope).debug(log, args);
+    }
+}
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
 const Fn = std.builtin.Type.Fn;
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 pub const util = @import("util.zig");
