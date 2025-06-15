@@ -844,7 +844,7 @@ pub fn Iter(comptime T: type) type {
             context_ptr: anytype,
             ownership: ContextOwnership,
         ) Iter(TOther) {
-            validateSelectContext(T, TOther, context_ptr);
+            validateSelectContext(T, TOther, context_ptr, true);
             const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
             const ctx = struct {
                 fn implNext(c: *const anyopaque, inner: *anyopaque) ?TOther {
@@ -1283,6 +1283,26 @@ pub fn Iter(comptime T: type) type {
                 if (context.filter(n)) {
                     return n;
                 }
+            }
+            return null;
+        }
+
+        /// Transform the next element from type `T` to type `TOther` (or return null if iteration is over)
+        /// - `context` must be a type that defines the method: `fn transform(@This(), T) TOther` (similar to `select()`).
+        ///
+        /// Context example:
+        /// ```zig
+        /// const Multiplier = struct {
+        ///     factor: u32,
+        ///     pub fn transform(self: @This(), item: u32) u32 {
+        ///         return self.factor * item;
+        ///     }
+        /// };
+        /// ```
+        pub fn transformNext(self: *Iter(T), comptime TOther: type, context: anytype) ?TOther {
+            validateSelectContext(T, TOther, context, false);
+            if (self.next()) |x| {
+                return context.transform(x);
             }
             return null;
         }
@@ -1837,28 +1857,28 @@ inline fn validateFilterContext(comptime T: type, context: anytype, comptime des
     }
 }
 
-inline fn validateSelectContext(comptime T: type, comptime TOther: type, context: anytype) void {
+inline fn validateSelectContext(comptime T: type, comptime TOther: type, context: anytype, comptime ptr_required: bool) void {
     const ContextType = @TypeOf(context);
     switch (@typeInfo(ContextType)) {
         .pointer => |ptr| {
             switch (ptr.size) {
-                .one => {
-                    const PtrType = ptr.child;
-                    if (!std.meta.hasMethod(PtrType, "transform")) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-                    }
-                    const method_info: Fn = @typeInfo(@TypeOf(@field(PtrType, "transform"))).@"fn";
-                    if (method_info.params.len != 2 or method_info.params[1].type != T) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-                    }
-                    if (method_info.return_type != TOther) {
-                        @compileError("Child type `" ++ @typeName(PtrType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-                    }
-                },
+                .one => return validateSelectContext(T, TOther, context.*, false),
                 else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
             }
         },
-        else => @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`"),
+        else => if (ptr_required) {
+            @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`");
+        }
+    }
+    if (!std.meta.hasMethod(ContextType, "transform")) {
+        @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+    }
+    const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "transform"))).@"fn";
+    if (method_info.params.len != 2 or method_info.params[1].type != T) {
+        @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
+    }
+    if (method_info.return_type != TOther) {
+        @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
     }
 }
 
