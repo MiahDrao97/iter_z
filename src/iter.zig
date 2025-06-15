@@ -9,24 +9,27 @@
 /// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
 pub fn VTable(comptime T: type) type {
     return struct {
-        /// Get the next element or null if iteration is over
+        /// Get the next element or null if iteration is over.
         next_fn: *const fn (*anyopaque) ?T,
-        /// Get the previous element or null if the iteration is at beginning
+        /// Get the previous element or null if the iteration is at beginning.
         prev_fn: *const fn (*anyopaque) ?T,
-        /// Reset the iterator the beginning
+        /// Reset the iterator the beginning.
         reset_fn: *const fn (*anyopaque) void,
-        /// Scroll to a relative offset from the iterator's current offset
+        /// Get the maximum number of elements that an iterator will return.
+        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
+        len_fn: *const fn (*anyopaque) usize,
+        /// Scroll to a relative offset from the iterator's current offset.
         /// If left null, a default implementation will be used:
         ///     If `isize` is positive, will call `next()` X times or until enumeration is over.
         ///     If `isize` is negative, will call `prev()` X times or until enumeration reaches the beginning.
         scroll_fn: ?*const fn (*anyopaque, isize) void = null,
-        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
-        clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-        /// Get the maximum number of elements that an iterator will return.
-        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
-        len_fn: *const fn (*anyopaque) usize,
-        /// Deinitialize and free memory as needed
-        deinit_fn: *const fn (*anyopaque) void,
+        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice).
+        /// If left null, a default implementation will be used:
+        ///     Simply returns the iterator
+        clone_fn: ?*const fn (*anyopaque, Allocator) Allocator.Error!Iter(T) = null,
+        /// Deinitialize and free memory as needed.
+        /// If left null, this becomes a no-op.
+        deinit_fn: ?*const fn (*anyopaque) void = null,
     };
 }
 
@@ -753,7 +756,12 @@ pub fn Iter(comptime T: type) type {
                     } else unreachable;
                 },
                 inline .concatenated, .appended, .other => |x| return try x.clone(allocator),
-                .anonymous => |a| return try a.v_table.clone_fn(a.ptr, allocator),
+                .anonymous => |a| {
+                    if (a.v_table.clone_fn) |exec_clone| {
+                        return try exec_clone(a.ptr, allocator);
+                    }
+                    return self;
+                },
                 .context => |c| return try c.v_table.clone_fn(c.context, c.iter, c.v_table, c.ownership, allocator),
                 .empty => return self,
             }
@@ -801,7 +809,11 @@ pub fn Iter(comptime T: type) type {
                 },
                 .multi_arr_list => if (Variant(T).multiArrListAllowed()) {} else unreachable, // does not own the list; so another no-op
                 inline .concatenated, .appended, .other => |*x| x.deinit(),
-                .anonymous => |a| a.v_table.deinit_fn(a.ptr),
+                .anonymous => |a| {
+                    if (a.v_table.deinit_fn) |exec_deinit| {
+                        exec_deinit(a.ptr);
+                    }
+                },
                 .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
                 .empty => {},
             }
