@@ -402,176 +402,6 @@ fn ContextIterable(comptime T: type) type {
     };
 }
 
-fn OtherIterable(comptime T: type) type {
-    return struct {
-        buf: []T,
-        other: *anyopaque,
-        next_fn: *const fn (*anyopaque) ?T,
-        iter_idx: usize = 0,
-        fill_idx: usize = 0,
-        fin: bool = false,
-        ownership: Ownership,
-
-        const Self = @This();
-        const Ownership = union(enum) {
-            none,
-            owns_buf: Allocator,
-            owns_ctx: struct { deinit_fn: *const fn (*anyopaque, Allocator) void, alloc: Allocator },
-            owns_both: struct { deinit_fn: *const fn (*anyopaque, Allocator) void, alloc: Allocator },
-        };
-
-        pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            try writer.print("\n{{\n  index: {d},\n  filled: {d},\n  finished: {},\n  buffer: [", .{
-                self.iter_idx,
-                self.fill_idx,
-                self.fin,
-            });
-            const end: usize = if (self.fin) self.fill_idx -| 1 else self.fill_idx;
-            for (0..end) |i| {
-                const delim: []const u8 = if (i == end - 1) "\n  " else ",";
-                try writer.print("\n    {any}{s}", .{ self.buf[i], delim });
-            }
-            try writer.print("]\n}}", .{});
-        }
-
-        fn next(self: *Self) ?T {
-            logTrace(.OtherIterable, "Calling next() on other iter: {any}", .{self});
-            if (self.iter_idx == self.fill_idx) {
-                if (self.fin) {
-                    return null;
-                }
-
-                defer {
-                    self.iter_idx += 1;
-                    self.fill_idx += 1;
-                }
-                if (self.next_fn(self.other)) |x| {
-                    if (self.fill_idx >= self.buf.len) {
-                        // in the rare scenario that the buffer length is less than the number of elements in the other iterator
-                        self.fin = true;
-                        return null;
-                    }
-                    self.buf[self.fill_idx] = x;
-                    return self.buf[self.iter_idx];
-                }
-                self.fin = true;
-                return null;
-            } else if (self.iter_idx < self.fill_idx) {
-                logTrace(.OtherIterable, "next(): Determined that iter index is less than fill index on other iter: {any}", .{self});
-                if (self.fin and self.iter_idx == self.fill_idx -| 1) {
-                    return null;
-                }
-                defer self.iter_idx += 1;
-                return self.buf[self.iter_idx];
-            } else {
-                // the fill index can only be less than the iter index when we've scrolled ahead (past the point we've filled)
-                defer self.iter_idx += 1;
-                // zig fmt: off
-                while (!self.fin
-                    and self.fill_idx <= self.iter_idx
-                    and self.fill_idx < self.buf.len
-                ) : (self.fill_idx += 1) {
-                // zig fmt: on
-                    if (self.next_fn(self.other)) |x|
-                        self.buf[self.fill_idx] = x
-                    else
-                        self.fin = true;
-                }
-                logTrace(.OtherIterable, "Iter index was greater than fill index. Filled out buffer: {any}", .{self});
-                return if (self.iter_idx < self.buf.len)
-                    self.buf[self.iter_idx]
-                else
-                    null;
-            }
-        }
-
-        fn prev(self: *Self) ?T {
-            logTrace(.OtherIterable, "Calling prev() on other iter: {any}", .{self});
-            if (self.iter_idx == 0) {
-                return null;
-            } else if (self.iter_idx > self.fill_idx) {
-                if (self.fin) {
-                    // index-wise, the fill index is 2 ahead (should be equal to filled length plus 1)
-                    // Example:
-                    //  We filled 6 spaces, so fill index is going to be equal to 7 by the time we realize we're done
-                    //  To get the last element, index should be 5, which is fill_idx - 2;
-                    self.iter_idx = self.fill_idx - 2;
-                    return self.buf[self.iter_idx];
-                }
-                // fill it up!
-                // zig fmt: off
-                while (!self.fin
-                    and self.fill_idx <= self.iter_idx
-                    and self.fill_idx < self.buf.len
-                ) : (self.fill_idx += 1) {
-                // zig fmt: on
-                    if (self.next_fn(self.other)) |x|
-                        self.buf[self.fill_idx] = x
-                    else
-                        self.fin = true;
-                }
-                if (self.iter_idx > self.fill_idx) {
-                    self.iter_idx = self.fill_idx;
-                }
-                self.iter_idx -= 1;
-                return self.buf[self.iter_idx];
-            } else {
-                self.iter_idx -= 1;
-                return self.buf[self.iter_idx];
-            }
-        }
-
-        fn scroll(self: *Self, offset: isize) void {
-            const new_idx: isize = @as(isize, @bitCast(self.iter_idx)) + offset;
-            if (new_idx < 0) {
-                self.iter_idx = 0;
-            } else {
-                self.iter_idx = @bitCast(new_idx);
-            }
-            logTrace(.OtherIterable, "Other iter after scrolling {d}: {any}", .{ offset, self });
-        }
-
-        fn reset(self: *Self) void {
-            self.iter_idx = 0;
-        }
-
-        fn clone(self: Self, alloc: Allocator) Allocator.Error!Iter(T) {
-            const self_clone: Self = .{
-                .buf = try alloc.dupe(T, self.buf),
-                .other = self.other,
-                .next_fn = self.next_fn,
-                .iter_idx = self.iter_idx,
-                .fill_idx = self.fill_idx,
-                .fin = self.fin,
-                // Regardless of previous ownership strategy, only the original iter can own the context,
-                // and all clones own a copy of the buffer.
-                .ownership = Ownership{ .owns_buf = alloc },
-            };
-            return Iter(T){
-                .variant = Variant(T){
-                    .other = self_clone,
-                },
-            };
-        }
-
-        fn len(self: Self) usize {
-            return self.buf.len;
-        }
-
-        fn deinit(self: Self) void {
-            switch (self.ownership) {
-                .owns_buf => |alloc| alloc.free(self.buf),
-                .owns_ctx => |x| x.deinit_fn(self.other, x.alloc),
-                .owns_both => |y| {
-                    y.alloc.free(self.buf);
-                    y.deinit_fn(self.other, y.alloc);
-                },
-                .none => {},
-            }
-        }
-    };
-}
-
 fn Variant(comptime T: type) type {
     const multi_arr_list_allowed: bool = switch (@typeInfo(T)) {
         .@"struct" => true,
@@ -585,7 +415,6 @@ fn Variant(comptime T: type) type {
         appended: AppendedIterable(T),
         anonymous: AnonymousIterable(T),
         context: ContextIterable(T),
-        other: OtherIterable(T),
         empty,
 
         inline fn multiArrListAllowed() bool {
@@ -620,7 +449,7 @@ pub fn Iter(comptime T: type) type {
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended, .other => |*x| return x.next(),
+                inline .concatenated, .appended => |*x| return x.next(),
                 .anonymous => |a| return a.v_table.next_fn(a.ptr),
                 .context => |c| return c.v_table.next_fn(c.context, c.iter),
                 .empty => return null,
@@ -650,7 +479,7 @@ pub fn Iter(comptime T: type) type {
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended, .other => |*x| return x.prev(),
+                inline .concatenated, .appended => |*x| return x.prev(),
                 .anonymous => |a| return a.v_table.prev_fn(a.ptr),
                 .context => |c| return c.v_table.prev_fn(c.context, c.iter),
                 .empty => return null,
@@ -667,7 +496,7 @@ pub fn Iter(comptime T: type) type {
                         m.idx = 0;
                     } else unreachable;
                 },
-                inline .concatenated, .appended, .other => |*x| x.reset(),
+                inline .concatenated, .appended => |*x| x.reset(),
                 .anonymous => |a| a.v_table.reset_fn(a.ptr),
                 .context => |c| c.v_table.reset_fn(c.iter),
                 .empty => {},
@@ -697,7 +526,7 @@ pub fn Iter(comptime T: type) type {
                         }
                     } else unreachable;
                 },
-                inline .concatenated, .appended, .other => |*x| x.scroll(offset),
+                inline .concatenated, .appended => |*x| x.scroll(offset),
                 .anonymous => |a| {
                     if (a.v_table.scroll_fn) |exec_scroll| {
                         exec_scroll(a.ptr, offset);
@@ -755,7 +584,7 @@ pub fn Iter(comptime T: type) type {
                         return self;
                     } else unreachable;
                 },
-                inline .concatenated, .appended, .other => |x| return try x.clone(allocator),
+                inline .concatenated, .appended => |x| return try x.clone(allocator),
                 .anonymous => |a| {
                     if (a.v_table.clone_fn) |exec_clone| {
                         return try exec_clone(a.ptr, allocator);
@@ -785,7 +614,7 @@ pub fn Iter(comptime T: type) type {
                         return m.list.len;
                     } else unreachable;
                 },
-                inline .concatenated, .appended, .other => |x| return x.len(),
+                inline .concatenated, .appended => |x| return x.len(),
                 .anonymous => |a| return a.v_table.len_fn(a.ptr),
                 .context => |c| return c.v_table.len_fn(c.iter),
                 .empty => return 0,
@@ -808,7 +637,7 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 .multi_arr_list => if (Variant(T).multiArrListAllowed()) {} else unreachable, // does not own the list; so another no-op
-                inline .concatenated, .appended, .other => |*x| x.deinit(),
+                inline .concatenated, .appended => |*x| x.deinit(),
                 .anonymous => |a| {
                     if (a.v_table.deinit_fn) |exec_deinit| {
                         exec_deinit(a.ptr);
@@ -928,116 +757,69 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Take any pointer, given that its child type has a method called `next()` that takes no params apart from the receiver and returns `?T`.
+        /// Take any type (or pointer child type) that has a method called `next()` that takes no params apart from the receiver and returns `?T`.
         ///
         /// Unfortunately, we can only rely on the existence of a `next()` method.
-        /// So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and lazily fill it as we call `next()`.
-        /// Keep in mind: `length` may be larger/smaller than the number of times `ptr.next()` may return.
-        /// Even so, `iter.len()` will return the length of the buffer, which represents the maximum number of items returned from `iter.next()`.
-        ///
-        /// Params:
-        ///     - allocator,
-        ///     - ptr to other iterator
-        ///     - length of iteration
-        ///     - ownership of the ptr (if `.owned`, then will be destroyed by `allocator` on `deinit()`)
-        ///
-        /// Be sure to call `deinit()` to free the underlying buffer.
-        pub fn fromOtherAlloc(
-            allocator: Allocator,
-            ptr: anytype,
-            length: usize,
-            ptr_ownership: enum { owned, none },
-        ) Allocator.Error!Iter(T) {
-            validateOtherIterator(T, ptr);
-            const OtherType = @typeInfo(@TypeOf(ptr)).pointer.child;
-            if (length == 0) {
-                return .empty;
-            }
-            const buf: []T = try allocator.alloc(T, length);
-            errdefer allocator.free(buf);
-
-            const next_fn = struct {
-                fn next(impl: *anyopaque) ?T {
-                    const other_ptr: *OtherType = @ptrCast(@alignCast(impl));
-                    return other_ptr.next();
-                }
-            }.next;
-            const deinit_fn = struct {
-                fn deinit(impl: *anyopaque, alloc: Allocator) void {
-                    const other_ptr: *OtherType = @ptrCast(@alignCast(impl));
-                    alloc.destroy(other_ptr);
-                }
-            }.deinit;
-
-            return Iter(T){
-                .variant = Variant(T){
-                    .other = OtherIterable(T){
-                        .other = ptr,
-                        .next_fn = &next_fn,
-                        .buf = buf,
-                        .ownership = switch (ptr_ownership) {
-                            .none => .{ .owns_buf = allocator },
-                            .owned => .{
-                                .owns_both = .{
-                                    .deinit_fn = &deinit_fn,
-                                    .alloc = allocator,
-                                },
-                            },
-                        },
-                    },
-                },
-            };
-        }
-
-        /// Take any pointer, given that its child type has a method called `next()` that takes no params apart from the receiver and returns `?T`.
-        ///
-        /// Unfortunately, we can only rely on the existence of a `next()` method.
-        /// So to get all the functionality in `Iter(T)` from another iterator, we lazily fill `buf` as we call `next()`.
-        /// Keep in mind: Length of `buf` may be larger/smaller than the number of times `ptr.next()` may return.
-        /// Even so, `iter.len()` will return the length of the buffer, which represents the maximum number of items returned from `iter.next()`.
+        /// So, we call `other.next()` until the iteration is over or we run out of space in `buf`.
         ///
         /// Params:
         ///     - backing buffer
-        ///     - ptr to other iterator
-        ///     - ownership of the ptr (if `ContextOwnership.owned`, then will be destroyed by `alloc` on `deinit()`)
-        pub fn fromOther(buf: []T, ptr: anytype, ptr_ownership: ContextOwnership) Iter(T) {
-            validateOtherIterator(T, ptr);
-            const OtherType = @typeInfo(@TypeOf(ptr)).pointer.child;
+        ///     - other iterator
+        pub fn fromOtherBuf(buf: []T, other: anytype) Iter(T) {
+            validateOtherIterator(T, other);
             if (buf.len == 0) {
                 return .empty;
             }
 
-            const next_fn = struct {
-                fn next(impl: *anyopaque) ?T {
-                    const other_ptr: *OtherType = @ptrCast(@alignCast(impl));
-                    return other_ptr.next();
-                }
-            }.next;
-            const deinit_fn = struct {
-                fn deinit(impl: *anyopaque, alloc: Allocator) void {
-                    const other_ptr: *OtherType = @ptrCast(@alignCast(impl));
-                    alloc.destroy(other_ptr);
-                }
-            }.deinit;
+            var i: usize = 0;
+            while (other.next()) |x| : (i += 1) {
+                if (i >= buf.len) break;
+                buf[i] = x;
+            }
+            if (i < buf.len) {
+                return from(buf[0..i]);
+            }
+            return from(buf);
+        }
 
-            return Iter(T){
-                .variant = Variant(T){
-                    .other = OtherIterable(T){
-                        .other = ptr,
-                        .next_fn = &next_fn,
-                        .buf = buf,
-                        .ownership = switch (ptr_ownership) {
-                            .none => .none,
-                            .owned => |alloc| .{
-                                .owns_ctx = .{
-                                    .deinit_fn = &deinit_fn,
-                                    .alloc = alloc,
-                                },
-                            },
-                        },
-                    },
-                },
-            };
+        /// Take any type, given that defines a method called `next()` that takes no params apart from the receiver and returns `?T`.
+        ///
+        /// Unfortunately, we can only rely on the existence of a `next()` method.
+        /// So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and fill it with the results from `other.next()`.
+        /// Will pare the buffer down to the exact size returned from all the `other.next()` calls.
+        ///
+        /// Params:
+        ///     - allocator,
+        ///     - other iterator
+        ///     - length of iteration
+        ///
+        /// Be sure to call `deinit()` to free the underlying buffer.
+        pub fn fromOther(
+            allocator: Allocator,
+            other: anytype,
+            length: usize,
+        ) Allocator.Error!Iter(T) {
+            validateOtherIterator(T, other);
+            if (length == 0) {
+                return .empty;
+            }
+
+            const buf: []T = try allocator.alloc(T, length);
+            errdefer allocator.free(buf);
+
+            var i: usize = 0;
+            while (other.next()) |x| : (i += 1) {
+                buf[i] = x;
+            }
+
+            if (i < length) {
+                if (allocator.resize(buf, i)) {
+                    return fromSliceOwned(allocator, buf, null);
+                }
+                defer allocator.free(buf);
+                return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
+            }
+            return fromSliceOwned(allocator, buf, null);
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
@@ -1748,7 +1530,6 @@ pub fn Iter(comptime T: type) type {
                                 m.idx = m.list.len;
                             } else unreachable;
                         },
-                        .other => |*o| o.iter_idx = o.buf.len,
                         .empty => {},
                         else => while (self_ptr.next()) |_| {},
                     }
@@ -1796,7 +1577,6 @@ pub fn Iter(comptime T: type) type {
                                 m.idx = m.list.len;
                             } else unreachable;
                         },
-                        .other => |*o| o.iter_idx = o.buf.len,
                         .empty => {},
                         else => while (clone_ptr.iter.next()) |_| {},
                     }
@@ -2135,11 +1915,15 @@ inline fn validateCompareContext(comptime T: type, context: anytype) void {
     }
 }
 
-inline fn validateOtherIterator(comptime T: type, ptr: anytype) void {
-    comptime var OtherType = @TypeOf(ptr);
+inline fn validateOtherIterator(comptime T: type, other: anytype) void {
+    comptime var OtherType = @TypeOf(other);
+    comptime var is_ptr: bool = false;
     switch (@typeInfo(OtherType)) {
-        .pointer => |p| OtherType = p.child,
-        else => @compileError("Expected pointer type, but found `" ++ @typeName(OtherType) ++ "`"),
+        .pointer => |p| {
+            OtherType = p.child;
+            is_ptr = true;
+        },
+        else => {},
     }
     if (!std.meta.hasMethod(OtherType, "next")) {
         @compileError(@typeName(OtherType) ++ " does not define a method called `next()`.");
@@ -2148,15 +1932,21 @@ inline fn validateOtherIterator(comptime T: type, ptr: anytype) void {
     if (method_info.params.len != 1 or method_info.return_type != ?T) {
         @compileError("`next()` method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
     }
+    if (method_info.params[0].type == *OtherType) {
+        if (!is_ptr or @typeInfo(@TypeOf(other)).pointer.is_const) {
+            @compileError("`next()` method receiver requires `*" ++ @typeName(OtherType) ++ "`, but found `*const " ++ @typeName(OtherType) ++ "`");
+        }
+    }
 }
 
 inline fn logTrace(comptime scope: @Type(.enum_literal), comptime log: []const u8, args: anytype) void {
-    if (builtin.is_test and std.log.logEnabled(.debug, scope)) {
+    if (@hasDecl(root, "trace_enabled")) {
         std.log.scoped(scope).debug(log, args);
     }
 }
 
 const std = @import("std");
+const root = @import("root");
 const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
 const Fn = std.builtin.Type.Fn;
