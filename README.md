@@ -984,24 +984,27 @@ You only need to implement `AnonymousIterable(T)`, and call `iter()` on it, whic
 /// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
 pub fn VTable(comptime T: type) type {
     return struct {
-        /// Get the next element or null if iteration is over
+        /// Get the next element or null if iteration is over.
         next_fn: *const fn (*anyopaque) ?T,
-        /// Get the previous element or null if the iteration is at beginning
+        /// Get the previous element or null if the iteration is at beginning.
         prev_fn: *const fn (*anyopaque) ?T,
-        /// Reset the iterator the beginning
+        /// Reset the iterator the beginning.
         reset_fn: *const fn (*anyopaque) void,
-        /// Scroll to a relative offset from the iterator's current offset
+        /// Get the maximum number of elements that an iterator will return.
+        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
+        len_fn: *const fn (*anyopaque) usize,
+        /// Scroll to a relative offset from the iterator's current offset.
         /// If left null, a default implementation will be used:
         ///     If `isize` is positive, will call `next()` X times or until enumeration is over.
         ///     If `isize` is negative, will call `prev()` X times or until enumeration reaches the beginning.
         scroll_fn: ?*const fn (*anyopaque, isize) void = null,
-        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice)
-        clone_fn: *const fn (*anyopaque, Allocator) Allocator.Error!Iter(T),
-        /// Get the maximum number of elements that an iterator will return.
-        /// Note this may not reflect the actual number of elements returned if the iterator is pared down (via filtering).
-        len_fn: *const fn (*anyopaque) usize,
-        /// Deinitialize and free memory as needed
-        deinit_fn: *const fn (*anyopaque) void,
+        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice).
+        /// If left null, a default implementation will be used:
+        ///     Simply returns the iterator
+        clone_fn: ?*const fn (*anyopaque, Allocator) Allocator.Error!Iter(T) = null,
+        /// Deinitialize and free memory as needed.
+        /// If left null, this becomes a no-op.
+        deinit_fn: ?*const fn (*anyopaque) void = null,
     };
 }
 

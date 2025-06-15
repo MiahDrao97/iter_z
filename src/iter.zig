@@ -586,7 +586,7 @@ fn Variant(comptime T: type) type {
         anonymous: AnonymousIterable(T),
         context: ContextIterable(T),
         other: OtherIterable(T),
-        empty: void,
+        empty,
 
         inline fn multiArrListAllowed() bool {
             return multi_arr_list_allowed;
