@@ -10,7 +10,7 @@ pub fn Select(
     if (@sizeOf(TContext) > 0) {
         @compileError(std.fmt.comptimePrint("Non-allocation `select()` can only be used with 0-sized contexts. Found `{s}` with size {d}", .{ @typeName(TContext), @sizeOf(TContext) }));
     }
-    comptime _ = @as(fn (TContext, T) TOther, TContext.transform);
+    _ = @as(fn (TContext, T) TOther, TContext.transform);
     const context: TContext = undefined;
     return struct {
         inner: *Iter(T),
@@ -144,7 +144,7 @@ pub fn SelectAlloc(
     comptime TOther: type,
     comptime TContext: type,
 ) type {
-    comptime _ = @as(fn (TContext, T) TOther, TContext.transform);
+    _ = @as(fn (TContext, T) TOther, TContext.transform);
     return struct {
         inner: *Iter(T),
         context: TContext,

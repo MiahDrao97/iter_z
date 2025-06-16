@@ -3,7 +3,6 @@
 //! - `VTable(T)`: functions used by `AnonymousIterable(T)`
 //! - `AnonymousIterable(T)`: extensible structure that uses `VTable(T)` and converts to `Iter(T)`
 //! - `Ordering`: `asc` or `desc`, which are used when sorting
-//! - `ContextOwnership`: used by `select()`, `where()`, `fromOther()`, and `fromOtherAlloc()` to denote the context pointer should be owned by the iterator or not
 //! - auto contexts: `autoCompare(T)`, `autoSum(T)`, `autoMin(T)`, `autoMax(T)`
 
 /// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
@@ -369,39 +368,6 @@ fn ConcatIterable(comptime T: type) type {
     };
 }
 
-/// Whether or not the context is owned by the iterator
-pub const ContextOwnership = union(enum) {
-    /// No ownership; the context is locally scoped or owned by something else
-    none,
-    /// Owned by the iterator, and this allocator will destroy the context on `deinit()`
-    owned: Allocator,
-};
-
-fn ContextIterable(comptime T: type) type {
-    return struct {
-        context: *const anyopaque,
-        iter: *anyopaque,
-        v_table: *const ContextVTable,
-        ownership: Ownership,
-
-        const Ownership = union(enum) {
-            none,
-            owns_context: Allocator,
-            owns_iter: Allocator,
-            owns_both: Allocator,
-        };
-
-        const ContextVTable = struct {
-            next_fn: *const fn (*const anyopaque, *anyopaque) ?T,
-            prev_fn: *const fn (*const anyopaque, *anyopaque) ?T,
-            reset_fn: *const fn (*anyopaque) void,
-            len_fn: *const fn (*anyopaque) usize,
-            clone_fn: *const fn (*const anyopaque, *anyopaque, *const ContextVTable, Ownership, Allocator) Allocator.Error!Iter(T),
-            deinit_fn: *const fn (*const anyopaque, *anyopaque, Ownership) void,
-        };
-    };
-}
-
 fn Variant(comptime T: type) type {
     const multi_arr_list_allowed: bool = switch (@typeInfo(T)) {
         .@"struct" => true,
@@ -414,7 +380,6 @@ fn Variant(comptime T: type) type {
         concatenated: ConcatIterable(T),
         appended: AppendedIterable(T),
         anonymous: AnonymousIterable(T),
-        context: ContextIterable(T),
         empty,
 
         inline fn multiArrListAllowed() bool {
@@ -451,7 +416,6 @@ pub fn Iter(comptime T: type) type {
                 },
                 inline .concatenated, .appended => |*x| return x.next(),
                 .anonymous => |a| return a.v_table.next_fn(a.ptr),
-                .context => |c| return c.v_table.next_fn(c.context, c.iter),
                 .empty => return null,
             }
         }
@@ -481,7 +445,6 @@ pub fn Iter(comptime T: type) type {
                 },
                 inline .concatenated, .appended => |*x| return x.prev(),
                 .anonymous => |a| return a.v_table.prev_fn(a.ptr),
-                .context => |c| return c.v_table.prev_fn(c.context, c.iter),
                 .empty => return null,
             }
         }
@@ -498,7 +461,6 @@ pub fn Iter(comptime T: type) type {
                 },
                 inline .concatenated, .appended => |*x| x.reset(),
                 .anonymous => |a| a.v_table.reset_fn(a.ptr),
-                .context => |c| c.v_table.reset_fn(c.iter),
                 .empty => {},
             }
             return self;
@@ -542,17 +504,6 @@ pub fn Iter(comptime T: type) type {
                         }
                     }
                 },
-                .context => |c| {
-                    if (offset > 0) {
-                        for (0..@bitCast(offset)) |_| {
-                            _ = c.v_table.next_fn(c.context, c.iter) orelse break;
-                        }
-                    } else if (offset < 0) {
-                        for (0..@abs(offset)) |_| {
-                            _ = c.v_table.prev_fn(c.context, c.iter) orelse break;
-                        }
-                    }
-                },
                 else => {},
             }
             return self;
@@ -591,7 +542,6 @@ pub fn Iter(comptime T: type) type {
                     }
                     return self;
                 },
-                .context => |c| return try c.v_table.clone_fn(c.context, c.iter, c.v_table, c.ownership, allocator),
                 .empty => return self,
             }
         }
@@ -616,7 +566,6 @@ pub fn Iter(comptime T: type) type {
                 },
                 inline .concatenated, .appended => |x| return x.len(),
                 .anonymous => |a| return a.v_table.len_fn(a.ptr),
-                .context => |c| return c.v_table.len_fn(c.iter),
                 .empty => return 0,
             }
         }
@@ -643,7 +592,6 @@ pub fn Iter(comptime T: type) type {
                         exec_deinit(a.ptr);
                     }
                 },
-                .context => |c| c.v_table.deinit_fn(c.context, c.iter, c.ownership),
                 .empty => {},
             }
             self.* = .empty;
@@ -757,31 +705,6 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Take any type (or pointer child type) that has a method called `next()` that takes no params apart from the receiver and returns `?T`.
-        ///
-        /// Unfortunately, we can only rely on the existence of a `next()` method.
-        /// So, we call `other.next()` until the iteration is over or we run out of space in `buf`.
-        ///
-        /// Params:
-        ///     - backing buffer
-        ///     - other iterator
-        pub fn fromOtherBuf(buf: []T, other: anytype) Iter(T) {
-            validateOtherIterator(T, other);
-            if (buf.len == 0) {
-                return .empty;
-            }
-
-            var i: usize = 0;
-            while (other.next()) |x| : (i += 1) {
-                if (i >= buf.len) break;
-                buf[i] = x;
-            }
-            if (i < buf.len) {
-                return from(buf[0..i]);
-            }
-            return from(buf);
-        }
-
         /// Take any type, given that defines a method called `next()` that takes no params apart from the receiver and returns `?T`.
         ///
         /// Unfortunately, we can only rely on the existence of a `next()` method.
@@ -822,6 +745,31 @@ pub fn Iter(comptime T: type) type {
             return fromSliceOwned(allocator, buf, null);
         }
 
+        /// Take any type (or pointer child type) that has a method called `next()` that takes no params apart from the receiver and returns `?T`.
+        ///
+        /// Unfortunately, we can only rely on the existence of a `next()` method.
+        /// So, we call `other.next()` until the iteration is over or we run out of space in `buf`.
+        ///
+        /// Params:
+        ///     - backing buffer
+        ///     - other iterator
+        pub fn fromOtherBuf(buf: []T, other: anytype) Iter(T) {
+            validateOtherIterator(T, other);
+            if (buf.len == 0) {
+                return .empty;
+            }
+
+            var i: usize = 0;
+            while (other.next()) |x| : (i += 1) {
+                if (i >= buf.len) break;
+                buf[i] = x;
+            }
+            if (i < buf.len) {
+                return from(buf[0..i]);
+            }
+            return from(buf);
+        }
+
         /// Transform an iterator of type `T` to type `TOther`.
         /// `context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
         ///
@@ -834,6 +782,24 @@ pub fn Iter(comptime T: type) type {
         ) Iter(TOther) {
             const selector: Select(T, TOther, @TypeOf(context)) = .{ .inner = self };
             return selector.iter();
+        }
+
+        /// Destructured version of `select()`, which allows for defining `context` and `filterFn` independently.
+        /// This is also needed if `context` is a pointer.
+        pub inline fn selectDestructured(
+            self: *Iter(T),
+            comptime TOther: type,
+            context: anytype,
+            transformFn: fn (@TypeOf(context), T) TOther,
+        ) Iter(T) {
+            const SubContext = struct {
+                inner: @TypeOf(context),
+
+                pub fn transform(this: @This(), item: T) TOther {
+                    return transformFn(this.inner, item);
+                }
+            };
+            return self.select(TOther, SubContext{ .inner = context });
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
@@ -857,6 +823,25 @@ pub fn Iter(comptime T: type) type {
             return selector.iter();
         }
 
+        /// Destructured version of `selectAlloc()`, which allows for defining `context` and `filterFn` independently.
+        /// This is also needed if `context` is a pointer.
+        pub inline fn selectAllocDestructured(
+            self: *Iter(T),
+            comptime TOther: type,
+            allocator: Allocator,
+            context: anytype,
+            transformFn: fn (@TypeOf(context), T) TOther,
+        ) Allocator.Error!Iter(T) {
+            const SubContext = struct {
+                inner: @TypeOf(context),
+
+                pub fn transform(this: @This(), item: T) TOther {
+                    return transformFn(this.inner, item);
+                }
+            };
+            return self.selectAlloc(TOther, allocator, SubContext{ .inner = context });
+        }
+
         /// Return a pared-down iterator that matches the criteria specified in `filter()`.
         /// `context` must define the following method: `fn filter(@TypeOf(context), T) bool`
         ///
@@ -865,6 +850,23 @@ pub fn Iter(comptime T: type) type {
         pub fn where(self: *Iter(T), context: anytype) Iter(T) {
             const w: Where(T, @TypeOf(context)) = .{ .inner = self };
             return w.iter();
+        }
+
+        /// Destructured version of `where()`, which allows for defining `context` and `filterFn` independently.
+        /// This is also needed if `context` is a pointer.
+        pub inline fn whereDestructured(
+            self: *Iter(T),
+            context: anytype,
+            filterFn: fn (@TypeOf(context), T) bool,
+        ) Iter(T) {
+            const SubContext = struct {
+                inner: @TypeOf(context),
+
+                pub fn filter(this: @This(), item: T) bool {
+                    return filterFn(this.inner, item);
+                }
+            };
+            return self.where(SubContext{ .inner = context });
         }
 
         /// Return a pared-down iterator that matches the criteria specified in `filter()`.
@@ -881,6 +883,24 @@ pub fn Iter(comptime T: type) type {
         ) Allocator.Error!Iter(T) {
             const w: *WhereAlloc(T, @TypeOf(context)) = try .new(allocator, self, context);
             return w.iter();
+        }
+
+        /// Destructured version of `whereAlloc()`, which allows for defining `context` and `filterFn` independently.
+        /// This is also needed if `context` is a pointer.
+        pub inline fn whereAllocDestructured(
+            self: *Iter(T),
+            allocator: Allocator,
+            context: anytype,
+            filterFn: fn (@TypeOf(context), T) bool,
+        ) Allocator.Error!Iter(T) {
+            const SubContext = struct {
+                inner: @TypeOf(context),
+
+                pub fn filter(this: @This(), item: T) bool {
+                    return filterFn(this.inner, item);
+                }
+            };
+            return self.whereAlloc(allocator, SubContext{ .inner = context });
         }
 
         /// Take `buf.len` and return new iterator from that buffer.
@@ -964,7 +984,6 @@ pub fn Iter(comptime T: type) type {
             context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            validateCompareContext(T, context);
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
             const sort_ctx: SortContext(T, @TypeOf(context)) = .{
                 .slice = slice,
@@ -987,7 +1006,6 @@ pub fn Iter(comptime T: type) type {
             context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            validateCompareContext(T, context);
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
             const sort_ctx: SortContext(T, @TypeOf(context)) = .{
                 .slice = slice,
@@ -1000,7 +1018,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
         /// This makes use of an unstable sorting algorith. If stable sorting is required, use `orderByStable()`.
-        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+        /// `context` must define the method `fn compare(@TypeOf(context), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderBy(
@@ -1014,7 +1032,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
-        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+        /// `context` must define the method `fn compare(@TypeOf(context), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderByStable(
@@ -1030,9 +1048,15 @@ pub fn Iter(comptime T: type) type {
         /// Determine if the sequence contains any element with a given filter context (or pass in null to simply peek at the next element).
         /// Always scrolls back in place.
         ///
-        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
         pub fn any(self: *Iter(T), context: anytype) ?T {
-            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
+            const filterProvided: bool = switch (@typeInfo(@TypeOf(context))) {
+                .void, .null => false,
+                else => blk: {
+                    _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+                    break :blk true;
+                },
+            };
             if (self.len() == 0) {
                 return null;
             }
@@ -1042,7 +1066,7 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |n| {
                 scroll_amt -= 1;
-                if (ctx_type == .exists) {
+                if (filterProvided) {
                     if (context.filter(n)) {
                         return n;
                     }
@@ -1057,7 +1081,7 @@ pub fn Iter(comptime T: type) type {
         /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
         ///
-        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1073,7 +1097,7 @@ pub fn Iter(comptime T: type) type {
             context: anytype,
             moved_forward: *usize,
         ) ?T {
-            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = false }) == .exists);
+            _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
@@ -1086,7 +1110,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform the next element from type `T` to type `TOther` (or return null if iteration is over)
-        /// - `context` must be a type that defines the method: `fn transform(@This(), T) TOther` (similar to `select()`).
+        /// - `context` must be a type that defines the method: `fn transform(@TypeOf(context), T) TOther` (similar to `select()`).
         ///
         /// Context example:
         /// ```zig
@@ -1098,7 +1122,7 @@ pub fn Iter(comptime T: type) type {
         /// };
         /// ```
         pub fn transformNext(self: *Iter(T), comptime TOther: type, context: anytype) ?TOther {
-            validateSelectContext(T, TOther, context, false);
+            _ = @as(fn (@TypeOf(context), T) TOther, @TypeOf(context).transform);
             if (self.next()) |x| {
                 return context.transform(x);
             }
@@ -1109,7 +1133,7 @@ pub fn Iter(comptime T: type) type {
         /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
         /// Will scroll back in place.
         ///
-        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1124,7 +1148,13 @@ pub fn Iter(comptime T: type) type {
             self: *Iter(T),
             context: anytype,
         ) error{MultipleElementsFound}!?T {
-            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
+            const filterProvided: bool = switch (@typeInfo(@TypeOf(context))) {
+                .void, .null => false,
+                else => blk: {
+                    _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+                    break :blk true;
+                },
+            };
 
             if (self.len() == 0) {
                 return null;
@@ -1136,7 +1166,7 @@ pub fn Iter(comptime T: type) type {
             var found: ?T = null;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (ctx_type == .exists) {
+                if (filterProvided) {
                     if (context.filter(x)) {
                         if (found != null) {
                             return error.MultipleElementsFound;
@@ -1160,7 +1190,7 @@ pub fn Iter(comptime T: type) type {
         /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
         /// Will scroll back in place.
         ///
-        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1175,7 +1205,6 @@ pub fn Iter(comptime T: type) type {
             self: *Iter(T),
             context: anytype,
         ) error{ NoElementsFound, MultipleElementsFound }!T {
-            _ = validateFilterContext(T, context, .optional);
             return try self.singleOrNull(context) orelse error.NoElementsFound;
         }
 
@@ -1211,24 +1240,34 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Scrolls back in place.
         pub fn contains(self: *Iter(T), item: T, context: anytype) bool {
-            validateCompareContext(T, context);
             const ComparerContext = struct {
-                ctx_item: T,
+                fn ComparerContext(comptime TContext: type) type {
+                    _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
+                    return struct {
+                        ctx_item: T,
+                        context: TContext,
 
-                pub fn filter(ctx: @This(), x: T) bool {
-                    return switch (context.compare(ctx.ctx_item, x)) {
-                        .eq => true,
-                        else => false,
+                        pub fn filter(ctx: @This(), x: T) bool {
+                            return switch (ctx.context.compare(ctx.ctx_item, x)) {
+                                .eq => true,
+                                else => false,
+                            };
+                        }
                     };
                 }
-            };
-            return self.any(ComparerContext{ .ctx_item = item }) != null;
+            }.ComparerContext;
+            return self.any(
+                ComparerContext(@TypeOf(context)){
+                    .ctx_item = item,
+                    .context = context,
+                },
+            ) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
         /// If you do not wish to apply a filter, pass in `null` or void literal `{}` to `context`.
         ///
-        /// `context` must define the method: `fn filter(@This(), T) bool`.
+        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
         /// Example:
         /// ```zig
         /// fn Ctx(comptime T: type) type {
@@ -1240,7 +1279,13 @@ pub fn Iter(comptime T: type) type {
         /// }
         /// ```
         pub fn count(self: *Iter(T), context: anytype) usize {
-            const ctx_type: CtxType = validateFilterContext(T, context, .optional);
+            const filterProvided: bool = switch (@typeInfo(@TypeOf(context))) {
+                .void, .null => false,
+                else => blk: {
+                    _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+                    break :blk true;
+                },
+            };
             if (self.len() == 0) {
                 return 0;
             }
@@ -1251,7 +1296,7 @@ pub fn Iter(comptime T: type) type {
             var result: usize = 0;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (ctx_type == .exists) {
+                if (filterProvided) {
                     if (context.filter(x)) {
                         result += 1;
                     }
@@ -1276,7 +1321,7 @@ pub fn Iter(comptime T: type) type {
         /// }
         /// ```
         pub fn all(self: *Iter(T), context: anytype) bool {
-            assert(validateFilterContext(T, context, Descriptor{ .required = true, .must_be_ptr = false }) == .exists);
+            _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
             if (self.len() == 0) {
                 return true;
             }
@@ -1296,7 +1341,7 @@ pub fn Iter(comptime T: type) type {
         /// Fold the iterator into a single value.
         /// - `self`: method receiver (non-const pointer)
         /// - `TOther` is the return type
-        /// - `context` must define the method `fn accumulate(@This(), TOther, T) TOther`
+        /// - `context` must define the method `fn accumulate(@TypeOf(context), TOther, T) TOther`
         /// - `init` is the starting value of the accumulator
         pub fn fold(
             self: *Iter(T),
@@ -1304,7 +1349,7 @@ pub fn Iter(comptime T: type) type {
             context: anytype,
             init: TOther,
         ) TOther {
-            validateAccumulatorContext(T, TOther, context);
+            _ = @as(fn (@TypeOf(context), TOther, T) TOther, @TypeOf(context).accumulate);
             var result: TOther = init;
             while (self.next()) |x| {
                 result = context.accumulate(result, x);
@@ -1312,14 +1357,50 @@ pub fn Iter(comptime T: type) type {
             return result;
         }
 
+        /// Destructured version of `fold()`, where you can define `context` and `accumulateFn` independently.
+        /// This is needed when `context` is a pointer type.
+        pub inline fn foldDestructured(
+            self: *Iter(T),
+            comptime TOther: type,
+            context: anytype,
+            accumulateFn: fn (@TypeOf(context), TOther, T) TOther,
+            init: TOther,
+        ) TOther {
+            const SubContext = struct {
+                inner: @TypeOf(context),
+
+                pub fn accumulate(this: @This(), accumulator: TOther, item: T) TOther {
+                    return accumulateFn(this.inner, accumulator, item);
+                }
+            };
+            return self.fold(TOther, SubContext{ .inner = context }, init);
+        }
+
         /// Calls `fold`, using the first element as `init`.
         /// Note that this returns null if the iterator is empty or at the end.
         ///
-        /// `context` must define the method `fn accumulate(@This(), T, T) T`
+        /// `context` must define the method `fn accumulate(@TypeOf(context), T, T) T`
         pub fn reduce(self: *Iter(T), context: anytype) ?T {
-            validateAccumulatorContext(T, T, context);
+            _ = @as(fn (@TypeOf(context), T, T) T, @TypeOf(context).accumulate);
             const init: T = self.next() orelse return null;
             return self.fold(T, context, init);
+        }
+
+        /// Destructured version of `reduce()`, where you can define `context` and `accumulateFn` independently.
+        /// This is needed when `context` is a pointer type.
+        pub inline fn reduceDestructured(
+            self: *Iter(T),
+            context: anytype,
+            accumulateFn: fn (@TypeOf(context), T, T) T,
+        ) ?T {
+            const SubContext = struct {
+                inner: @TypeOf(context),
+
+                pub fn accumulate(this: @This(), accumulator: T, item: T) T {
+                    return accumulateFn(this.inner, accumulator, item);
+                }
+            };
+            return self.reduce(SubContext{ .inner = context });
         }
 
         /// Reverse the direction of the iterator.
@@ -1591,6 +1672,7 @@ fn AutoCompareContext(comptime T: type) type {
 pub const Ordering = enum { asc, desc };
 
 fn SortContext(comptime T: type, comptime TContext: type) type {
+    comptime _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
     return struct {
         ctx: TContext,
         slice: []T,
@@ -1604,130 +1686,6 @@ fn SortContext(comptime T: type, comptime TContext: type) type {
             };
         }
     };
-}
-
-const CtxType = enum { exists, none };
-const Descriptor = struct {
-    required: bool,
-    must_be_ptr: bool,
-
-    const optional: Descriptor = .{ .required = false, .must_be_ptr = false };
-};
-
-inline fn validateFilterContext(comptime T: type, context: anytype, comptime descriptor: Descriptor) CtxType {
-    const ContextType = @TypeOf(context);
-    switch (@typeInfo(ContextType)) {
-        .null, .void => {
-            if (descriptor.required) {
-                @compileError("Context is not optional. Expected a type defines a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-            }
-            return .none;
-        },
-        .pointer => |ptr| {
-            switch (ptr.size) {
-                .one => {
-                    return validateFilterContext(T, context.*, Descriptor{ .must_be_ptr = false, .required = true });
-                },
-                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
-            }
-        },
-        // separate error for optionals
-        .optional => @compileError("Expected non-optional type, but found `" ++ @typeName(ContextType) ++ "`. Either pass in null or unwrap the optional."),
-        else => {
-            if (descriptor.must_be_ptr) {
-                @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`");
-            }
-            if (!std.meta.hasMethod(ContextType, "filter")) {
-                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-            }
-            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "filter"))).@"fn";
-            if (method_info.params.len != 2 or method_info.params[1].type != T) {
-                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-            }
-            if (method_info.return_type != bool) {
-                @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `filter` that takes in `" ++ @typeName(T) ++ "` and returns `bool`");
-            }
-            return .exists;
-        },
-    }
-}
-
-inline fn validateSelectContext(comptime T: type, comptime TOther: type, context: anytype, comptime ptr_required: bool) void {
-    const ContextType = @TypeOf(context);
-    switch (@typeInfo(ContextType)) {
-        .pointer => |ptr| {
-            switch (ptr.size) {
-                .one => return validateSelectContext(T, TOther, context.*, false),
-                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
-            }
-        },
-        else => if (ptr_required) {
-            @compileError("Expected single item pointer type, but found `" ++ @typeName(ContextType) ++ "`");
-        }
-    }
-    if (!std.meta.hasMethod(ContextType, "transform")) {
-        @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-    }
-    const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "transform"))).@"fn";
-    if (method_info.params.len != 2 or method_info.params[1].type != T) {
-        @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-    }
-    if (method_info.return_type != TOther) {
-        @compileError("Child type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `transform` that takes in `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-    }
-}
-
-inline fn validateAccumulatorContext(comptime T: type, comptime TOther: type, context: anytype) void {
-    const ContextType = @TypeOf(context);
-    switch (@typeInfo(ContextType)) {
-        .pointer => |ptr| {
-            switch (ptr.size) {
-                .one => validateAccumulatorContext(T, TOther, context.*),
-                else => @compileError("Expected single item pointer, but found `" ++ @tagName(ptr.size) ++ "`"),
-            }
-        },
-        else => {
-            if (!std.meta.hasMethod(ContextType, "accumulate")) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-            }
-            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "accumulate"))).@"fn";
-            // zig fmt: off
-            if (method_info.params.len != 3
-                or method_info.params[1].type != TOther
-                or method_info.params[2].type != T
-            ) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++  "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-            }
-            // zig fmt: on
-            if (method_info.return_type != TOther) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `accumulate` that takes in `" ++ @typeName(TOther) ++ "`, `" ++ @typeName(T) ++ "` and returns `" ++ @typeName(TOther) ++ "`");
-            }
-        }
-    }
-}
-
-inline fn validateCompareContext(comptime T: type, context: anytype) void {
-    const ContextType = @TypeOf(context);
-    switch (@typeInfo(ContextType)) {
-        .pointer => validateCompareContext(T, context.*),
-        else => {
-            if (!std.meta.hasMethod(ContextType, "compare")) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
-            }
-            const method_info: Fn = @typeInfo(@TypeOf(@field(ContextType, "compare"))).@"fn";
-            // zig fmt: off
-            if (method_info.params.len != 3
-                or method_info.params[1].type != T
-                or method_info.params[2].type != T
-            ) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
-            }
-            // zig fmt: on
-            if (method_info.return_type != std.math.Order) {
-                @compileError("Type `" ++ @typeName(ContextType) ++ "` does not publicly define a method `compare` that takes in `" ++ @typeName(T) ++ "`, `" ++ @typeName(T) ++ "` and returns `std." ++ @typeName(std.math.Order) ++ "`");
-            }
-        }
-    }
 }
 
 inline fn validateOtherIterator(comptime T: type, other: anytype) void {

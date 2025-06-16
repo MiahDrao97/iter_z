@@ -7,7 +7,7 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
     if (@sizeOf(TContext) > 0) {
         @compileError(std.fmt.comptimePrint("Non-allocation `where()` can only be used with 0-sized contexts. Found `{s}` with size {d}", .{ @typeName(TContext), @sizeOf(TContext) }));
     }
-    comptime _ = @as(fn (TContext, T) bool, TContext.filter);
+    _ = @as(fn (TContext, T) bool, TContext.filter);
     const context: TContext = undefined;
     return struct {
         inner: *Iter(T),
@@ -145,7 +145,7 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
 
 /// This where structure assumes that a pointer will be allocated for it so that it can store a nonzero-sized `TContext` instance.
 pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
-    comptime _ = @as(fn (TContext, T) bool, TContext.filter);
+    _ = @as(fn (TContext, T) bool, TContext.filter);
     return struct {
         inner: *Iter(T),
         context: TContext,
