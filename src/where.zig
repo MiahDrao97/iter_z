@@ -1,32 +1,33 @@
-//! Structures related to `select()` and `selectAlloc()`.
+//! Structures related to `where()` and `whereAlloc()`.
 //! Both versions leverage the `AnonymousIterable(T)` variant as the implementation of `Iter(T)`.
 
-/// Select structure that leverages the `AnonymousIterable(T)` variant.
-pub fn Select(
-    comptime T: type,
-    comptime TOther: type,
-    comptime TContext: type,
-) type {
+/// Where structure that leverages the `AnonymousIterable(T)` variant.
+/// Intended for 0-sized contexts.
+pub fn Where(comptime T: type, comptime TContext: type) type {
     if (@sizeOf(TContext) > 0) {
-        @compileError(std.fmt.comptimePrint("Non-allocation `select()` can only be used with 0-sized contexts. Found `{s}` with size {d}", .{ @typeName(TContext), @sizeOf(TContext) }));
+        @compileError(std.fmt.comptimePrint("Non-allocation `where()` can only be used with 0-sized contexts. Found `{s}` with size {d}", .{ @typeName(TContext), @sizeOf(TContext) }));
     }
-    comptime _ = @as(fn (TContext, T) TOther, TContext.transform);
+    comptime _ = @as(fn (TContext, T) bool, TContext.filter);
     const context: TContext = undefined;
     return struct {
         inner: *Iter(T),
 
-        fn implNext(impl: *anyopaque) ?TOther {
+        fn implNext(impl: *anyopaque) ?T {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            if (ptr.next()) |x| {
-                return context.transform(x);
+            while (ptr.next()) |x| {
+                if (context.filter(x)) {
+                    return x;
+                }
             }
             return null;
         }
 
-        fn implPrev(impl: *anyopaque) ?TOther {
+        fn implPrev(impl: *anyopaque) ?T {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            if (ptr.prev()) |x| {
-                return context.transform(x);
+            while (ptr.prev()) |x| {
+                if (context.filter(x)) {
+                    return x;
+                }
             }
             return null;
         }
@@ -46,16 +47,16 @@ pub fn Select(
             _ = ptr.reset();
         }
 
-        fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
+        fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
 
             const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
             errdefer allocator.destroy(cloned);
 
             cloned.* = .{ .iter = try ptr.clone(allocator), .allocator = allocator };
-            return (AnonymousIterable(TOther){
+            return (AnonymousIterable(T){
                 .ptr = cloned,
-                .v_table = &VTable(TOther){
+                .v_table = &VTable(T){
                     .next_fn = &implNextAsClone,
                     .prev_fn = &implPrevAsClone,
                     .scroll_fn = &implScrollAsClone,
@@ -67,18 +68,22 @@ pub fn Select(
             }).iter();
         }
 
-        fn implNextAsClone(impl: *anyopaque) ?TOther {
+        fn implNextAsClone(impl: *anyopaque) ?T {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            if (ptr.iter.next()) |x| {
-                return context.transform(x);
+            while (ptr.iter.next()) |x| {
+                if (context.filter(x)) {
+                    return x;
+                }
             }
             return null;
         }
 
-        fn implPrevAsClone(impl: *anyopaque) ?TOther {
+        fn implPrevAsClone(impl: *anyopaque) ?T {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            if (ptr.iter.prev()) |x| {
-                return context.transform(x);
+            while (ptr.iter.prev()) |x| {
+                if (context.filter(x)) {
+                    return x;
+                }
             }
             return null;
         }
@@ -98,13 +103,13 @@ pub fn Select(
             _ = ptr.iter.reset();
         }
 
-        fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
+        fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
             const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
             cloned.* = .{ .iter = ptr.iter, .allocator = allocator };
-            return (AnonymousIterable(TOther){
+            return (AnonymousIterable(T){
                 .ptr = cloned,
-                .v_table = &VTable(TOther){
+                .v_table = &VTable(T){
                     .next_fn = &implNextAsClone,
                     .prev_fn = &implPrevAsClone,
                     .scroll_fn = &implScrollAsClone,
@@ -122,10 +127,10 @@ pub fn Select(
             ptr.allocator.destroy(ptr);
         }
 
-        pub fn iter(self: @This()) Iter(TOther) {
-            return (AnonymousIterable(TOther){
+        pub fn iter(self: @This()) Iter(T) {
+            return (AnonymousIterable(T){
                 .ptr = self.inner,
-                .v_table = &VTable(TOther){
+                .v_table = &VTable(T){
                     .next_fn = &implNext,
                     .prev_fn = &implPrev,
                     .scroll_fn = &implScroll,
@@ -138,13 +143,9 @@ pub fn Select(
     };
 }
 
-/// This select structure assumes that a pointer will be allocated for it so that it can store a nonzero-sized `TContext` instance.
-pub fn SelectAlloc(
-    comptime T: type,
-    comptime TOther: type,
-    comptime TContext: type,
-) type {
-    comptime _ = @as(fn (TContext, T) TOther, TContext.transform);
+/// This where structure assumes that a pointer will be allocated for it so that it can store a nonzero-sized `TContext` instance.
+pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
+    comptime _ = @as(fn (TContext, T) bool, TContext.filter);
     return struct {
         inner: *Iter(T),
         context: TContext,
@@ -162,18 +163,22 @@ pub fn SelectAlloc(
             return ptr;
         }
 
-        fn implNext(impl: *anyopaque) ?TOther {
+        fn implNext(impl: *anyopaque) ?T {
             const self: *Self = @ptrCast(@alignCast(impl));
-            if (self.inner.next()) |x| {
-                return self.context.transform(x);
+            while (self.inner.next()) |x| {
+                if (self.context.filter(x)) {
+                    return x;
+                }
             }
             return null;
         }
 
-        fn implPrev(impl: *anyopaque) ?TOther {
+        fn implPrev(impl: *anyopaque) ?T {
             const self: *Self = @ptrCast(@alignCast(impl));
-            if (self.inner.prev()) |x| {
-                return self.context.transform(x);
+            while (self.inner.prev()) |x| {
+                if (self.context.filter(x)) {
+                    return x;
+                }
             }
             return null;
         }
@@ -193,7 +198,7 @@ pub fn SelectAlloc(
             _ = self.inner.reset();
         }
 
-        fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
+        fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
             const self: *Self = @ptrCast(@alignCast(impl));
 
             const cloned: *Self = try allocator.create(Self);
@@ -208,9 +213,9 @@ pub fn SelectAlloc(
                 .context = self.context,
                 .allocator = allocator,
             };
-            return (AnonymousIterable(TOther){
+            return (AnonymousIterable(T){
                 .ptr = cloned,
-                .v_table = &VTable(TOther){
+                .v_table = &VTable(T){
                     .next_fn = &implNext,
                     .prev_fn = &implPrev,
                     .reset_fn = &implReset,
@@ -234,10 +239,10 @@ pub fn SelectAlloc(
             ptr.allocator.destroy(ptr);
         }
 
-        pub fn iter(self: *Self) Iter(TOther) {
-            return (AnonymousIterable(TOther){
+        pub fn iter(self: *Self) Iter(T) {
+            return (AnonymousIterable(T){
                 .ptr = self,
-                .v_table = &VTable(TOther){
+                .v_table = &VTable(T){
                     .next_fn = &implNext,
                     .prev_fn = &implPrev,
                     .scroll_fn = &implScroll,
@@ -253,8 +258,9 @@ pub fn SelectAlloc(
 
 const std = @import("std");
 const iter = @import("iter.zig");
+const util = @import("util.zig");
+const Allocator = std.mem.Allocator;
 const Iter = iter.Iter;
-const ClonedIter = @import("util.zig").ClonedIter;
 const AnonymousIterable = iter.AnonymousIterable;
 const VTable = iter.VTable;
-const Allocator = std.mem.Allocator;
+const ClonedIter = util.ClonedIter;

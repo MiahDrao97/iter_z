@@ -31,9 +31,8 @@ const ZeroRemainder = struct {
 fn getEventsIter(allocator: Allocator, iter: *Iter(u8)) Allocator.Error!Iter(u8) {
     var divisor: u8 = 2;
     _ = &divisor;
-    const ctx: *ZeroRemainder = try allocator.create(ZeroRemainder);
-    ctx.* = .{ .divisor = divisor };
-    return iter.where(ctx, ContextOwnership{ .owned = allocator });
+    const ctx: ZeroRemainder = .{ .divisor = divisor };
+    return try iter.whereAlloc(allocator, ctx);
 }
 
 const NumToString = struct {
@@ -120,11 +119,7 @@ test "select" {
     };
 
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var iter: Iter(Allocator.Error![]u8) = inner.select(
-        Allocator.Error![]u8,
-        NumToStringAlloc{},
-        NumToStringAlloc.transform,
-    );
+    var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, NumToStringAlloc{});
 
     try testing.expect(iter.len() == 3);
 
@@ -158,7 +153,7 @@ test "cloneReset" {
 }
 test "where" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
+    var filtered: Iter(u8) = iter.where(IsEven{});
 
     var clone: Iter(u8) = try filtered.clone(testing.allocator);
     defer clone.deinit();
@@ -192,7 +187,7 @@ test "does the context seg-fault?" {
 test "enumerateToOwnedSlice" {
     {
         var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
-        var iter: Iter(u8) = inner.where(&IsEven{}, .none);
+        var iter: Iter(u8) = inner.where(IsEven{});
 
         try testing.expect(iter.len() == 3);
 
@@ -224,7 +219,7 @@ test "empty" {
     try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
 
-    var next_iter = iter.where(&IsEven{}, .none);
+    var next_iter = iter.where(IsEven{});
 
     try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
@@ -259,7 +254,7 @@ test "concat" {
 
         try testing.expectEqual(9, i);
 
-        var new_iter: Iter(u8) = iter.reset().where(&IsEven{}, .none);
+        var new_iter: Iter(u8) = iter.reset().where(IsEven{});
 
         try testing.expectEqual(9, new_iter.len());
 
@@ -439,7 +434,7 @@ test "clone" {
 }
 test "clone with where static" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var outer: Iter(u8) = iter.where(&IsEven{}, .none);
+    var outer: Iter(u8) = iter.where(IsEven{});
 
     var result: ?u8 = outer.next();
     try testing.expectEqual(2, result);
@@ -479,7 +474,7 @@ test "clone with select" {
     };
 
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = iter.select([]const u8, AsDigit{}, AsDigit.transform);
+    var outer: Iter([]const u8) = iter.select([]const u8, AsDigit{});
     defer outer.deinit();
 
     AsDigit.representation = .decimal;
@@ -504,7 +499,7 @@ test "clone with select" {
     try testing.expectEqualStrings("4", outer.next().?);
 
     // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = iter.select([]const u8, AsDigit{}, AsDigit.transform);
+    var alternate: Iter([]const u8) = iter.select([]const u8, AsDigit{});
     defer alternate.deinit();
 
     // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
@@ -536,7 +531,7 @@ test "Overlapping select edge cases" {
     const getMultiplier = struct {
         fn getMultiplier(allocator: Allocator, factor: u8, iterator: *Iter(u8)) Allocator.Error!Iter(u32) {
             const multiplier: Multiplier = .{ .factor = factor };
-            return try iterator.selectAlloc(u32, allocator, multiplier, Multiplier.transform);
+            return try iterator.selectAlloc(u32, allocator, multiplier);
         }
     }.getMultiplier;
 
@@ -943,7 +938,7 @@ test "enumerate to buffer" {
 }
 test "allocator mix n match" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var filtered: Iter(u8) = iter.where(&IsEven{}, .none);
+    var filtered: Iter(u8) = iter.where(IsEven{});
 
     var arena: ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -961,7 +956,7 @@ test "allocator mix n match" {
     var clone4 = try iter.clone(arena2.allocator());
     defer clone4.deinit();
 
-    var filtered2 = clone4.where(&IsEven{}, .none);
+    var filtered2 = clone4.where(IsEven{});
 
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();

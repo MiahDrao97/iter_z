@@ -823,6 +823,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
+        /// `context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
         ///
         /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
         /// Use `selectAlloc()` for nonzero-sized contexts.
@@ -830,16 +831,16 @@ pub fn Iter(comptime T: type) type {
             self: *Iter(T),
             comptime TOther: type,
             context: anytype,
-            transform: fn (@TypeOf(context), T) TOther,
         ) Iter(TOther) {
-            const selector: Select(T, TOther, @TypeOf(context), transform) = .{ .inner = self };
+            const selector: Select(T, TOther, @TypeOf(context)) = .{ .inner = self };
             return selector.iter();
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
+        /// `context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
         ///
-        /// This method is intended for nonzero-sized contexts,
-        /// and will invoke a `@compileLog` when `context` is zero-sized, suggesting to use `select()` instead.
+        /// This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
+        /// If you wish to avoid the allocation, use `select()`.
         ///
         /// Since this method creates a pointer, be sure to call `deinit()` after usage.
         pub fn selectAlloc(
@@ -847,9 +848,8 @@ pub fn Iter(comptime T: type) type {
             comptime TOther: type,
             allocator: Allocator,
             context: anytype,
-            transform: fn (@TypeOf(context), T) TOther,
         ) Allocator.Error!Iter(TOther) {
-            const selector: *SelectAlloc(T, TOther, @TypeOf(context), transform) = try .new(
+            const selector: *SelectAlloc(T, TOther, @TypeOf(context)) = try .new(
                 allocator,
                 self,
                 context,
@@ -857,136 +857,30 @@ pub fn Iter(comptime T: type) type {
             return selector.iter();
         }
 
-        /// Returns a filtered iterator, using `self` as a source.
+        /// Return a pared-down iterator that matches the criteria specified in `filter()`.
+        /// `context` must define the following method: `fn filter(@TypeOf(context), T) bool`
         ///
-        /// - `context_ptr` must be a *pointer* to a type that defines the method: `fn filter(@This(), T) bool`.
-        ///   That pointer will be stored as a type-erased pointer.
-        /// - `ownership` indicates whether or not `context` is owned by this iterator.
-        ///   If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
-        ///   Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
+        /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
+        /// Use `whereAlloc()` for nonzero-sized contexts.
+        pub fn where(self: *Iter(T), context: anytype) Iter(T) {
+            const w: Where(T, @TypeOf(context)) = .{ .inner = self };
+            return w.iter();
+        }
+
+        /// Return a pared-down iterator that matches the criteria specified in `filter()`.
+        /// `context` must define the following method: `fn filter(@TypeOf(context), T) bool`
         ///
-        /// Context example:
-        /// ```zig
-        /// fn Ctx(comptime T: type) type {
-        ///     return struct {
-        ///         pub fn filter(_: @This(), item: T) bool {
-        ///             return true;
-        ///         }
-        ///     };
-        /// }
-        /// ```
-        pub fn where(self: *Iter(T), context_ptr: anytype, ownership: ContextOwnership) Iter(T) {
-            assert(validateFilterContext(T, context_ptr, Descriptor{ .required = true, .must_be_ptr = true }) == .exists);
-            const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
-            const ctx = struct {
-                fn implNext(c: *const anyopaque, inner: *anyopaque) ?T {
-                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    while (inner_iter.next()) |x| {
-                        if (c_ptr.filter(x)) {
-                            return x;
-                        }
-                    }
-                    return null;
-                }
-
-                fn implPrev(c: *const anyopaque, inner: *anyopaque) ?T {
-                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    while (inner_iter.prev()) |x| {
-                        if (c_ptr.filter(x)) {
-                            return x;
-                        }
-                    }
-                    return null;
-                }
-
-                fn implReset(inner: *anyopaque) void {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    _ = inner_iter.reset();
-                }
-
-                fn implLen(inner: *anyopaque) usize {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    return inner_iter.len();
-                }
-
-                fn implClone(
-                    c: *const anyopaque,
-                    inner: *anyopaque,
-                    v_table: *const ContextIterable(T).ContextVTable,
-                    owning: ContextIterable(T).Ownership,
-                    allocator: Allocator,
-                ) Allocator.Error!Iter(T) {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
-                    errdefer allocator.destroy(iter_clone);
-                    iter_clone.* = inner_iter.*;
-                    return Iter(T){
-                        .variant = Variant(T){
-                            .context = ContextIterable(T){
-                                .context = switch (owning) {
-                                    .owns_context, .owns_both => blk: {
-                                        const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                                        const c_clone: *ContextType = try allocator.create(ContextType);
-                                        c_clone.* = c_ptr.*;
-                                        break :blk c_clone;
-                                    },
-                                    else => c,
-                                },
-                                .v_table = v_table,
-                                .iter = iter_clone,
-                                .ownership = switch (owning) {
-                                    .owns_context, .owns_both => .{ .owns_both = allocator },
-                                    else => .{ .owns_iter = allocator },
-                                },
-                            },
-                        },
-                    };
-                }
-
-                fn implDeinit(
-                    c: *const anyopaque,
-                    inner: *anyopaque,
-                    owning: ContextIterable(T).Ownership,
-                ) void {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    inner_iter.deinit();
-                    switch (owning) {
-                        .owns_iter => |alloc| alloc.destroy(inner_iter),
-                        .owns_context => |alloc| {
-                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                            alloc.destroy(c_ptr);
-                        },
-                        .owns_both => |alloc| {
-                            alloc.destroy(inner_iter);
-                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                            alloc.destroy(c_ptr);
-                        },
-                        else => {},
-                    }
-                }
-            };
-            return Iter(T){
-                .variant = Variant(T){
-                    .context = ContextIterable(T){
-                        .context = context_ptr,
-                        .iter = self,
-                        .v_table = &ContextIterable(T).ContextVTable{
-                            .next_fn = &ctx.implNext,
-                            .prev_fn = &ctx.implPrev,
-                            .reset_fn = &ctx.implReset,
-                            .len_fn = &ctx.implLen,
-                            .clone_fn = &ctx.implClone,
-                            .deinit_fn = &ctx.implDeinit,
-                        },
-                        .ownership = switch (ownership) {
-                            .none => .none,
-                            .owned => |alloc| .{ .owns_context = alloc },
-                        },
-                    },
-                },
-            };
+        /// This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
+        /// If you wish to avoid the allocation, use `where()`.
+        ///
+        /// Since this method creates a pointer, be sure to call `deinit()` after usage.
+        pub fn whereAlloc(
+            self: *Iter(T),
+            allocator: Allocator,
+            context: anytype,
+        ) Allocator.Error!Iter(T) {
+            const w: *WhereAlloc(T, @TypeOf(context)) = try .new(allocator, self, context);
+            return w.iter();
         }
 
         /// Take `buf.len` and return new iterator from that buffer.
@@ -1461,9 +1355,12 @@ pub fn Iter(comptime T: type) type {
 
                 fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    const cloned: *CloneIter(T) = try allocator.create(CloneIter(T));
-                    cloned.* = .{ .allocator = allocator, .iter = self_ptr.* };
-                    const reversed: AnonymousIterable(T) = .{
+
+                    const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
+                    errdefer allocator.destroy(cloned);
+
+                    cloned.* = .{ .allocator = allocator, .iter = try self_ptr.clone(allocator) };
+                    return (AnonymousIterable(T){
                         .ptr = cloned,
                         .v_table = &.{
                             .next_fn = &implNextAsClone,
@@ -1473,8 +1370,7 @@ pub fn Iter(comptime T: type) type {
                             .len_fn = &implLenAsClone,
                             .deinit_fn = &implDeinitAsClone,
                         },
-                    };
-                    return reversed.iter();
+                    }).iter();
                 }
 
                 fn implLen(impl: *anyopaque) usize {
@@ -1483,17 +1379,17 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 fn implNextAsClone(impl: *anyopaque) ?T {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
                     return clone_ptr.iter.prev();
                 }
 
                 fn implPrevAsClone(impl: *anyopaque) ?T {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
                     return clone_ptr.iter.next();
                 }
 
                 fn implResetAsClone(impl: *anyopaque) void {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
                     switch (clone_ptr.iter.variant) {
                         .slice => |*s| s.idx = s.elements.len,
                         .multi_arr_list => |*m| {
@@ -1507,10 +1403,13 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
-                    const cloned: *CloneIter(T) = try allocator.create(CloneIter(T));
-                    cloned.* = .{ .allocator = allocator, .iter = clone_ptr.iter };
-                    const reversed: AnonymousIterable(T) = .{
+                    const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
+
+                    const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
+                    errdefer allocator.destroy(cloned);
+
+                    cloned.* = .{ .allocator = allocator, .iter = try clone_ptr.iter.clone(allocator) };
+                    return (AnonymousIterable(T){
                         .ptr = cloned,
                         .v_table = &.{
                             .next_fn = &implNextAsClone,
@@ -1520,12 +1419,11 @@ pub fn Iter(comptime T: type) type {
                             .len_fn = &implLenAsClone,
                             .deinit_fn = &implDeinitAsClone,
                         },
-                    };
-                    return reversed.iter();
+                    }).iter();
                 }
 
                 fn implLenAsClone(impl: *anyopaque) usize {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
                     return clone_ptr.iter.len();
                 }
 
@@ -1535,7 +1433,7 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 fn implDeinitAsClone(impl: *anyopaque) void {
-                    const clone_ptr: *CloneIter(T) = @ptrCast(@alignCast(impl));
+                    const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
                     clone_ptr.allocator.destroy(clone_ptr);
                 }
             };
@@ -1568,13 +1466,6 @@ pub fn Iter(comptime T: type) type {
             var reversed: Iter(T) = self.reverse();
             return try reversed.cloneReset(allocator);
         }
-    };
-}
-
-fn CloneIter(comptime T: type) type {
-    return struct {
-        iter: Iter(T),
-        allocator: Allocator,
     };
 }
 
@@ -1878,4 +1769,7 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 const Select = @import("select.zig").Select;
 const SelectAlloc = @import("select.zig").SelectAlloc;
+const Where = @import("where.zig").Where;
+const WhereAlloc = @import("where.zig").WhereAlloc;
 pub const util = @import("util.zig");
+const ClonedIter = util.ClonedIter;

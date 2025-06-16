@@ -2,6 +2,7 @@ const std = @import("std");
 const iter = @import("iter.zig");
 const Allocator = std.mem.Allocator;
 const Ordering = iter.Ordering;
+const Iter = iter.Iter;
 const Fn = std.builtin.Type.Fn;
 
 pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}![len]T {
@@ -26,4 +27,12 @@ pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}!
     }
 
     return arr;
+}
+
+/// Used internally as a pointer type with an inner `iter` and `allocator` that owned the pointer to this structure.
+pub fn ClonedIter(comptime T: type) type {
+    return struct {
+        iter: Iter(T),
+        allocator: Allocator,
+    };
 }

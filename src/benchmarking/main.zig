@@ -177,7 +177,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
     var expected: u32 = 0;
     switch (scenario.strategy) {
         .select => {
-            var selected: Iter(u32) = iter.select(u32, ValueSelector{}, ValueSelector.transform);
+            var selected: Iter(u32) = iter.select(u32, ValueSelector{});
             while (selected.next()) |actual| : (expected += 1) {
                 if (expected != actual) {
                     std.debug.print("WARN: Expected {d} but found {d}", .{ expected, actual });
