@@ -1045,7 +1045,8 @@ pub fn Iter(comptime T: type) type {
             return fromSliceOwned(allocator, slice, null);
         }
 
-        /// Determine if the sequence contains any element with a given filter context (or pass in null to simply peek at the next element).
+        /// Determine if the sequence contains any element with a given filter context
+        /// (or pass in void literal `{}` or `null` to simply peek at the next element).
         /// Always scrolls back in place.
         ///
         /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
@@ -1130,7 +1131,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Ensure there is exactly 1 or 0 elements that matches the passed-in filter.
-        /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
+        /// The filter is optional, and you may pass in void literal `{}` or `null` if you do not wish to apply a filter.
         /// Will scroll back in place.
         ///
         /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
@@ -1144,7 +1145,7 @@ pub fn Iter(comptime T: type) type {
         ///     };
         /// }
         /// ```
-        pub fn singleOrNull(
+        pub fn single(
             self: *Iter(T),
             context: anytype,
         ) error{MultipleElementsFound}!?T {
@@ -1184,28 +1185,6 @@ pub fn Iter(comptime T: type) type {
             }
 
             return found;
-        }
-
-        /// Ensure there is exactly 1 element that matches the passed-in filter.
-        /// The filter is optional, and you may pass in `null` or void literal `{}` if you do not wish to apply a filter.
-        /// Will scroll back in place.
-        ///
-        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
-        /// Example:
-        /// ```zig
-        /// fn Ctx(comptime T: type) type {
-        ///     return struct {
-        ///         pub fn filter(_: @This(), item: T) bool {
-        ///             return true;
-        ///         }
-        ///     };
-        /// }
-        /// ```
-        pub fn single(
-            self: *Iter(T),
-            context: anytype,
-        ) error{ NoElementsFound, MultipleElementsFound }!T {
-            return try self.singleOrNull(context) orelse error.NoElementsFound;
         }
 
         /// Run `action` for each element in the iterator
@@ -1265,7 +1244,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
-        /// If you do not wish to apply a filter, pass in `null` or void literal `{}` to `context`.
+        /// If you do not wish to apply a filter, pass in void literal `{}` or `null` to `context`.
         ///
         /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
         /// Example:

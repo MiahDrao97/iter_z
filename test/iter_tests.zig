@@ -369,7 +369,7 @@ test "any" {
     result = iter.next();
     try testing.expect(result.? == 3);
 }
-test "single/single or null" {
+test "single" {
     var iter: Iter(u8) = .from("racecar");
     defer iter.deinit();
 
@@ -381,40 +381,30 @@ test "single/single or null" {
         }
     };
 
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(HasChar{ .char = 'r' }));
+    try testing.expectError(error.MultipleElementsFound, iter.single(HasChar{ .char = 'r' }));
 
-    var result: ?u8 = try iter.singleOrNull(HasChar{ .char = 'e' });
+    var result: ?u8 = try iter.single(HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    result = try iter.singleOrNull(HasChar{ .char = 'x' });
+    result = try iter.single(HasChar{ .char = 'x' });
     try testing.expect(result == null);
 
     result = try iter.single(HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    try testing.expectError(error.NoElementsFound, iter.single(HasChar{ .char = 'x' }));
-
+    try testing.expectEqual(null, try iter.single(HasChar{ .char = 'x' }));
     try testing.expectError(error.MultipleElementsFound, iter.single(HasChar{ .char = 'r' }));
-
-    try testing.expectError(error.MultipleElementsFound, iter.singleOrNull(null));
     try testing.expectError(error.MultipleElementsFound, iter.single({}));
 
     iter.deinit();
     iter = .from("");
 
-    try testing.expectError(error.NoElementsFound, iter.single(null));
-
-    result = try iter.singleOrNull({});
-    try testing.expect(result == null);
+    try testing.expectEqual(null, try iter.single({}));
 
     iter.deinit();
     iter = .from("x");
 
-    result = try iter.singleOrNull(null);
-    try testing.expect(result.? == 'x');
-
-    result = try iter.single(null);
-    try testing.expect(result.? == 'x');
+    try testing.expectEqual('x', try iter.single({}));
 }
 test "clone" {
     var iter: Iter(u8) = .from("asdf");
