@@ -110,18 +110,20 @@ test "select" {
     };
 
     const NumToStringAlloc = struct {
-        allocator: Allocator,
+        // Can cheat the zero-size rule with statics, but I'll leave that up to the caller.
+        // Statics can be sketchy.
+        var allocator: Allocator = testing.allocator;
 
-        pub fn transform(self: @This(), num: u8) Allocator.Error![]u8 {
-            return try std.fmt.allocPrint(self.allocator, "{d}", .{num});
+        pub fn transform(_: @This(), num: u8) Allocator.Error![]u8 {
+            return try std.fmt.allocPrint(allocator, "{d}", .{num});
         }
     };
 
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var iter: Iter(Allocator.Error![]u8) = inner.select(
         Allocator.Error![]u8,
-        &NumToStringAlloc{ .allocator = testing.allocator },
-        .none,
+        NumToStringAlloc{},
+        NumToStringAlloc.transform,
     );
 
     try testing.expect(iter.len() == 3);
@@ -465,25 +467,22 @@ test "clone with where static" {
 }
 test "clone with select" {
     const AsDigit = struct {
-        representation: enum { hex, decimal },
-        buffer: []u8,
+        var representation: enum { hex, decimal } = undefined;
+        var buffer: [16]u8 = undefined;
 
-        pub fn transform(self: @This(), byte: u8) []const u8 {
-            return switch (self.representation) {
-                .decimal => std.fmt.bufPrint(self.buffer, "{d}", .{byte}) catch unreachable,
-                .hex => std.fmt.bufPrint(self.buffer, "0x{x:0>2}", .{byte}) catch unreachable,
+        pub fn transform(_: @This(), byte: u8) []const u8 {
+            return switch (representation) {
+                .decimal => std.fmt.bufPrint(&buffer, "{d}", .{byte}) catch unreachable,
+                .hex => std.fmt.bufPrint(&buffer, "0x{x:0>2}", .{byte}) catch unreachable,
             };
         }
     };
 
-    var buf: [4]u8 = undefined;
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = iter.select(
-        []const u8,
-        &AsDigit{ .representation = .decimal, .buffer = &buf },
-        .none,
-    );
+    var outer: Iter([]const u8) = iter.select([]const u8, AsDigit{}, AsDigit.transform);
+    defer outer.deinit();
 
+    AsDigit.representation = .decimal;
     try testing.expectEqualStrings("1", outer.next().?);
 
     var clone: Iter([]const u8) = try outer.cloneReset(testing.allocator);
@@ -505,13 +504,13 @@ test "clone with select" {
     try testing.expectEqualStrings("4", outer.next().?);
 
     // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = iter.select(
-        []const u8,
-        &AsDigit{ .representation = .hex, .buffer = &buf },
-        .none,
-    );
+    var alternate: Iter([]const u8) = iter.select([]const u8, AsDigit{}, AsDigit.transform);
+    defer alternate.deinit();
+
     // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
+    AsDigit.representation = .hex;
     try testing.expectEqualStrings("0x05", alternate.next().?);
+    AsDigit.representation = .decimal;
     try testing.expectEqualStrings("6", outer.next().?);
 
     // check the clones
@@ -536,10 +535,8 @@ test "Overlapping select edge cases" {
 
     const getMultiplier = struct {
         fn getMultiplier(allocator: Allocator, factor: u8, iterator: *Iter(u8)) Allocator.Error!Iter(u32) {
-            const multiplier: *Multiplier = try allocator.create(Multiplier);
-            multiplier.* = .{ .factor = factor };
-
-            return iterator.select(u32, multiplier, ContextOwnership{ .owned = allocator });
+            const multiplier: Multiplier = .{ .factor = factor };
+            return try iterator.selectAlloc(u32, allocator, multiplier, Multiplier.transform);
         }
     }.getMultiplier;
 

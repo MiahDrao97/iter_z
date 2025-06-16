@@ -823,134 +823,38 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
-        /// - `context_ptr` must be a pointer to a type that defines the method: `fn transform(@This(), T) TOther`.
-        ///   It's stored as a type-erased pointer.
-        /// - `ownership` indicates whether or not `context` is owned by this iterator.
-        ///   If you pass in the `owned` tag with the allocator that created the context pointer, it will be destroyed on `deinit()`.
-        ///   Otherwise, pass in `.none` if `context` points to something locally scoped or a constant.
         ///
-        /// Context example:
-        /// ```zig
-        /// const Multiplier = struct {
-        ///     factor: u32,
-        ///     pub fn transform(self: @This(), item: u32) u32 {
-        ///         return self.factor * item;
-        ///     }
-        /// };
-        /// ```
+        /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
+        /// Use `selectAlloc()` for nonzero-sized contexts.
         pub fn select(
             self: *Iter(T),
             comptime TOther: type,
-            context_ptr: anytype,
-            ownership: ContextOwnership,
+            context: anytype,
+            transform: fn (@TypeOf(context), T) TOther,
         ) Iter(TOther) {
-            validateSelectContext(T, TOther, context_ptr, true);
-            const ContextType = @typeInfo(@TypeOf(context_ptr)).pointer.child;
-            const ctx = struct {
-                fn implNext(c: *const anyopaque, inner: *anyopaque) ?TOther {
-                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    if (inner_iter.next()) |x| {
-                        return c_ptr.transform(x);
-                    }
-                    return null;
-                }
+            const selector: Select(T, TOther, @TypeOf(context), transform) = .{ .inner = self };
+            return selector.iter();
+        }
 
-                fn implPrev(c: *const anyopaque, inner: *anyopaque) ?TOther {
-                    const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    if (inner_iter.prev()) |x| {
-                        return c_ptr.transform(x);
-                    }
-                    return null;
-                }
-
-                fn implReset(inner: *anyopaque) void {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    _ = inner_iter.reset();
-                }
-
-                fn implLen(inner: *anyopaque) usize {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    return inner_iter.len();
-                }
-
-                fn implClone(
-                    c: *const anyopaque,
-                    inner: *anyopaque,
-                    v_table: *const ContextIterable(TOther).ContextVTable,
-                    owning: ContextIterable(TOther).Ownership,
-                    allocator: Allocator,
-                ) Allocator.Error!Iter(TOther) {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    const iter_clone: *Iter(T) = try allocator.create(Iter(T));
-                    errdefer allocator.destroy(iter_clone);
-                    iter_clone.* = inner_iter.*;
-                    return Iter(TOther){
-                        .variant = Variant(TOther){
-                            .context = ContextIterable(TOther){
-                                .context = switch (owning) {
-                                    .owns_context, .owns_both => blk: {
-                                        const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                                        const c_clone: *ContextType = try allocator.create(ContextType);
-                                        c_clone.* = c_ptr.*;
-                                        break :blk c_clone;
-                                    },
-                                    else => c,
-                                },
-                                .v_table = v_table,
-                                .iter = iter_clone,
-                                .ownership = switch (owning) {
-                                    .owns_context, .owns_both => .{ .owns_both = allocator },
-                                    else => .{ .owns_iter = allocator },
-                                },
-                            },
-                        },
-                    };
-                }
-
-                fn implDeinit(
-                    c: *const anyopaque,
-                    inner: *anyopaque,
-                    owning: ContextIterable(TOther).Ownership,
-                ) void {
-                    const inner_iter: *Iter(T) = @ptrCast(@alignCast(inner));
-                    inner_iter.deinit();
-                    switch (owning) {
-                        .owns_iter => |alloc| alloc.destroy(inner_iter),
-                        .owns_context => |alloc| {
-                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                            alloc.destroy(c_ptr);
-                        },
-                        .owns_both => |alloc| {
-                            alloc.destroy(inner_iter);
-                            const c_ptr: *const ContextType = @ptrCast(@alignCast(c));
-                            alloc.destroy(c_ptr);
-                        },
-                        else => {},
-                    }
-                }
-            };
-            return Iter(TOther){
-                .variant = Variant(TOther){
-                    .context = ContextIterable(TOther){
-                        .context = context_ptr,
-                        .iter = self,
-                        .v_table = &ContextIterable(TOther).ContextVTable{
-                            .next_fn = &ctx.implNext,
-                            .prev_fn = &ctx.implPrev,
-                            .reset_fn = &ctx.implReset,
-                            .len_fn = &ctx.implLen,
-                            .clone_fn = &ctx.implClone,
-                            .deinit_fn = &ctx.implDeinit,
-                        },
-                        .ownership = switch (ownership) {
-                            .none => .none,
-                            .owned => |alloc| .{ .owns_context = alloc },
-                        },
-                    },
-                },
-            };
+        /// Transform an iterator of type `T` to type `TOther`.
+        ///
+        /// This method is intended for nonzero-sized contexts,
+        /// and will invoke a `@compileLog` when `context` is zero-sized, suggesting to use `select()` instead.
+        ///
+        /// Since this method creates a pointer, be sure to call `deinit()` after usage.
+        pub fn selectAlloc(
+            self: *Iter(T),
+            comptime TOther: type,
+            allocator: Allocator,
+            context: anytype,
+            transform: fn (@TypeOf(context), T) TOther,
+        ) Allocator.Error!Iter(TOther) {
+            const selector: *SelectAlloc(T, TOther, @TypeOf(context), transform) = try .new(
+                allocator,
+                self,
+                context,
+            );
+            return selector.iter();
         }
 
         /// Returns a filtered iterator, using `self` as a source.
@@ -1972,4 +1876,6 @@ const MultiArrayList = std.MultiArrayList;
 const Fn = std.builtin.Type.Fn;
 const assert = std.debug.assert;
 const builtin = @import("builtin");
+const Select = @import("select.zig").Select;
+const SelectAlloc = @import("select.zig").SelectAlloc;
 pub const util = @import("util.zig");

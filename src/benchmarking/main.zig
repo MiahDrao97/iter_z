@@ -177,7 +177,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
     var expected: u32 = 0;
     switch (scenario.strategy) {
         .select => {
-            var selected: Iter(u32) = iter.select(u32, &ValueSelector{}, .none);
+            var selected: Iter(u32) = iter.select(u32, ValueSelector{}, ValueSelector.transform);
             while (selected.next()) |actual| : (expected += 1) {
                 if (expected != actual) {
                     std.debug.print("WARN: Expected {d} but found {d}", .{ expected, actual });
@@ -186,7 +186,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
             }
         },
         .vtable => {
-            var selected: Iter(u32) = selectLegacyNoAlloc(HashMap.Entry, u32, &iter, {}, transformEntry);
+            var selected: Iter(u32) = selectLegacyNoAlloc(HashMap.Entry, u32, &iter, ValueSelector{});
             defer selected.deinit();
             while (selected.next()) |actual| : (expected += 1) {
                 if (expected != actual) {
@@ -249,9 +249,8 @@ fn selectLegacyNoAlloc(
     comptime TOther: type,
     iter: *Iter(T),
     context: anytype,
-    transform: fn (@TypeOf(context), T) TOther,
 ) Iter(TOther) {
-    const Select = LegacySelectNoAlloc(T, TOther, @TypeOf(context), transform);
+    const Select = LegacySelectNoAlloc(T, TOther, @TypeOf(context));
     const select: Select = .{ .inner = iter };
     return select.iter();
 }
@@ -260,7 +259,6 @@ fn LegacySelectNoAlloc(
     comptime T: type,
     comptime TOther: type,
     comptime TContext: type,
-    transform: fn (TContext, T) TOther,
 ) type {
     if (@sizeOf(TContext) != 0) {
         @compileError("No-alloc only allowed with 0-size context types.");
@@ -271,7 +269,8 @@ fn LegacySelectNoAlloc(
         fn implNext(impl: *anyopaque) ?TOther {
             const self: *Iter(T) = @ptrCast(@alignCast(impl));
             if (self.next()) |x| {
-                return transform(undefined, x);
+                const context: TContext = undefined;
+                return context.transform(x);
             }
             return null;
         }
@@ -279,7 +278,8 @@ fn LegacySelectNoAlloc(
         fn implPrev(impl: *anyopaque) ?u32 {
             const self: *Iter(T) = @ptrCast(@alignCast(impl));
             if (self.prev()) |x| {
-                return transform(undefined, x);
+                const context: TContext = undefined;
+                return context.transform(x);
             }
             return null;
         }
