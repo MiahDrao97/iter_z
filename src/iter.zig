@@ -784,24 +784,6 @@ pub fn Iter(comptime T: type) type {
             return selector.iter();
         }
 
-        /// Destructured version of `select()`, which allows for defining `context` and `filterFn` independently.
-        /// This is also needed if `context` is a pointer.
-        pub inline fn selectDestructured(
-            self: *Iter(T),
-            comptime TOther: type,
-            context: anytype,
-            transformFn: fn (@TypeOf(context), T) TOther,
-        ) Iter(T) {
-            const SubContext = struct {
-                inner: @TypeOf(context),
-
-                pub fn transform(this: @This(), item: T) TOther {
-                    return transformFn(this.inner, item);
-                }
-            };
-            return self.select(TOther, SubContext{ .inner = context });
-        }
-
         /// Transform an iterator of type `T` to type `TOther`.
         /// `context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
         ///
@@ -823,25 +805,6 @@ pub fn Iter(comptime T: type) type {
             return selector.iter();
         }
 
-        /// Destructured version of `selectAlloc()`, which allows for defining `context` and `filterFn` independently.
-        /// This is also needed if `context` is a pointer.
-        pub inline fn selectAllocDestructured(
-            self: *Iter(T),
-            comptime TOther: type,
-            allocator: Allocator,
-            context: anytype,
-            transformFn: fn (@TypeOf(context), T) TOther,
-        ) Allocator.Error!Iter(T) {
-            const SubContext = struct {
-                inner: @TypeOf(context),
-
-                pub fn transform(this: @This(), item: T) TOther {
-                    return transformFn(this.inner, item);
-                }
-            };
-            return self.selectAlloc(TOther, allocator, SubContext{ .inner = context });
-        }
-
         /// Return a pared-down iterator that matches the criteria specified in `filter()`.
         /// `context` must define the following method: `fn filter(@TypeOf(context), T) bool`
         ///
@@ -850,23 +813,6 @@ pub fn Iter(comptime T: type) type {
         pub fn where(self: *Iter(T), context: anytype) Iter(T) {
             const w: Where(T, @TypeOf(context)) = .{ .inner = self };
             return w.iter();
-        }
-
-        /// Destructured version of `where()`, which allows for defining `context` and `filterFn` independently.
-        /// This is also needed if `context` is a pointer.
-        pub inline fn whereDestructured(
-            self: *Iter(T),
-            context: anytype,
-            filterFn: fn (@TypeOf(context), T) bool,
-        ) Iter(T) {
-            const SubContext = struct {
-                inner: @TypeOf(context),
-
-                pub fn filter(this: @This(), item: T) bool {
-                    return filterFn(this.inner, item);
-                }
-            };
-            return self.where(SubContext{ .inner = context });
         }
 
         /// Return a pared-down iterator that matches the criteria specified in `filter()`.
@@ -883,24 +829,6 @@ pub fn Iter(comptime T: type) type {
         ) Allocator.Error!Iter(T) {
             const w: *WhereAlloc(T, @TypeOf(context)) = try .new(allocator, self, context);
             return w.iter();
-        }
-
-        /// Destructured version of `whereAlloc()`, which allows for defining `context` and `filterFn` independently.
-        /// This is also needed if `context` is a pointer.
-        pub inline fn whereAllocDestructured(
-            self: *Iter(T),
-            allocator: Allocator,
-            context: anytype,
-            filterFn: fn (@TypeOf(context), T) bool,
-        ) Allocator.Error!Iter(T) {
-            const SubContext = struct {
-                inner: @TypeOf(context),
-
-                pub fn filter(this: @This(), item: T) bool {
-                    return filterFn(this.inner, item);
-                }
-            };
-            return self.whereAlloc(allocator, SubContext{ .inner = context });
         }
 
         /// Take `buf.len` and return new iterator from that buffer.
@@ -1336,25 +1264,6 @@ pub fn Iter(comptime T: type) type {
             return result;
         }
 
-        /// Destructured version of `fold()`, where you can define `context` and `accumulateFn` independently.
-        /// This is needed when `context` is a pointer type.
-        pub inline fn foldDestructured(
-            self: *Iter(T),
-            comptime TOther: type,
-            context: anytype,
-            accumulateFn: fn (@TypeOf(context), TOther, T) TOther,
-            init: TOther,
-        ) TOther {
-            const SubContext = struct {
-                inner: @TypeOf(context),
-
-                pub fn accumulate(this: @This(), accumulator: TOther, item: T) TOther {
-                    return accumulateFn(this.inner, accumulator, item);
-                }
-            };
-            return self.fold(TOther, SubContext{ .inner = context }, init);
-        }
-
         /// Calls `fold`, using the first element as `init`.
         /// Note that this returns null if the iterator is empty or at the end.
         ///
@@ -1363,23 +1272,6 @@ pub fn Iter(comptime T: type) type {
             _ = @as(fn (@TypeOf(context), T, T) T, @TypeOf(context).accumulate);
             const init: T = self.next() orelse return null;
             return self.fold(T, context, init);
-        }
-
-        /// Destructured version of `reduce()`, where you can define `context` and `accumulateFn` independently.
-        /// This is needed when `context` is a pointer type.
-        pub inline fn reduceDestructured(
-            self: *Iter(T),
-            context: anytype,
-            accumulateFn: fn (@TypeOf(context), T, T) T,
-        ) ?T {
-            const SubContext = struct {
-                inner: @TypeOf(context),
-
-                pub fn accumulate(this: @This(), accumulator: T, item: T) T {
-                    return accumulateFn(this.inner, accumulator, item);
-                }
-            };
-            return self.reduce(SubContext{ .inner = context });
         }
 
         /// Reverse the direction of the iterator.
