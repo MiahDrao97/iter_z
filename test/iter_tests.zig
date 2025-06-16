@@ -43,7 +43,7 @@ const NumToString = struct {
     }
 };
 
-const StringCompare = struct {
+const stringCompare = struct {
     pub fn compare(_: @This(), a: []const u8, b: []const u8) std.math.Order {
         // basically alphabetical
         for (0..@min(a.len, b.len)) |i| {
@@ -108,7 +108,7 @@ test "select" {
         }
     };
 
-    const NumToStringAlloc = struct {
+    const numToStrAlloc = struct {
         // Can cheat the zero-size rule with statics, but I'll leave that up to the caller.
         // Statics can be sketchy.
         var allocator: Allocator = testing.allocator;
@@ -119,7 +119,7 @@ test "select" {
     };
 
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, NumToStringAlloc{});
+    var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, numToStrAlloc{});
 
     try testing.expect(iter.len() == 3);
 
@@ -701,9 +701,9 @@ test "from other alloc" {
     result = iter.next();
     try testing.expect(result == null);
 
-    try testing.expect(iter.reset().contains("a", StringCompare{}));
-    try testing.expect(!iter.contains("blarf", StringCompare{}));
-    try testing.expect(iter.contains("this", StringCompare{}));
+    try testing.expect(iter.reset().contains("a", stringCompare{}));
+    try testing.expect(!iter.contains("blarf", stringCompare{}));
+    try testing.expect(iter.contains("this", stringCompare{}));
 
     const StrLength = struct {
         len: usize,
