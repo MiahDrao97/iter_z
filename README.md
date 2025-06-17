@@ -449,7 +449,7 @@ Use `whereAlloc()` for nonzero-sized contexts.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const zeroRemainder = struct {
+const zero_remainder = struct {
     var divisor: u32 = 1,
 
     pub fn filter(self: @This(), item: u32) bool {
@@ -457,8 +457,8 @@ const zeroRemainder = struct {
     }
 };
 
-zeroRemainder.divisor = 2; // using a static value to get around the zero-sized context rule
-var evens: Iter(u32) = iter.where(zeroRemainder{});
+zero_remainder.divisor = 2; // using a static value to get around the zero-sized context rule
+var evens: Iter(u32) = iter.where(zero_remainder{});
 while (evens.next()) |x| {
     // 2, 4
 }
@@ -614,7 +614,7 @@ const ctx = struct {
     }
 };
 
-const printNumber = struct{
+const print_number = struct{
     var allocator: Allocator = testing.allocator,
 
     pub fn transform(self: @This(), item: u8) Allocator.Error![]u8 {
@@ -623,7 +623,7 @@ const printNumber = struct{
 };
 
 var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, printNumber{});
+var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, print_number{});
 
 var i: usize = 0;
 var test_failed: bool = false;
@@ -650,33 +650,33 @@ Also, since this filter is optional, you may pass in void literal `{}` or `null`
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
 
-const isEven = struct {
+const is_even = struct {
     pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
 };
 
-const evens = iter.where(isEven{});
+const evens = iter.where(is_even{});
 _ = evens.len(); // length is 5 because this iterator is transformed from another
 _ = evens.count({}); // 2 (because that's how many there are with the `where()` filter applied)
 
 // count on original iterator
 _ = iter.count({}); // 5
-_ = iter.count(isEven{}); // 2
+_ = iter.count(is_even{}); // 2
 ```
 
 ### `all()`
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(context), T) bool`.
 ```zig
-const isEven = struct {
+const is_even = struct {
     pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
 };
 
 var iter: Iter(u8) = .from(&[_]u8{ 2, 4, 6 });
-_ = iter.all(isEven{}); // true
+_ = iter.all(is_even{}); // true
 ```
 
 ### `single()`

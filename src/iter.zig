@@ -1043,7 +1043,7 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Context example:
         /// ```zig
-        /// const Multiplier = struct {
+        /// const multiplier = struct {
         ///     factor: u32,
         ///     pub fn transform(self: @This(), item: u32) u32 {
         ///         return self.factor * item;

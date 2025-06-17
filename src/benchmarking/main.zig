@@ -168,7 +168,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
     var iter: Iter(HashMap.Entry) = try .fromOther(allocator, &other_iter, scenario.range);
     defer iter.deinit();
 
-    const valueSelector = struct {
+    const value_selector = struct {
         pub fn transform(_: @This(), val: HashMap.Entry) u32 {
             return val.value_ptr.*;
         }
@@ -177,7 +177,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
     var expected: u32 = 0;
     switch (scenario.strategy) {
         .select => {
-            var selected: Iter(u32) = iter.select(u32, valueSelector{});
+            var selected: Iter(u32) = iter.select(u32, value_selector{});
             while (selected.next()) |actual| : (expected += 1) {
                 if (expected != actual) {
                     std.debug.print("WARN: Expected {d} but found {d}", .{ expected, actual });
@@ -186,7 +186,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
             }
         },
         .vtable => {
-            var selected: Iter(u32) = selectLegacyNoAlloc(HashMap.Entry, u32, &iter, valueSelector{});
+            var selected: Iter(u32) = selectLegacyNoAlloc(HashMap.Entry, u32, &iter, value_selector{});
             defer selected.deinit();
             while (selected.next()) |actual| : (expected += 1) {
                 if (expected != actual) {
@@ -196,7 +196,7 @@ fn runBenchmark(scenario: RunIterBenchmark, allocator: Allocator, _: *std.time.T
             }
         },
         .transform_next => {
-            while (iter.transformNext(u32, valueSelector{})) |actual| : (expected += 1) {
+            while (iter.transformNext(u32, value_selector{})) |actual| : (expected += 1) {
                 if (expected != actual) {
                     std.debug.print("WARN: Expected {d} but found {d}", .{ expected, actual });
                     break;

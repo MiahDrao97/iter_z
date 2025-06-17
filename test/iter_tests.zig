@@ -14,8 +14,8 @@ const autoSum = iter_z.autoSum;
 const autoMin = iter_z.autoMin;
 const autoMax = iter_z.autoMax;
 
-const isEven = struct {
-    pub fn filter(_: isEven, num: u8) bool {
+const is_even = struct {
+    pub fn filter(_: is_even, num: u8) bool {
         return num % 2 == 0;
     }
 };
@@ -43,7 +43,7 @@ const NumToString = struct {
     }
 };
 
-const stringCompare = struct {
+const str_cmp = struct {
     pub fn compare(_: @This(), a: []const u8, b: []const u8) std.math.Order {
         // basically alphabetical
         for (0..@min(a.len, b.len)) |i| {
@@ -108,7 +108,7 @@ test "select" {
         }
     };
 
-    const numToStrAlloc = struct {
+    const num_to_str_alloc = struct {
         // Can cheat the zero-size rule with statics, but I'll leave that up to the caller.
         // Statics can be sketchy.
         var allocator: Allocator = testing.allocator;
@@ -119,7 +119,7 @@ test "select" {
     };
 
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, numToStrAlloc{});
+    var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, num_to_str_alloc{});
 
     try testing.expect(iter.len() == 3);
 
@@ -153,7 +153,7 @@ test "cloneReset" {
 }
 test "where" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var filtered: Iter(u8) = iter.where(isEven{});
+    var filtered: Iter(u8) = iter.where(is_even{});
 
     var clone: Iter(u8) = try filtered.clone(testing.allocator);
     defer clone.deinit();
@@ -187,7 +187,7 @@ test "does the context seg-fault?" {
 test "enumerateToOwnedSlice" {
     {
         var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
-        var iter: Iter(u8) = inner.where(isEven{});
+        var iter: Iter(u8) = inner.where(is_even{});
 
         try testing.expect(iter.len() == 3);
 
@@ -219,7 +219,7 @@ test "empty" {
     try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
 
-    var next_iter = iter.where(isEven{});
+    var next_iter = iter.where(is_even{});
 
     try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
@@ -254,7 +254,7 @@ test "concat" {
 
         try testing.expectEqual(9, i);
 
-        var new_iter: Iter(u8) = iter.reset().where(isEven{});
+        var new_iter: Iter(u8) = iter.reset().where(is_even{});
 
         try testing.expectEqual(9, new_iter.len());
 
@@ -356,7 +356,7 @@ test "any" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
     defer iter.deinit();
 
-    var result: ?u8 = iter.any(isEven{});
+    var result: ?u8 = iter.any(is_even{});
     try testing.expect(result == null);
 
     // should have scrolled back
@@ -398,12 +398,10 @@ test "single" {
 
     iter.deinit();
     iter = .from("");
-
     try testing.expectEqual(null, try iter.single({}));
 
     iter.deinit();
     iter = .from("x");
-
     try testing.expectEqual('x', try iter.single({}));
 }
 test "clone" {
@@ -424,7 +422,7 @@ test "clone" {
 }
 test "clone with where static" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var outer: Iter(u8) = iter.where(isEven{});
+    var outer: Iter(u8) = iter.where(is_even{});
 
     var result: ?u8 = outer.next();
     try testing.expectEqual(2, result);
@@ -451,7 +449,7 @@ test "clone with where static" {
     try testing.expectEqual(6, result);
 }
 test "clone with select" {
-    const asDigit = struct {
+    const as_digit = struct {
         var representation: enum { hex, decimal } = undefined;
         var buffer: [16]u8 = undefined;
 
@@ -464,10 +462,10 @@ test "clone with select" {
     };
 
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
-    var outer: Iter([]const u8) = iter.select([]const u8, asDigit{});
+    var outer: Iter([]const u8) = iter.select([]const u8, as_digit{});
     defer outer.deinit();
 
-    asDigit.representation = .decimal;
+    as_digit.representation = .decimal;
     try testing.expectEqualStrings("1", outer.next().?);
 
     var clone: Iter([]const u8) = try outer.cloneReset(testing.allocator);
@@ -489,13 +487,13 @@ test "clone with select" {
     try testing.expectEqualStrings("4", outer.next().?);
 
     // test whether or not we can pass a different transform fn with the same signature, but different body
-    var alternate: Iter([]const u8) = iter.select([]const u8, asDigit{});
+    var alternate: Iter([]const u8) = iter.select([]const u8, as_digit{});
     defer alternate.deinit();
 
     // the following two are based off the root iterator `iter`, which would be on its 5th element at this point
-    asDigit.representation = .hex;
+    as_digit.representation = .hex;
     try testing.expectEqualStrings("0x05", alternate.next().?);
-    asDigit.representation = .decimal;
+    as_digit.representation = .decimal;
     try testing.expectEqualStrings("6", outer.next().?);
 
     // check the clones
@@ -701,9 +699,9 @@ test "from other alloc" {
     result = iter.next();
     try testing.expect(result == null);
 
-    try testing.expect(iter.reset().contains("a", stringCompare{}));
-    try testing.expect(!iter.contains("blarf", stringCompare{}));
-    try testing.expect(iter.contains("this", stringCompare{}));
+    try testing.expect(iter.reset().contains("a", str_cmp{}));
+    try testing.expect(!iter.contains("blarf", str_cmp{}));
+    try testing.expect(iter.contains("this", str_cmp{}));
 
     const StrLength = struct {
         len: usize,
@@ -928,7 +926,7 @@ test "enumerate to buffer" {
 }
 test "allocator mix n match" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
-    var filtered: Iter(u8) = iter.where(isEven{});
+    var filtered: Iter(u8) = iter.where(is_even{});
 
     var arena: ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -946,7 +944,7 @@ test "allocator mix n match" {
     var clone4 = try iter.clone(arena2.allocator());
     defer clone4.deinit();
 
-    var filtered2 = clone4.where(isEven{});
+    var filtered2 = clone4.where(is_even{});
 
     var clone5 = try filtered2.clone(arena2.allocator());
     defer clone5.deinit();
@@ -954,13 +952,13 @@ test "allocator mix n match" {
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var moved: usize = undefined;
-    try testing.expectEqual(2, iter.filterNext(isEven{}, &moved));
+    try testing.expectEqual(2, iter.filterNext(is_even{}, &moved));
     try testing.expectEqual(2, moved); // moved 2 elements
 
-    try testing.expectEqual(null, iter.filterNext(isEven{}, &moved));
+    try testing.expectEqual(null, iter.filterNext(is_even{}, &moved));
     try testing.expectEqual(1, moved); // moved 1 element and then encountered end
 
-    try testing.expectEqual(null, iter.filterNext(isEven{}, &moved));
+    try testing.expectEqual(null, iter.filterNext(is_even{}, &moved));
     try testing.expectEqual(0, moved); // did not move again
 }
 test "iter with optionals" {
