@@ -582,62 +582,65 @@ test "filterNext()" {
 ```
 
 ### `forEach()`
-Execute an action over the elements of your iterator.
-Optionally pass in an action when an error is occurred and determine if iteration should break when an error is encountered.
+Run `action` for each element in the iterator
+- `self`: method receiver (non-const pointer)
+- `context`: context object that may hold data
+- `action`: action performed on each element
+- `handleErrOpts`: options for handling an error if encountered while executing `action`:
+    - `exec_on_err`: executed if an error is returned while executing `action`
+    - `terminate_iteration`: if true, terminates iteration when an error is encountered
+
+Note that you may need to reset this iterator after calling this method.
 ```zig
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
-const ctx = struct {
-    fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
-        const x: *usize = args.@"0";
-        x.* += 1;
+test "forEach" {
+    const Context = struct {
+        x: usize = 0,
+        allocator: Allocator,
+        test_failed: bool = false,
 
-        var buf: [1]u8 = undefined;
-        const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{x.*}) catch unreachable;
+        fn action(self: *@This(), maybe_str: Allocator.Error![]u8) anyerror!void {
+            self.x += 1;
 
-        const allocator: Allocator = args.@"2";
+            var buf: [1]u8 = undefined;
+            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{self.x}) catch unreachable;
 
-        const actual: []u8 = try maybe_str;
-        defer allocator.free(actual);
+            const actual: []u8 = try maybe_str;
+            defer self.allocator.free(actual);
 
-        testing.expectEqualStrings(actual, expected) catch |err| {
-            std.debug.print("Test failed: {s} -> {?}", .{ @errorName(err), @errorReturnTrace() });
-            return err;
-        };
-    }
+            testing.expectEqualStrings(actual, expected) catch |err| {
+                std.debug.print("Test failed: {s} -> {?}", .{ @errorName(err), @errorReturnTrace() });
+                return err;
+            };
+        }
 
-    fn onErr(_: anyerror, _: Allocator.Error![]u8, args: anytype) void {
-        const failed: *bool = args.@"1";
-        failed.* = true;
-    }
-};
+        fn onErr(self: *@This(), _: anyerror, _: Allocator.Error![]u8) void {
+            self.test_failed = true;
+        }
+    };
 
-const print_number = struct{
-    var allocator: Allocator = testing.allocator,
+    const num_to_str_alloc = struct {
+        var allocator: Allocator = testing.allocator;
 
-    pub fn transform(self: @This(), item: u8) Allocator.Error![]u8 {
-        return try std.fmt.allocPrint(self.allocator, "{d}", .{item});
-    }
-};
+        pub fn transform(_: @This(), num: u8) Allocator.Error![]u8 {
+            return try std.fmt.allocPrint(allocator, "{d}", .{num});
+        }
+    };
 
-var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, print_number{});
+    var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, num_to_str_alloc{});
 
-var i: usize = 0;
-var test_failed: bool = false;
+    try testing.expect(iter.len() == 3);
 
-// Parameters:
-// - action to perform on every element
-// - another action to be executed on error
-// - whether or not to break on error
-// - args
-iter.forEach(ctx.action, ctx.onErr, true, .{ &i, &test_failed, testing.allocator });
+    var ctx: Context = .{ .allocator = testing.allocator };
+    iter.forEach(&ctx, Context.action, .{ .exec_on_err = Context.onErr });
 
-try testing.expect(!test_failed);
-try testing.expect(i == 3);
-
+    try testing.expect(!ctx.test_failed);
+    try testing.expect(ctx.x == 3);
+}
 ```
 
 ### `count()`
@@ -734,8 +737,8 @@ That collector value is continued is each subsequent call to `accumulate()` with
 Parameters:
 - `self`: method receiver (non-const pointer)
 - `TOther` is the return type
-- `context` must define the method `fn accumulate(@TypeOf(context), TOther, T) TOther`
 - `init` is the starting value of the accumulator
+- `context` must define the method `fn accumulate(@TypeOf(context), TOther, T) TOther`
 A classic example of fold would be summing all the values in the iteration.
 ```zig
 const sum = struct {
@@ -746,7 +749,7 @@ const sum = struct {
 };
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-_ = iter.fold(u16, sum{}, 0); // 6
+_ = iter.fold(u16, 0, sum{}); // 6
 ```
 
 ### `reduce()`

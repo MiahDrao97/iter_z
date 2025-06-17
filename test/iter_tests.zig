@@ -13,6 +13,10 @@ const autoCompare = iter_z.autoCompare;
 const autoSum = iter_z.autoSum;
 const autoMin = iter_z.autoMin;
 const autoMax = iter_z.autoMax;
+const filterContext = iter_z.filterContext;
+const transformContext = iter_z.transformContext;
+const accumulateContext = iter_z.accumulateContext;
+const compareContext = iter_z.compareContext;
 
 const is_even = struct {
     pub fn filter(_: is_even, num: u8) bool {
@@ -23,7 +27,7 @@ const is_even = struct {
 const ZeroRemainder = struct {
     divisor: u8,
 
-    pub fn filter(self: @This(), num: u8) bool {
+    pub fn noRemainder(self: @This(), num: u8) bool {
         return num % self.divisor == 0;
     }
 };
@@ -32,7 +36,7 @@ fn getEventsIter(allocator: Allocator, iter: *Iter(u8)) Allocator.Error!Iter(u8)
     var divisor: u8 = 2;
     _ = &divisor;
     const ctx: ZeroRemainder = .{ .divisor = divisor };
-    return try iter.whereAlloc(allocator, ctx);
+    return try iter.whereAlloc(allocator, filterContext(u8, ctx, ZeroRemainder.noRemainder));
 }
 
 const NumToString = struct {
@@ -43,26 +47,24 @@ const NumToString = struct {
     }
 };
 
-const str_cmp = struct {
-    pub fn compare(_: @This(), a: []const u8, b: []const u8) std.math.Order {
-        // basically alphabetical
-        for (0..@min(a.len, b.len)) |i| {
-            if (a[i] > b[i]) {
-                return .gt;
-            } else if (a[i] < b[i]) {
-                return .lt;
-            }
-        }
-        // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
-        if (a.len > b.len) {
-            return .lt;
-        } else if (a.len < b.len) {
+fn strCompare(_: @This(), a: []const u8, b: []const u8) std.math.Order {
+    // basically alphabetical
+    for (0..@min(a.len, b.len)) |i| {
+        if (a[i] > b[i]) {
             return .gt;
-        } else {
-            return .eq;
+        } else if (a[i] < b[i]) {
+            return .lt;
         }
     }
-};
+    // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
+    if (a.len > b.len) {
+        return .lt;
+    } else if (a.len < b.len) {
+        return .gt;
+    } else {
+        return .eq;
+    }
+}
 
 test "from" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -83,18 +85,19 @@ test "from" {
     }
 }
 test "select" {
-    const ctx = struct {
-        fn action(maybe_str: Allocator.Error![]u8, args: anytype) anyerror!void {
-            const x: *usize = args.@"0";
-            x.* += 1;
+    const Context = struct {
+        x: usize = 0,
+        allocator: Allocator,
+        test_failed: bool = false,
+
+        fn action(self: *@This(), maybe_str: Allocator.Error![]u8) anyerror!void {
+            self.x += 1;
 
             var buf: [1]u8 = undefined;
-            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{x.*}) catch unreachable;
-
-            const allocator: std.mem.Allocator = args.@"2";
+            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{self.x}) catch unreachable;
 
             const actual: []u8 = try maybe_str;
-            defer allocator.free(actual);
+            defer self.allocator.free(actual);
 
             testing.expectEqualStrings(actual, expected) catch |err| {
                 std.debug.print("Test failed: {s} -> {?}", .{ @errorName(err), @errorReturnTrace() });
@@ -102,9 +105,8 @@ test "select" {
             };
         }
 
-        fn onErr(_: anyerror, _: Allocator.Error![]u8, args: anytype) void {
-            const failed: *bool = args.@"1";
-            failed.* = true;
+        fn onErr(self: *@This(), _: anyerror, _: Allocator.Error![]u8) void {
+            self.test_failed = true;
         }
     };
 
@@ -123,13 +125,11 @@ test "select" {
 
     try testing.expect(iter.len() == 3);
 
-    var i: usize = 0;
-    var test_failed: bool = false;
+    var ctx: Context = .{ .allocator = testing.allocator };
+    iter.forEach(&ctx, Context.action, .{ .exec_on_err = Context.onErr });
 
-    iter.forEach(ctx.action, ctx.onErr, true, .{ &i, &test_failed, testing.allocator });
-
-    try testing.expect(!test_failed);
-    try testing.expect(i == 3);
+    try testing.expect(!ctx.test_failed);
+    try testing.expect(ctx.x == 3);
 }
 test "cloneReset" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -152,8 +152,15 @@ test "cloneReset" {
     try testing.expectEqual(3, clone.prev());
 }
 test "where" {
+    const ctx = struct {
+        pub fn isEven(_: @This(), byte: u8) bool {
+            return byte % 2 == 0;
+        }
+    };
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    var filtered: Iter(u8) = iter.where(is_even{});
+    var filtered: Iter(u8) = iter.where(
+        filterContext(u8, ctx{}, ctx.isEven),
+    );
 
     var clone: Iter(u8) = try filtered.clone(testing.allocator);
     defer clone.deinit();
@@ -501,25 +508,23 @@ test "clone with select" {
     try testing.expectEqualStrings("2", clone2.next().?);
 }
 test "Overlapping select edge cases" {
-    // force these to be runtime values
-    var double_factor: u8 = 2;
-    _ = &double_factor;
-
-    var triple_factor: u8 = 3;
-    _ = &triple_factor;
-
     const Multiplier = struct {
         factor: u8,
+        last: u32 = undefined,
 
-        pub fn transform(self: @This(), val: u8) u32 {
-            return val * self.factor;
+        pub fn mul(self: *@This(), val: u8) u32 {
+            self.last = val * self.factor;
+            return self.last;
         }
     };
 
     const getMultiplier = struct {
-        fn getMultiplier(allocator: Allocator, factor: u8, iterator: *Iter(u8)) Allocator.Error!Iter(u32) {
-            const multiplier: Multiplier = .{ .factor = factor };
-            return try iterator.selectAlloc(u32, allocator, multiplier);
+        fn getMultiplier(allocator: Allocator, iterator: *Iter(u8), multiplier: *Multiplier) Allocator.Error!Iter(u32) {
+            return try iterator.selectAlloc(
+                u32,
+                allocator,
+                transformContext(u8, u32, multiplier, Multiplier.mul),
+            );
         }
     }.getMultiplier;
 
@@ -527,9 +532,20 @@ test "Overlapping select edge cases" {
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
-    var doubler: Iter(u32) = try getMultiplier(testing.allocator, double_factor, &iter);
+    var doubler_ctx: Multiplier = .{ .factor = 2 };
+    var doubler: Iter(u32) = try getMultiplier(
+        testing.allocator,
+        &iter,
+        &doubler_ctx,
+    );
     defer doubler.deinit();
-    var tripler: Iter(u32) = try getMultiplier(testing.allocator, triple_factor, &clone);
+
+    var tripler_ctx: Multiplier = .{ .factor = 3 };
+    var tripler: Iter(u32) = try getMultiplier(
+        testing.allocator,
+        &clone,
+        &tripler_ctx,
+    );
     defer tripler.deinit();
 
     var result: ?u32 = doubler.next();
@@ -594,6 +610,9 @@ test "Overlapping select edge cases" {
 
     result = tripler_cpy.next();
     try testing.expectEqual(9, result);
+
+    try testing.expectEqual(6, doubler_ctx.last);
+    try testing.expectEqual(9, tripler_ctx.last);
 }
 test "owned slice iterator" {
     const slice: []u8 = try testing.allocator.alloc(u8, 6);
@@ -699,9 +718,10 @@ test "from other alloc" {
     result = iter.next();
     try testing.expect(result == null);
 
-    try testing.expect(iter.reset().contains("a", str_cmp{}));
-    try testing.expect(!iter.contains("blarf", str_cmp{}));
-    try testing.expect(iter.contains("this", str_cmp{}));
+    const this = @This();
+    try testing.expect(iter.reset().contains("a", compareContext([]const u8, this{}, strCompare)));
+    try testing.expect(!iter.contains("blarf", compareContext([]const u8, this{}, strCompare)));
+    try testing.expect(iter.contains("this", compareContext([]const u8, this{}, strCompare)));
 
     const StrLength = struct {
         len: usize,
@@ -970,6 +990,15 @@ test "iter with optionals" {
             i += 1;
         }
     }
+}
+test "fold" {
+    const ctx = struct {
+        fn add(_: @This(), accumulator: u16, item: u8) u16 {
+            return accumulator + item;
+        }
+    };
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+    try testing.expectEqual(6, iter.fold(u16, 0, accumulateContext(u8, u16, ctx{}, ctx.add)));
 }
 test "reduce auto sum" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });

@@ -4,6 +4,7 @@
 //! - `AnonymousIterable(T)`: extensible structure that uses `VTable(T)` and converts to `Iter(T)`
 //! - `Ordering`: `asc` or `desc`, which are used when sorting
 //! - auto contexts: `autoCompare(T)`, `autoSum(T)`, `autoMin(T)`, `autoMax(T)`
+//! - helper functions that can wrap external context objects into types that are usable by this API, such as `filterContext()`.
 
 /// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
 pub fn VTable(comptime T: type) type {
@@ -1117,27 +1118,28 @@ pub fn Iter(comptime T: type) type {
 
         /// Run `action` for each element in the iterator
         /// - `self`: method receiver (non-const pointer)
+        /// - `context`: context object that may hold data
         /// - `action`: action performed on each element
-        /// - `on_err`: executed if an error is returned while executing `action`
-        /// - `terminate_on_err`: if true, terminates iteration when an error is encountered
-        /// - `args`: additional arguments to pass to `action`
+        /// - `handleErrOpts`: options for handling an error if encountered while executing `action`:
+        ///     - `exec_on_err`: executed if an error is returned while executing `action`
+        ///     - `terminate_iteration`: if true, terminates iteration when an error is encountered
         ///
         /// Note that you may need to reset this iterator after calling this method.
         pub fn forEach(
             self: *Iter(T),
-            action: fn (T, anytype) anyerror!void,
-            on_err: ?fn (anyerror, T, anytype) void,
-            terminate_on_err: bool,
-            args: anytype,
+            context: anytype,
+            action: fn (@TypeOf(context), T) anyerror!void,
+            handleErrOpts: struct {
+                exec_on_err: ?fn (@TypeOf(context), anyerror, T) void = null,
+                terminate_iteration: bool = true,
+            },
         ) void {
             while (self.next()) |x| {
-                action(x, args) catch |err| {
-                    if (on_err) |execute_on_err| {
-                        execute_on_err(err, x, args);
+                action(context, x) catch |err| {
+                    if (handleErrOpts.exec_on_err) |onErr| {
+                        onErr(context, err, x);
                     }
-                    if (terminate_on_err) {
-                        break;
-                    }
+                    if (handleErrOpts.terminate_iteration) break;
                 };
             }
         }
@@ -1147,28 +1149,19 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Scrolls back in place.
         pub fn contains(self: *Iter(T), item: T, context: anytype) bool {
-            const ComparerContext = struct {
-                fn ComparerContext(comptime TContext: type) type {
-                    _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
-                    return struct {
-                        ctx_item: T,
-                        context: TContext,
+            _ = @as(fn (@TypeOf(context), T, T) std.math.Order, @TypeOf(context).compare);
+            const Ctx = struct {
+                ctx_item: T,
+                inner: @TypeOf(context),
 
-                        pub fn filter(ctx: @This(), x: T) bool {
-                            return switch (ctx.context.compare(ctx.ctx_item, x)) {
-                                .eq => true,
-                                else => false,
-                            };
-                        }
+                pub fn filter(this: @This(), x: T) bool {
+                    return switch (this.inner.compare(this.ctx_item, x)) {
+                        .eq => true,
+                        else => false,
                     };
                 }
-            }.ComparerContext;
-            return self.any(
-                ComparerContext(@TypeOf(context)){
-                    .ctx_item = item,
-                    .context = context,
-                },
-            ) != null;
+            };
+            return self.any(Ctx{ .ctx_item = item, .inner = context }) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
@@ -1253,8 +1246,8 @@ pub fn Iter(comptime T: type) type {
         pub fn fold(
             self: *Iter(T),
             comptime TOther: type,
-            context: anytype,
             init: TOther,
+            context: anytype,
         ) TOther {
             _ = @as(fn (@TypeOf(context), TOther, T) TOther, @TypeOf(context).accumulate);
             var result: TOther = init;
@@ -1271,7 +1264,7 @@ pub fn Iter(comptime T: type) type {
         pub fn reduce(self: *Iter(T), context: anytype) ?T {
             _ = @as(fn (@TypeOf(context), T, T) T, @TypeOf(context).accumulate);
             const init: T = self.next() orelse return null;
-            return self.fold(T, context, init);
+            return self.fold(T, init, context);
         }
 
         /// Reverse the direction of the iterator.
@@ -1557,6 +1550,118 @@ fn SortContext(comptime T: type, comptime TContext: type) type {
             };
         }
     };
+}
+
+fn FilterContext(
+    comptime T: type,
+    comptime TContext: type,
+    filterFn: fn (TContext, T) bool,
+) type {
+    return struct {
+        context: TContext,
+
+        pub fn filter(self: @This(), item: T) bool {
+            return filterFn(self.context, item);
+        }
+    };
+}
+
+/// Given a context and a filter function `fn (@TypeOf(context), T) bool`,
+/// returns a structure that fulfills the type requirements to use `where()`, `any()`, etc. by wrapping `context`.
+///
+/// This helper function is intended to be used if the filter function has a name other than `filter` or the context is a pointer type.
+/// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
+pub inline fn filterContext(
+    comptime T: type,
+    context: anytype,
+    filter: fn (@TypeOf(context), T) bool,
+) FilterContext(T, @TypeOf(context), filter) {
+    return .{ .context = context };
+}
+
+fn TransformContext(
+    comptime T: type,
+    comptime TOther: type,
+    comptime TContext: type,
+    transformFn: fn (TContext, T) TOther,
+) type {
+    return struct {
+        context: TContext,
+
+        pub fn transform(this: @This(), item: T) TOther {
+            return transformFn(this.context, item);
+        }
+    };
+}
+
+/// Given a context and a transform function `fn (@TypeOf(context), T) TOther`,
+/// returns a structure that fulfills the type requirements to use `select()`, `transformNext()`, etc. by wrapping `context`.
+///
+/// This helper function is intended to be used if the filter function has a name other than `transform` or the context is a pointer type.
+/// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
+pub inline fn transformContext(
+    comptime T: type,
+    comptime TOther: type,
+    context: anytype,
+    transform: fn (@TypeOf(context), T) TOther,
+) TransformContext(T, TOther, @TypeOf(context), transform) {
+    return .{ .context = context };
+}
+
+fn AccumulateContext(
+    comptime T: type,
+    comptime TOther: type,
+    comptime TContext: type,
+    accumulateFn: fn (TContext, TOther, T) TOther,
+) type {
+    return struct {
+        context: TContext,
+
+        pub fn accumulate(this: @This(), accumulator: TOther, item: T) TOther {
+            return accumulateFn(this.context, accumulator, item);
+        }
+    };
+}
+
+/// Given a context and an accumulate function `fn (@TypeOf(context), TOther, T) TOther`,
+/// returns a structure that fulfills the type requirements to use `fold()` and `reduce()` by wrapping `context`.
+///
+/// This helper function is intended to be used if the filter function has a name other than `accumulate` or the context is a pointer type.
+/// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
+pub inline fn accumulateContext(
+    comptime T: type,
+    comptime TOther: type,
+    context: anytype,
+    accumulate: fn (@TypeOf(context), TOther, T) TOther,
+) AccumulateContext(T, TOther, @TypeOf(context), accumulate) {
+    return .{ .context = context };
+}
+
+fn CompareContext(
+    comptime T: type,
+    comptime TContext: type,
+    compareFn: fn (TContext, T, T) std.math.Order,
+) type {
+    return struct {
+        context: TContext,
+
+        pub fn compare(this: @This(), a: T, b: T) std.math.Order {
+            return compareFn(this.context, a, b);
+        }
+    };
+}
+
+/// Given a context and a compare function `fn (@TypeOf(context), T, T) std.math.Order`,
+/// returns a structure that fulfills the type requirements to use `orderBy()`, `contains()`, `toSortedSliceOwned()`, etc. by wrapping `context`.
+///
+/// This helper function is intended to be used if the filter function has a name other than `compare` or the context is a pointer type.
+/// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
+pub inline fn compareContext(
+    comptime T: type,
+    context: anytype,
+    compare: fn (@TypeOf(context), T, T) std.math.Order,
+) CompareContext(T, @TypeOf(context), compare) {
+    return .{ .context = context };
 }
 
 inline fn validateOtherIterator(comptime T: type, other: anytype) void {
