@@ -41,12 +41,10 @@ pub fn AnonymousIterable(comptime T: type) type {
         /// Function pointers to the specific implementation functions
         v_table: *const VTable(T),
 
-        const Self = @This();
-
         /// Convert to `Iter(T)`
-        pub fn iter(self: Self) Iter(T) {
+        pub fn iter(this: @This()) Iter(T) {
             return .{
-                .variant = Variant(T){ .anonymous = self },
+                .variant = Variant(T){ .anonymous = this },
             };
         }
     };
@@ -476,20 +474,12 @@ pub fn Iter(comptime T: type) type {
             switch (self.variant) {
                 .slice => |*s| {
                     const new_idx: isize = @as(isize, @bitCast(s.idx)) + offset;
-                    if (new_idx < 0) {
-                        s.idx = 0;
-                    } else {
-                        s.idx = @bitCast(new_idx);
-                    }
+                    s.idx = if (new_idx < 0) 0 else @bitCast(new_idx);
                 },
                 .multi_arr_list => |*m| {
                     if (Variant(T).multiArrListAllowed()) {
                         const new_idx: isize = @as(isize, @bitCast(m.idx)) + offset;
-                        if (new_idx < 0) {
-                            m.idx = 0;
-                        } else {
-                            m.idx = @bitCast(new_idx);
-                        }
+                        m.idx = if (new_idx < 0) 0 else @bitCast(new_idx);
                     } else unreachable;
                 },
                 inline .concatenated, .appended => |*x| x.scroll(offset),
@@ -533,12 +523,7 @@ pub fn Iter(comptime T: type) type {
                     }
                     return self;
                 },
-                .multi_arr_list => {
-                    if (Variant(T).multiArrListAllowed()) {
-                        // does not own the MultiArrayList
-                        return self;
-                    } else unreachable;
-                },
+                .multi_arr_list => return if (Variant(T).multiArrListAllowed()) self else unreachable, // does not own the MultiArrayList
                 inline .concatenated, .appended => |x| return try x.clone(allocator),
                 .anonymous => |a| {
                     if (a.v_table.clone_fn) |exec_clone| {

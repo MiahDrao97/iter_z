@@ -984,12 +984,10 @@ pub fn AnonymousIterable(comptime T: type) type {
         /// Function pointers to the specific implementation functions
         v_table: *const VTable(T),
 
-        const Self = @This();
-
         /// Convert to `Iter(T)`
-        pub fn iter(self: Self) Iter(T) {
+        pub fn iter(this: @This()) Iter(T) {
             return .{
-                .variant = Variant(T){ .anonymous = self },
+                .variant = Variant(T){ .anonymous = this },
             };
         }
     };
