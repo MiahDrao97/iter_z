@@ -27,8 +27,8 @@ const is_even = struct {
 const ZeroRemainder = struct {
     divisor: u8,
 
-    pub fn noRemainder(self: @This(), num: u8) bool {
-        return num % self.divisor == 0;
+    pub fn noRemainder(this: @This(), num: u8) bool {
+        return num % this.divisor == 0;
     }
 };
 
@@ -42,12 +42,12 @@ fn getEventsIter(allocator: Allocator, iter: *Iter(u8)) Allocator.Error!Iter(u8)
 const NumToString = struct {
     buf: []u8,
 
-    pub fn transform(self: @This(), val: u8) []const u8 {
-        return std.fmt.bufPrint(self.buf, "{d}", .{val}) catch self.buf;
+    pub fn transform(this: @This(), val: u8) []const u8 {
+        return std.fmt.bufPrint(this.buf, "{d}", .{val}) catch this.buf;
     }
 };
 
-fn strCompare(_: @This(), a: []const u8, b: []const u8) std.math.Order {
+fn strCompare(_: void, a: []const u8, b: []const u8) std.math.Order {
     // basically alphabetical
     for (0..@min(a.len, b.len)) |i| {
         if (a[i] > b[i]) {
@@ -370,7 +370,7 @@ test "any" {
     result = iter.next();
     try testing.expect(result.? == 1);
 
-    result = iter.any(null);
+    result = iter.any({});
     try testing.expect(result.? == 3);
 
     result = iter.next();
@@ -383,8 +383,8 @@ test "single" {
     const HasChar = struct {
         char: u8,
 
-        pub fn filter(self: @This(), x: u8) bool {
-            return self.char == x;
+        pub fn filter(this: @This(), x: u8) bool {
+            return this.char == x;
         }
     };
 
@@ -512,9 +512,9 @@ test "Overlapping select edge cases" {
         factor: u8,
         last: u32 = undefined,
 
-        pub fn mul(self: *@This(), val: u8) u32 {
-            self.last = val * self.factor;
-            return self.last;
+        pub fn mul(this: *@This(), val: u8) u32 {
+            this.last = val * this.factor;
+            return this.last;
         }
     };
 
@@ -646,7 +646,7 @@ test "owned slice iterator w/ args" {
     const Context = struct {
         allocator: Allocator,
 
-        fn onDeinit(this: @This(), slice: [][]u8) void {
+        fn onDeinit(this: @This(), slice: [][]const u8) void {
             for (slice) |s| {
                 this.allocator.free(s);
             }
@@ -662,11 +662,11 @@ test "owned slice iterator w/ args" {
     errdefer allocator.free(slice2);
     @memcpy(slice2, "asdf");
 
-    const combined: [][]u8 = try allocator.alloc([]u8, 2);
+    const combined: [][]const u8 = try allocator.alloc([]const u8, 2);
     combined[0] = slice1;
     combined[1] = slice2;
 
-    var iter: Iter([]u8) = try .fromSliceOwnedContext(
+    var iter: Iter([]const u8) = try .fromSliceOwnedContext(
         allocator,
         combined,
         Context{ .allocator = allocator },
@@ -682,7 +682,7 @@ test "owned slice iterator w/ args" {
     try testing.expectEqualStrings("blarf", iter.prev().?);
     try testing.expectEqual(null, iter.prev());
 
-    var clone: Iter([]u8) = try iter.cloneReset(allocator);
+    var clone: Iter([]const u8) = try iter.cloneReset(allocator);
     defer clone.deinit();
 
     _ = iter.scroll(1);
@@ -695,7 +695,7 @@ test "owned slice iterator w/ args" {
     // make sure OG iterator is still where we expect
     try testing.expectEqualStrings("asdf", iter.next().?);
 }
-test "from other alloc" {
+test "from other" {
     const str = "this,is,a,string,to,split";
     var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");
 
@@ -725,25 +725,24 @@ test "from other alloc" {
     result = iter.next();
     try testing.expect(result == null);
 
-    const this = @This();
-    try testing.expect(iter.reset().contains("a", compareContext([]const u8, this{}, strCompare)));
-    try testing.expect(!iter.contains("blarf", compareContext([]const u8, this{}, strCompare)));
-    try testing.expect(iter.contains("this", compareContext([]const u8, this{}, strCompare)));
+    try testing.expect(iter.reset().contains("a", compareContext([]const u8, {}, strCompare)));
+    try testing.expect(!iter.contains("blarf", compareContext([]const u8, {}, strCompare)));
+    try testing.expect(iter.contains("this", compareContext([]const u8, {}, strCompare)));
 
     const StrLength = struct {
         len: usize,
 
-        pub fn filter(self: @This(), s: []const u8) bool {
-            return s.len == self.len;
+        pub fn filter(this: @This(), s: []const u8) bool {
+            return s.len == this.len;
         }
     };
 
     const HasNoChar = struct {
         char: u8,
 
-        pub fn filter(self: @This(), s: []const u8) bool {
+        pub fn filter(this: @This(), s: []const u8) bool {
             var inner_iter: Iter(u8) = .from(s);
-            return !inner_iter.contains(self.char, autoCompare(u8));
+            return !inner_iter.contains(this.char, autoCompare(u8));
         }
     };
 
@@ -763,7 +762,7 @@ test "from other alloc" {
     try testing.expectEqualStrings("this", iter.prev().?);
     try testing.expectEqual(null, iter.prev());
 }
-test "from other alloc - scroll first" {
+test "from other - scroll first" {
     const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
     {
         var dictionary: HashMap = .empty;
@@ -831,7 +830,7 @@ test "from other alloc - scroll first" {
         try testing.expectEqual(null, iter.next());
     }
 }
-test "from other" {
+test "from other buf" {
     const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
     {
         var dictionary: HashMap = .empty;
@@ -937,7 +936,7 @@ test "enumerate to buffer" {
 
         var buf2: [4]u8 = undefined;
         try testing.expectError(error.NoSpaceLeft, iter.reset().enumerateToBuffer(&buf2));
-        for (&buf2, 1..) |x, i| {
+        for (buf2, 1..) |x, i| {
             return testing.expectEqual(i, x);
         }
 

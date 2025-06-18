@@ -509,7 +509,7 @@ pub fn Iter(comptime T: type) type {
                 .slice => |s| {
                     // if we have an allocator saved on the struct, we know we own the slice
                     if (s.allocator) |_| {
-                        return .{
+                        return Iter(T){
                             .variant = Variant(T){
                                 .slice = SliceIterable(T){
                                     .elements = try allocator.dupe(T, s.elements),
@@ -653,17 +653,18 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
         pub fn concat(sources: []Iter(T)) Iter(T) {
-            if (sources.len == 0) {
-                return .empty;
-            } else if (sources.len == 1) {
-                return sources[0];
-            } else return .{
-                .variant = Variant(T){
-                    .concatenated = ConcatIterable(T){
-                        .sources = sources,
+            return if (sources.len == 0)
+                .empty
+            else if (sources.len == 1)
+                sources[0]
+            else
+                Iter(T){
+                    .variant = Variant(T){
+                        .concatenated = ConcatIterable(T){
+                            .sources = sources,
+                        },
                     },
-                },
-            };
+                };
         }
 
         /// Merge several sources into one, and this resulting iterator owns `sources`.
@@ -684,7 +685,7 @@ pub fn Iter(comptime T: type) type {
         /// Note that on `deinit()`, both `self` and `other` will also be deinitialized.
         /// If that is undesired behavior, you may want to clone them beforehand.
         pub fn append(self: *Iter(T), other: *Iter(T)) Iter(T) {
-            return Iter(T){
+            return .{
                 .variant = Variant(T){
                     .appended = AppendedIterable(T){
                         .iter_a = self,
@@ -985,10 +986,7 @@ pub fn Iter(comptime T: type) type {
             while (self.next()) |n| {
                 scroll_amt -= 1;
                 if (filterProvided) {
-                    if (context.filter(n)) {
-                        return n;
-                    }
-                    continue;
+                    if (!context.filter(n)) continue;
                 }
                 return n;
             }
@@ -1034,17 +1032,14 @@ pub fn Iter(comptime T: type) type {
         /// ```zig
         /// const multiplier = struct {
         ///     factor: u32,
-        ///     pub fn transform(self: @This(), item: u32) u32 {
-        ///         return self.factor * item;
+        ///     pub fn transform(this: @This(), item: u32) u32 {
+        ///         return this.factor * item;
         ///     }
         /// };
         /// ```
         pub fn transformNext(self: *Iter(T), comptime TOther: type, context: anytype) ?TOther {
             _ = @as(fn (@TypeOf(context), T) TOther, @TypeOf(context).transform);
-            if (self.next()) |x| {
-                return context.transform(x);
-            }
-            return null;
+            return if (self.next()) |x| context.transform(x) else null;
         }
 
         /// Ensure there is exactly 1 or 0 elements that matches the passed-in filter.
@@ -1085,19 +1080,12 @@ pub fn Iter(comptime T: type) type {
             while (self.next()) |x| {
                 scroll_amt -= 1;
                 if (filterProvided) {
-                    if (context.filter(x)) {
-                        if (found != null) {
-                            return error.MultipleElementsFound;
-                        } else {
-                            found = x;
-                        }
-                    }
+                    if (!context.filter(x)) continue;
+                }
+                if (found != null) {
+                    return error.MultipleElementsFound;
                 } else {
-                    if (found != null) {
-                        return error.MultipleElementsFound;
-                    } else {
-                        found = x;
-                    }
+                    found = x;
                 }
             }
 
@@ -1185,12 +1173,9 @@ pub fn Iter(comptime T: type) type {
             while (self.next()) |x| {
                 scroll_amt -= 1;
                 if (filterProvided) {
-                    if (context.filter(x)) {
-                        result += 1;
-                    }
-                } else {
-                    result += 1;
+                    if (!context.filter(x)) continue;
                 }
+                result += 1;
             }
             return result;
         }
@@ -1360,11 +1345,6 @@ pub fn Iter(comptime T: type) type {
                     return clone_ptr.iter.len();
                 }
 
-                fn implDeinit(impl: *anyopaque) void {
-                    const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-                    self_ptr.deinit();
-                }
-
                 fn implDeinitAsClone(impl: *anyopaque) void {
                     const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
                     clone_ptr.allocator.destroy(clone_ptr);
@@ -1379,7 +1359,6 @@ pub fn Iter(comptime T: type) type {
                     .reset_fn = &ctx.implReset,
                     .clone_fn = &ctx.implClone,
                     .len_fn = &ctx.implLen,
-                    .deinit_fn = &ctx.implDeinit,
                 },
             };
             return reversed.iter();
@@ -1524,15 +1503,15 @@ fn AutoCompareContext(comptime T: type) type {
 pub const Ordering = enum { asc, desc };
 
 fn SortContext(comptime T: type, comptime TContext: type) type {
-    comptime _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
+    _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
     return struct {
         ctx: TContext,
         slice: []T,
         ordering: Ordering,
 
-        pub fn lessThan(self: @This(), a: T, b: T) bool {
-            const comparison: std.math.Order = self.ctx.compare(a, b);
-            return switch (self.ordering) {
+        pub fn lessThan(this: @This(), a: T, b: T) bool {
+            const comparison: std.math.Order = this.ctx.compare(a, b);
+            return switch (this.ordering) {
                 .asc => comparison == .lt,
                 .desc => comparison == .gt,
             };
@@ -1548,8 +1527,8 @@ fn FilterContext(
     return struct {
         context: TContext,
 
-        pub fn filter(self: @This(), item: T) bool {
-            return filterFn(self.context, item);
+        pub fn filter(this: @This(), item: T) bool {
+            return filterFn(this.context, item);
         }
     };
 }
