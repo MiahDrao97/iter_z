@@ -643,10 +643,12 @@ test "owned slice iterator" {
     try testing.expectEqual(7, expected);
 }
 test "owned slice iterator w/ args" {
-    const ctx = struct {
-        fn onDeinit(slice: [][]u8, args: anytype) void {
+    const Context = struct {
+        allocator: Allocator,
+
+        fn onDeinit(this: @This(), slice: [][]u8) void {
             for (slice) |s| {
-                @as(Allocator, args).free(s);
+                this.allocator.free(s);
             }
         }
     };
@@ -664,7 +666,12 @@ test "owned slice iterator w/ args" {
     combined[0] = slice1;
     combined[1] = slice2;
 
-    var iter: Iter([]u8) = try .fromSliceOwnedArgs(allocator, combined, ctx.onDeinit, allocator);
+    var iter: Iter([]u8) = try .fromSliceOwnedContext(
+        allocator,
+        combined,
+        Context{ .allocator = allocator },
+        Context.onDeinit,
+    );
     defer iter.deinit();
 
     try testing.expectEqualStrings("blarf", iter.next().?);

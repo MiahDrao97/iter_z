@@ -62,25 +62,29 @@ fn SliceIterable(comptime T: type) type {
     };
 }
 
-fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T, anytype) void) type {
+fn SliceIterableContext(
+    comptime T: type,
+    comptime TContext: type,
+    on_deinit: fn (TContext, []T) void,
+) type {
     return struct {
         elements: []const T,
         idx: usize = 0,
-        args: TArgs,
+        context: TContext,
         allocator: Allocator,
 
         const Self = @This();
 
         fn new(
-            alllocator: Allocator,
+            allocator: Allocator,
             elements: []const T,
-            args: TArgs,
+            context: TContext,
         ) Allocator.Error!*Self {
-            const ptr: *Self = try alllocator.create(@This());
+            const ptr: *Self = try allocator.create(Self);
             ptr.* = .{
                 .elements = elements,
-                .args = args,
-                .allocator = alllocator,
+                .context = context,
+                .allocator = allocator,
             };
             return ptr;
         }
@@ -142,13 +146,13 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
 
                 fn implDeinit(impl: *anyopaque) void {
                     const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    on_deinit(@constCast(self_ptr.elements), self_ptr.args);
+                    on_deinit(self_ptr.context, @constCast(self_ptr.elements));
                     self_ptr.allocator.free(self_ptr.elements);
                     self_ptr.allocator.destroy(self_ptr);
                 }
             };
 
-            const anon: AnonymousIterable(T) = .{
+            return (AnonymousIterable(T){
                 .ptr = self,
                 .v_table = &.{
                     .next_fn = &ctx.implNext,
@@ -159,8 +163,7 @@ fn SliceIterableArgs(comptime T: type, comptime TArgs: type, on_deinit: fn ([]T,
                     .len_fn = &ctx.implLen,
                     .deinit_fn = &ctx.implDeinit,
                 },
-            };
-            return anon.iter();
+            }).iter();
         }
     };
 }
@@ -632,19 +635,19 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Instantiate a new iterator, using `slice` as our source.
-        /// Differs from `fromSliceOwned()` because the `on_deinit` function can take external arguments.
+        /// Differs from `fromSliceOwned()` because the `on_deinit` function can take a `context` object.
         /// This iterator owns slice: calling `deinit()` will free it.
         ///
         /// NOTE : If this iterator is cloned, the clone will not call `on_deinit`.
         /// The reason for this is that, while the underlying slice is duplicated, each element the slice points to is not.
         /// Thus, `on_deinit` may cause unexpected behavior such as double-free's if you are attempting to free each element in the slice.
-        pub fn fromSliceOwnedArgs(
+        pub fn fromSliceOwnedContext(
             allocator: Allocator,
             slice: []const T,
-            on_deinit: fn ([]T, anytype) void,
-            args: anytype,
+            context: anytype,
+            on_deinit: fn (@TypeOf(context), []T) void,
         ) Allocator.Error!Iter(T) {
-            const slice_iter: *SliceIterableArgs(T, @TypeOf(args), on_deinit) = try .new(allocator, slice, args);
+            const slice_iter: *SliceIterableContext(T, @TypeOf(context), on_deinit) = try .new(allocator, slice, context);
             return slice_iter.iter();
         }
 
