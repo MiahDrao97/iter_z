@@ -937,6 +937,43 @@ pub fn accumulate(_: @This(), a: T, b: T) T {
 }
 ```
 
+## Context Helper Functions
+The functions `filterContext()`, `transformContext()`, `accumulateContext()`, and `compareContext()` create a wrapper struct for any
+context object that matches the corresponding function signature for filtering, transforming, accumulating, or comparing.
+
+This is helper when the original context is a pointer or the function name differs from `filter`, `transform`, `accumulate`, or `compare`.
+Keep in mind the size of the original context will be the size of the wrapped context (may be relevant when choosing between `select()` and `selectAlloc`, for example).
+```zig
+test "context helper fn" {
+    const Multiplier = struct {
+        factor: u8,
+        last: u32 = undefined,
+
+        pub fn mul(this: *@This(), val: u8) u32 {
+            this.last = val * this.factor;
+            return this.last;
+        }
+    };
+
+    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+
+    var doubler_ctx: Multiplier = .{ .factor = 2 };
+    var doubler: Iter(u32) = try iter.selectAlloc(
+        u32,
+        allocator,
+        transformContext(u8, u32, &doubler_ctx, Multiplier.mul), // context is a ptr type and function name differs from `transform`
+    );
+    defer doubler.deinit();
+
+    var i: usize = 1;
+    while (doubler.next()) |x| : (i += 1) {
+        try testing.expectEqual(i * 2, @as(usize, x));
+    }
+
+    try testing.expectEqual(6, doubler_ctx.last);
+}
+```
+
 ## Implementation Details
 If you have a transformed iterator, it holds a pointer to the original.
 The original and the transformed iterator move forward together unless you create a clone.
