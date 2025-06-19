@@ -57,13 +57,12 @@ fn strCompare(_: void, a: []const u8, b: []const u8) std.math.Order {
         }
     }
     // Inverted here: shorter words are alphabetically sorted before longer words (e.g. "long" before "longer")
-    if (a.len > b.len) {
-        return .lt;
-    } else if (a.len < b.len) {
-        return .gt;
-    } else {
-        return .eq;
-    }
+    return if (a.len > b.len)
+        .lt
+    else if (a.len < b.len)
+        .gt
+    else
+        .eq;
 }
 
 test "from" {
@@ -79,8 +78,7 @@ test "from" {
 
     try testing.expect(i == 3);
 
-    while (iter.prev()) |x| {
-        defer i -= 1;
+    while (iter.prev()) |x| : (i -= 1) {
         try testing.expect(i == x);
     }
 }
@@ -90,14 +88,14 @@ test "select" {
         allocator: Allocator,
         test_failed: bool = false,
 
-        fn action(self: *@This(), maybe_str: Allocator.Error![]u8) anyerror!void {
-            self.x += 1;
+        fn action(this: *@This(), maybe_str: Allocator.Error![]u8) anyerror!void {
+            this.x += 1;
 
             var buf: [1]u8 = undefined;
-            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{self.x}) catch unreachable;
+            const expected: []u8 = std.fmt.bufPrint(&buf, "{d}", .{this.x}) catch unreachable;
 
             const actual: []u8 = try maybe_str;
-            defer self.allocator.free(actual);
+            defer this.allocator.free(actual);
 
             testing.expectEqualStrings(actual, expected) catch |err| {
                 std.debug.print("Test failed: {s} -> {?}", .{ @errorName(err), @errorReturnTrace() });
@@ -105,8 +103,8 @@ test "select" {
             };
         }
 
-        fn onErr(self: *@This(), _: anyerror, _: Allocator.Error![]u8) void {
-            self.test_failed = true;
+        fn onErr(this: *@This(), _: anyerror, _: Allocator.Error![]u8) void {
+            this.test_failed = true;
         }
     };
 
@@ -140,9 +138,8 @@ test "cloneReset" {
     var clone: Iter(u8) = try iter.cloneReset(testing.allocator);
     defer clone.deinit();
 
-    var i: usize = 0;
-    while (clone.next()) |x| {
-        i += 1;
+    var i: usize = 1;
+    while (clone.next()) |x| : (i += 1) {
         try testing.expect(x == i);
     }
 
@@ -199,9 +196,8 @@ test "enumerateToOwnedSlice" {
         try testing.expect(iter.len() == 3);
 
         var i: usize = 0;
-        while (iter.next()) |x| {
+        while (iter.next()) |x| : (i += 1) {
             try testing.expect(x == 2);
-            i += 1;
         }
 
         try testing.expect(i == 1);
@@ -274,8 +270,7 @@ test "concat" {
 
         try testing.expect(i == 4);
 
-        while (new_iter.prev()) |x| {
-            defer i -= 1;
+        while (new_iter.prev()) |x| : (i -= 1) {
             // again, should only be the events
             try testing.expectEqual(i * 2, x);
         }
@@ -309,8 +304,7 @@ test "concat" {
 
         try testing.expect(i == 3);
 
-        while (iter2.prev()) |x| {
-            defer i -= 1;
+        while (iter2.prev()) |x| : (i -= 1) {
             try testing.expect(x == i);
         }
     }
@@ -352,9 +346,8 @@ test "orderBy" {
     var iter2 = try inner2.orderBy(testing.allocator, autoCompare(u8), .desc);
     defer iter2.deinit();
 
-    while (iter2.next()) |x| {
+    while (iter2.next()) |x| : (i -= 1) {
         try testing.expectEqual(i, x);
-        i -= 1;
     }
 
     try testing.expect(i == 0);

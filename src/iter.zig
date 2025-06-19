@@ -985,9 +985,8 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |n| {
                 scroll_amt -= 1;
-                if (filterProvided) {
-                    if (!context.filter(n)) continue;
-                }
+                if (filterProvided and !context.filter(n)) continue;
+
                 return n;
             }
             return null;
@@ -1039,7 +1038,10 @@ pub fn Iter(comptime T: type) type {
         /// ```
         pub fn transformNext(self: *Iter(T), comptime TOther: type, context: anytype) ?TOther {
             _ = @as(fn (@TypeOf(context), T) TOther, @TypeOf(context).transform);
-            return if (self.next()) |x| context.transform(x) else null;
+            return if (self.next()) |x|
+                context.transform(x)
+            else
+                null;
         }
 
         /// Ensure there is exactly 1 or 0 elements that matches the passed-in filter.
@@ -1079,9 +1081,8 @@ pub fn Iter(comptime T: type) type {
             var found: ?T = null;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (filterProvided) {
-                    if (!context.filter(x)) continue;
-                }
+                if (filterProvided and !context.filter(x)) continue;
+
                 if (found != null) {
                     return error.MultipleElementsFound;
                 } else {
@@ -1172,9 +1173,8 @@ pub fn Iter(comptime T: type) type {
             var result: usize = 0;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (filterProvided) {
-                    if (!context.filter(x)) continue;
-                }
+                if (filterProvided and !context.filter(x)) continue;
+
                 result += 1;
             }
             return result;
