@@ -581,6 +581,24 @@ test "filterNext()" {
 }
 ```
 
+### `transformNext()`
+Transform the next element from type `T` to type `TOther` (or return null if iteration is over).
+`context` must be a type that defines the method: `fn transform(@TypeOf(context), T) TOther` (similar to `select()`).
+```zig
+const Multiplier = struct {
+    factor: u8,
+
+    pub fn transform(this: @This(), val: u8) u32 {
+        return val * this.factor;
+    }
+};
+var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+while (iter.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
+    // 2, 4, 6
+}
+```
+
+
 ### `forEach()`
 Run `action` for each element in the iterator
 - `self`: method receiver (non-const pointer)
