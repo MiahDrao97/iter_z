@@ -240,6 +240,8 @@ _ = iter.len(); // 0
 
 ### `from()`
 Initializes an `Iter(T)` from a slice. It does not own the slice, and will not affect it while iterating.
+`clone()` is virtually a no-op since it only returns a copy of the iterator and does not copy the slice itself.
+
 There are examples of this function all over this document.
 
 ### `fromSliceOwned()`
@@ -286,10 +288,10 @@ while (iter.next()) |x| {
 Initialize an `Iter(T)` from a `MultiArrayList(T)`.
 Keep in mind that the resulting iterator does not own the backing list (and more specifically, it only has a copy to the list, not a const pointer).
 Because of that, some operations don't make a lot of sense through the `Iter(T)` API such as ordering.
-The recommended course of action for both of these is to order the list directly and then initialize a new iterator from the ordered list afterward.
+The recommended course of action is to order the list directly and then initialize a new iterator from the list afterward.
 
-`clone()` does not allocate additional memory since the iterator does not own the list. It merely clones the iterator, not the list itself.
-Consequently, `deinit()` will not free the list, and is virtually a no-op since there is no memory to cleanup (still assigns the iterator to `empty`).
+`clone()` does not allocate additional memory since the iterator does not own the list. It merely returns a copy of the iterator without cloning the list itself.
+Consequently, `deinit()` will not free the list, and is virtually a no-op since there is no memory to clean up (still assigns the iterator to `empty`).
 ```zig
 const S = struct {
     tag: usize,
