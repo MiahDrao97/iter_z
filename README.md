@@ -58,6 +58,7 @@ pub fn build(b: *std.Build) void {
 
 ### Main
 The main branch is generally unstable, intended to change as the Zig language evolves.
+Breaking API changes may be merged into the main branch before a new release is tagged.
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
@@ -262,9 +263,6 @@ Take any type (or pointer child type) that has a method called `next()` that tak
 Unfortunately, we can only rely on the existence of a `next()` method.
 So, we call `other.next()` until the iteration is over or we run out of space in `buf`.
 
-Params:
-    - backing buffer
-    - other iterator
 ```zig
 const std = @import("std");
 const testing = std.testing;
@@ -538,7 +536,7 @@ const ZeroRemainder = struct {
 
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 // peek without filter
-_ = iter.any(null); // 1
+_ = iter.any({}); // 1
 // peek with filter
 _ = iter.any(ZeroRemainder{ .divisor = 2 }); // 2
 
@@ -825,7 +823,7 @@ test "reverse reset" {
 ```
 
 ### `reverseCloneReset()`
-Calls `reverse()`, then `cloneReset` so that the resulting iterator moves independently of the orignal.
+Calls `reverse()`, then `cloneReset()` so that the resulting iterator moves independently of the orignal.
 ```zig
 test "reverse clone reset" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
@@ -994,11 +992,11 @@ test "context helper fn" {
 
 ## Implementation Details
 If you have a transformed iterator, it holds a pointer to the original.
-The original and the transformed iterator move forward together unless you create a clone.
-If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source.
+The original and the transformed iterator move forward together.
+If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source, which may necessitate creating a clone.
 
-Methods such as `enumerateToBuffer()`, `enumerateToOwnedSlice()`, `orderBy()`, and other queries start at the current offset.
-If you wish to start from the beginning, make sure to call `reset()`.
+Methods such as `enumerateToBuffer()`, `enumerateToOwnedSlice()`, `orderBy()`, etc. start at the current offset.
+If you wish to start from the beginning, make sure to call `reset()` beforehand.
 
 ## Extensibility
 You are free to create your own iterator!
