@@ -298,11 +298,6 @@ Unfortunately, we can only rely on the existence of a `next()` method.
 So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and fill it with the results from `other.next()`.
 Will pare the buffer down to the exact size returned from all the `other.next()` calls.
 
-Params:
-    - allocator,
-    - other iterator
-    - length of iteration
-
 Be sure to call `deinit()` to free the underlying buffer.
 ```zig
 const allocator = @import("std").testing.allocator;
