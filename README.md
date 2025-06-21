@@ -368,9 +368,9 @@ while (iter.next()) |x| {
 
 ### `select()`
 Transform an iterator of type `T` to type `TOther`.
-`context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
+`transform_context` must define the following method: `fn transform(@TypeOf(transform_context), T) TOther`
 
-This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
+This method is intended for zero-sized contexts, and will invoke a `@compileError` when `transform_context` is nonzero-sized.
 Use `selectAlloc()` for nonzero-sized contexts.
 ```zig
 const std = @import("std");
@@ -397,7 +397,7 @@ while (strings.next()) |maybe_str| {
 
 ### `selectAlloc()`
 Transform an iterator of type `T` to type `TOther`.
-`context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
+`transform_context` must define the following method: `fn transform(@TypeOf(transform_context), T) TOther`
 
 This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
 If you wish to avoid the allocation, use `select()`.
@@ -435,9 +435,9 @@ while (strings.next()) |maybe_str| {
 
 ### `where()`
 Return a pared-down iterator that matches the criteria specified in `filter()`.
-`context` must define the following method: `fn filter(@TypeOf(context), T) bool`
+`filter_context` must define the following method: `fn filter(@TypeOf(filter_context), T) bool`
 
-This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
+This method is intended for zero-sized contexts, and will invoke a `@compileError` when `filter_context` is nonzero-sized.
 Use `whereAlloc()` for nonzero-sized contexts.
 ```zig
 var iter: Iter(u32) = .from(&[_]u32{ 1, 2, 3, 4, 5 });
@@ -459,7 +459,7 @@ while (evens.next()) |x| {
 
 ### `whereAlloc()`
 Return a pared-down iterator that matches the criteria specified in `filter()`.
-`context` must define the following method: `fn filter(@TypeOf(context), T) bool`
+`filter_context` must define the following method: `fn filter(@TypeOf(filter_context), T) bool`
 
 This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
 If you wish to avoid the allocation, use `where()`.
@@ -517,7 +517,7 @@ while (ordered.next()) |x| {
 
 ### `any()`
 Peek at the next element with or without a filter.
-The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(context), T) bool`.
+The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
 Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 ```zig
@@ -543,7 +543,7 @@ _ = iter.next(); // 1
 Calls `next()` until an element fulfills the given filter condition or returns null if none are found/iteration is over.
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
-The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(context), T) bool`.
+The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
 Also, since this filter is optional, you may pass in `null` or void literal `{}` to use no filter.
 
@@ -576,7 +576,9 @@ test "filterNext()" {
 
 ### `transformNext()`
 Transform the next element from type `T` to type `TOther` (or return null if iteration is over).
-`context` must be a type that defines the method: `fn transform(@TypeOf(context), T) TOther` (similar to `select()`).
+`transform_context` must be a type that defines the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
+
+NOTE : This is preferred over `select()` when simply iterating with a transformation.
 ```zig
 const Multiplier = struct {
     factor: u8,
@@ -658,7 +660,7 @@ test "forEach" {
 Count the number of elements in your iterator with or without a filter.
 This differs from `len()` because it will count the exact number of remaining elements with all transformations applied. Scrolls back in place.
 
-The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(context), T) bool`.
+The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
 Also, since this filter is optional, you may pass in void literal `{}` or `null` to use no filter.
 ```zig
@@ -681,7 +683,7 @@ _ = iter.count(is_even{}); // 2
 
 ### `all()`
 Determine if all remaining elements fulfill a condition. Scrolls back in place.
-The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(context), T) bool`.
+The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 ```zig
 const is_even = struct {
     pub fn filter(_: @This(), item: u32) bool {
@@ -696,7 +698,7 @@ _ = iter.all(is_even{}); // true
 ### `single()`
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
 
-The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(context), T) bool`.
+The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 This filter is optional, so you may pass in void literal `{}` or `null` to use no filter.
 ```zig
 var iter1: Iter(u8) = .from("1");
@@ -711,7 +713,7 @@ _ = iter3.single({}); // null
 
 ### `contains()`
 Pass in a comparer context. Returns true if any element returns `.eq`. Scrolls back in place.
-`context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+`compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.contains(1, iter_z.autoCompare(u8)); // true
@@ -749,7 +751,7 @@ Parameters:
 - `self`: method receiver (non-const pointer)
 - `TOther` is the return type
 - `init` is the starting value of the accumulator
-- `context` must define the method `fn accumulate(@TypeOf(context), TOther, T) TOther`
+- `accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), TOther, T) TOther`
 A classic example of fold would be summing all the values in the iteration.
 ```zig
 const sum = struct {
@@ -767,7 +769,8 @@ _ = iter.fold(u16, 0, sum{}); // 6
 Calls `fold()`, using the first element as the collector value.
 The return type will be the same as the element type.
 If there are no elements or iteration is over, will return null.
-- `context` must define the method `fn accumulate(@TypeOf(context), T, T) T`
+
+`accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), T, T) T`
 ```zig
 // written out as example; see Auto Contexts section
 const sum = struct {
@@ -905,12 +908,12 @@ This generated context is intended to be used with `orderBy()` or `toSortedSlice
 The compare method looks like this:
 ```zig
 pub fn compare(_: @This(), a: T, b: T) std.math.Order {
-    if (a < b) {
-        return .lt;
-    } else if (a > b) {
-        return .gt;
-    }
-    return .eq;
+    return if (a < b)
+        .lt
+    else if (a > b)
+        .gt
+    else
+        .eq;
 }
 ```
 
@@ -929,10 +932,7 @@ This generated context is intended to be used with `fold()` or `reduce()` to ret
 The accumulate method looks like this:
 ```zig
 pub fn accumulate(_: @This(), a: T, b: T) T {
-    if (a < b) {
-        return a;
-    }
-    return b;
+    return if (a < b) a else b;
 }
 ```
 
@@ -941,10 +941,7 @@ This generated context is intended to be used with `fold()` or `reduce()` to ret
 The accumulate method looks like this:
 ```zig
 pub fn accumulate(_: @This(), a: T, b: T) T {
-    if (a > b) {
-        return a;
-    }
-    return b;
+    return if (a > b) a else b;
 }
 ```
 

@@ -316,11 +316,11 @@ fn ConcatIterable(comptime T: type) type {
         fn scroll(self: *Self, offset: isize) void {
             if (offset > 0) {
                 for (0..@bitCast(offset)) |_| {
-                    _ = self.next();
+                    _ = self.next() orelse break;
                 }
             } else if (offset < 0) {
                 for (0..@abs(offset)) |_| {
-                    _ = self.prev();
+                    _ = self.prev() orelse break;
                 }
             }
         }
@@ -339,7 +339,7 @@ fn ConcatIterable(comptime T: type) type {
                 sources_cpy[i] = try self.sources[i].clone(allocator);
                 success_counter += 1;
             }
-            return .{
+            return Iter(T){
                 .variant = Variant(T){
                     .concatenated = ConcatIterable(T){
                         .sources = sources_cpy,
@@ -761,21 +761,21 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
-        /// `context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
+        /// `transform_context` must define the following method: `fn transform(@TypeOf(transform_context), T) TOther`
         ///
         /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
         /// Use `selectAlloc()` for nonzero-sized contexts.
         pub fn select(
             self: *Iter(T),
             comptime TOther: type,
-            context: anytype,
+            transform_context: anytype,
         ) Iter(TOther) {
-            const selector: Select(T, TOther, @TypeOf(context)) = .{ .inner = self };
+            const selector: Select(T, TOther, @TypeOf(transform_context)) = .{ .inner = self };
             return selector.iter();
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
-        /// `context` must define the following method: `fn transform(@TypeOf(context), T) TOther`
+        /// `transform_context` must define the following method: `fn transform(@TypeOf(transform_context), T) TOther`
         ///
         /// This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
         /// If you wish to avoid the allocation, use `select()`.
@@ -785,28 +785,28 @@ pub fn Iter(comptime T: type) type {
             self: *Iter(T),
             comptime TOther: type,
             allocator: Allocator,
-            context: anytype,
+            transform_context: anytype,
         ) Allocator.Error!Iter(TOther) {
-            const selector: *SelectAlloc(T, TOther, @TypeOf(context)) = try .new(
+            const selector: *SelectAlloc(T, TOther, @TypeOf(transform_context)) = try .new(
                 allocator,
                 self,
-                context,
+                transform_context,
             );
             return selector.iter();
         }
 
         /// Return a pared-down iterator that matches the criteria specified in `filter()`.
-        /// `context` must define the following method: `fn filter(@TypeOf(context), T) bool`
+        /// `filter_context` must define the following method: `fn filter(@TypeOf(filter_context), T) bool`
         ///
         /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
         /// Use `whereAlloc()` for nonzero-sized contexts.
-        pub fn where(self: *Iter(T), context: anytype) Iter(T) {
-            const w: Where(T, @TypeOf(context)) = .{ .inner = self };
+        pub fn where(self: *Iter(T), filter_context: anytype) Iter(T) {
+            const w: Where(T, @TypeOf(filter_context)) = .{ .inner = self };
             return w.iter();
         }
 
         /// Return a pared-down iterator that matches the criteria specified in `filter()`.
-        /// `context` must define the following method: `fn filter(@TypeOf(context), T) bool`
+        /// `filter_context` must define the following method: `fn filter(@TypeOf(filter_context), T) bool`
         ///
         /// This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
         /// If you wish to avoid the allocation, use `where()`.
@@ -815,9 +815,9 @@ pub fn Iter(comptime T: type) type {
         pub fn whereAlloc(
             self: *Iter(T),
             allocator: Allocator,
-            context: anytype,
+            filter_context: anytype,
         ) Allocator.Error!Iter(T) {
-            const w: *WhereAlloc(T, @TypeOf(context)) = try .new(allocator, self, context);
+            const w: *WhereAlloc(T, @TypeOf(filter_context)) = try .new(allocator, self, filter_context);
             return w.iter();
         }
 
@@ -893,73 +893,73 @@ pub fn Iter(comptime T: type) type {
         /// If stable sorting is required, use `toSortedSliceOwnedStable()`.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
-        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+        /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
         pub fn toSortedSliceOwned(
             self: *Iter(T),
             allocator: Allocator,
-            context: anytype,
+            compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
-            const sort_ctx: SortContext(T, @TypeOf(context)) = .{
+            const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
                 .slice = slice,
-                .ctx = context,
+                .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sortUnstable(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
+            std.mem.sortUnstable(T, slice, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
             return slice;
         }
 
         /// Enumerates into new sorted slice, using a stable sorting algorithm.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
-        /// `context` must define the method `fn compare(@This(), T, T) std.math.Order`.
+        /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
         pub fn toSortedSliceOwnedStable(
             self: *Iter(T),
             allocator: Allocator,
-            context: anytype,
+            compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
             const slice: []T = try self.enumerateToOwnedSlice(allocator);
-            const sort_ctx: SortContext(T, @TypeOf(context)) = .{
+            const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
                 .slice = slice,
-                .ctx = context,
+                .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sort(T, slice, sort_ctx, SortContext(T, @TypeOf(context)).lessThan);
+            std.mem.sort(T, slice, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
             return slice;
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
         /// This makes use of an unstable sorting algorith. If stable sorting is required, use `orderByStable()`.
-        /// `context` must define the method `fn compare(@TypeOf(context), T, T) std.math.Order`.
+        /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderBy(
             self: *Iter(T),
             allocator: Allocator,
-            context: anytype,
+            compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error!Iter(T) {
-            const slice: []T = try self.toSortedSliceOwned(allocator, context, ordering);
+            const slice: []T = try self.toSortedSliceOwned(allocator, compare_context, ordering);
             return fromSliceOwned(allocator, slice, null);
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
-        /// `context` must define the method `fn compare(@TypeOf(context), T, T) std.math.Order`.
+        /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// This iterator needs its underlying slice freed by calling `deinit()`.
         pub fn orderByStable(
             self: *Iter(T),
             allocator: Allocator,
-            context: anytype,
+            compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error!Iter(T) {
-            const slice: []T = try self.toSortedSliceOwnedStable(allocator, context, ordering);
+            const slice: []T = try self.toSortedSliceOwnedStable(allocator, compare_context, ordering);
             return fromSliceOwned(allocator, slice, null);
         }
 
@@ -967,12 +967,12 @@ pub fn Iter(comptime T: type) type {
         /// (or pass in void literal `{}` or `null` to simply peek at the next element).
         /// Always scrolls back in place.
         ///
-        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
-        pub fn any(self: *Iter(T), context: anytype) ?T {
-            const filterProvided: bool = switch (@typeInfo(@TypeOf(context))) {
+        /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
+        pub fn any(self: *Iter(T), filter_context: anytype) ?T {
+            const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
                 else => blk: {
-                    _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+                    _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
                     break :blk true;
                 },
             };
@@ -985,7 +985,7 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |n| {
                 scroll_amt -= 1;
-                if (filterProvided and !context.filter(n)) continue;
+                if (filterProvided and !filter_context.filter(n)) continue;
 
                 return n;
             }
@@ -996,28 +996,19 @@ pub fn Iter(comptime T: type) type {
         /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
         ///
-        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
-        /// Example:
-        /// ```zig
-        /// fn Ctx(comptime T: type) type {
-        ///     return struct {
-        ///         pub fn filter(_: @This(), item: T) bool {
-        ///             return true;
-        ///         }
-        ///     };
-        /// }
+        /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         /// ```
         pub fn filterNext(
             self: *Iter(T),
-            context: anytype,
+            filter_context: anytype,
             moved_forward: *usize,
         ) ?T {
-            _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+            _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
                 moved += 1;
-                if (context.filter(n)) {
+                if (filter_context.filter(n)) {
                     return n;
                 }
             }
@@ -1025,21 +1016,13 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Transform the next element from type `T` to type `TOther` (or return null if iteration is over)
-        /// - `context` must be a type that defines the method: `fn transform(@TypeOf(context), T) TOther` (similar to `select()`).
-        ///
-        /// Context example:
-        /// ```zig
-        /// const multiplier = struct {
-        ///     factor: u32,
-        ///     pub fn transform(this: @This(), item: u32) u32 {
-        ///         return this.factor * item;
-        ///     }
-        /// };
+        /// `transform_context` must define the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
+        /// NOTE : This method is preferred over `select()` when simply iterating with a transformation.
         /// ```
-        pub fn transformNext(self: *Iter(T), comptime TOther: type, context: anytype) ?TOther {
-            _ = @as(fn (@TypeOf(context), T) TOther, @TypeOf(context).transform);
+        pub fn transformNext(self: *Iter(T), comptime TOther: type, transform_context: anytype) ?TOther {
+            _ = @as(fn (@TypeOf(transform_context), T) TOther, @TypeOf(transform_context).transform);
             return if (self.next()) |x|
-                context.transform(x)
+                transform_context.transform(x)
             else
                 null;
         }
@@ -1048,25 +1031,16 @@ pub fn Iter(comptime T: type) type {
         /// The filter is optional, and you may pass in void literal `{}` or `null` if you do not wish to apply a filter.
         /// Will scroll back in place.
         ///
-        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
-        /// Example:
-        /// ```zig
-        /// fn Ctx(comptime T: type) type {
-        ///     return struct {
-        ///         pub fn filter(_: @This(), item: T) bool {
-        ///             return true;
-        ///         }
-        ///     };
-        /// }
+        /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         /// ```
         pub fn single(
             self: *Iter(T),
-            context: anytype,
+            filter_context: anytype,
         ) error{MultipleElementsFound}!?T {
-            const filterProvided: bool = switch (@typeInfo(@TypeOf(context))) {
+            const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
                 else => blk: {
-                    _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+                    _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
                     break :blk true;
                 },
             };
@@ -1081,7 +1055,7 @@ pub fn Iter(comptime T: type) type {
             var found: ?T = null;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (filterProvided and !context.filter(x)) continue;
+                if (filterProvided and !filter_context.filter(x)) continue;
 
                 if (found != null) {
                     return error.MultipleElementsFound;
@@ -1122,14 +1096,14 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Determine if this iterator contains a specific `item`.
-        /// `context` must define the method: `fn compare(@This(), T, T) std.math.Order`.
+        /// `compare_context` must define the method: `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// Scrolls back in place.
-        pub fn contains(self: *Iter(T), item: T, context: anytype) bool {
-            _ = @as(fn (@TypeOf(context), T, T) std.math.Order, @TypeOf(context).compare);
+        pub fn contains(self: *Iter(T), item: T, compare_context: anytype) bool {
+            _ = @as(fn (@TypeOf(compare_context), T, T) std.math.Order, @TypeOf(compare_context).compare);
             const Ctx = struct {
                 ctx_item: T,
-                inner: @TypeOf(context),
+                inner: @TypeOf(compare_context),
 
                 pub fn filter(this: @This(), x: T) bool {
                     return switch (this.inner.compare(this.ctx_item, x)) {
@@ -1138,28 +1112,19 @@ pub fn Iter(comptime T: type) type {
                     };
                 }
             };
-            return self.any(Ctx{ .ctx_item = item, .inner = context }) != null;
+            return self.any(Ctx{ .ctx_item = item, .inner = compare_context }) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining. Scrolls back in place.
         /// If you do not wish to apply a filter, pass in void literal `{}` or `null` to `context`.
         ///
-        /// `context` must define the method: `fn filter(@TypeOf(context), T) bool`.
-        /// Example:
-        /// ```zig
-        /// fn Ctx(comptime T: type) type {
-        ///     return struct {
-        ///         pub fn filter(_: @This(), item: T) bool {
-        ///             return true;
-        ///         }
-        ///     };
-        /// }
+        /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         /// ```
-        pub fn count(self: *Iter(T), context: anytype) usize {
-            const filterProvided: bool = switch (@typeInfo(@TypeOf(context))) {
+        pub fn count(self: *Iter(T), filter_context: anytype) usize {
+            const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
                 else => blk: {
-                    _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+                    _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
                     break :blk true;
                 },
             };
@@ -1173,7 +1138,7 @@ pub fn Iter(comptime T: type) type {
             var result: usize = 0;
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (filterProvided and !context.filter(x)) continue;
+                if (filterProvided and !filter_context.filter(x)) continue;
 
                 result += 1;
             }
@@ -1182,19 +1147,10 @@ pub fn Iter(comptime T: type) type {
 
         /// Determine whether or not all elements fulfill a given filter. Scrolls back in place.
         ///
-        /// `context` must define the method: `fn filter(@This(), T) bool`.
-        /// Example:
-        /// ```zig
-        /// fn Ctx(comptime T: type) type {
-        ///     return struct {
-        ///         pub fn filter(_: @This(), item: T) bool {
-        ///             return true;
-        ///         }
-        ///     };
-        /// }
+        /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         /// ```
-        pub fn all(self: *Iter(T), context: anytype) bool {
-            _ = @as(fn (@TypeOf(context), T) bool, @TypeOf(context).filter);
+        pub fn all(self: *Iter(T), filter_context: anytype) bool {
+            _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
             if (self.len() == 0) {
                 return true;
             }
@@ -1204,7 +1160,7 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |x| {
                 scroll_amt -= 1;
-                if (!context.filter(x)) {
+                if (!filter_context.filter(x)) {
                     return false;
                 }
             }
@@ -1214,18 +1170,18 @@ pub fn Iter(comptime T: type) type {
         /// Fold the iterator into a single value.
         /// - `self`: method receiver (non-const pointer)
         /// - `TOther` is the return type
-        /// - `context` must define the method `fn accumulate(@TypeOf(context), TOther, T) TOther`
+        /// - `accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), TOther, T) TOther`
         /// - `init` is the starting value of the accumulator
         pub fn fold(
             self: *Iter(T),
             comptime TOther: type,
             init: TOther,
-            context: anytype,
+            accumulate_context: anytype,
         ) TOther {
-            _ = @as(fn (@TypeOf(context), TOther, T) TOther, @TypeOf(context).accumulate);
+            _ = @as(fn (@TypeOf(accumulate_context), TOther, T) TOther, @TypeOf(accumulate_context).accumulate);
             var result: TOther = init;
             while (self.next()) |x| {
-                result = context.accumulate(result, x);
+                result = accumulate_context.accumulate(result, x);
             }
             return result;
         }
@@ -1233,11 +1189,11 @@ pub fn Iter(comptime T: type) type {
         /// Calls `fold`, using the first element as `init`.
         /// Note that this returns null if the iterator is empty or at the end.
         ///
-        /// `context` must define the method `fn accumulate(@TypeOf(context), T, T) T`
-        pub fn reduce(self: *Iter(T), context: anytype) ?T {
-            _ = @as(fn (@TypeOf(context), T, T) T, @TypeOf(context).accumulate);
+        /// `accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), T, T) T`
+        pub fn reduce(self: *Iter(T), accumulate_context: anytype) ?T {
+            _ = @as(fn (@TypeOf(accumulate_context), T, T) T, @TypeOf(accumulate_context).accumulate);
             const init: T = self.next() orelse return null;
-            return self.fold(T, init, context);
+            return self.fold(T, init, accumulate_context);
         }
 
         /// Reverse the direction of the iterator.
@@ -1412,20 +1368,14 @@ fn AutoMinContext(comptime T: type) type {
         .int, .float => {
             return struct {
                 pub fn accumulate(_: @This(), a: T, b: T) T {
-                    if (a < b) {
-                        return a;
-                    }
-                    return b;
+                    return if (a < b) a else b;
                 }
             };
         },
         .@"enum" => {
             return struct {
                 pub fn accumulate(_: @This(), a: T, b: T) T {
-                    if (@intFromEnum(a) < @intFromEnum(b)) {
-                        return a;
-                    }
-                    return b;
+                    return if (@intFromEnum(a) < @intFromEnum(b)) a else b;
                 }
             };
         },
@@ -1443,20 +1393,14 @@ fn AutoMaxContext(comptime T: type) type {
         .int, .float => {
             return struct {
                 pub fn accumulate(_: @This(), a: T, b: T) T {
-                    if (a > b) {
-                        return a;
-                    }
-                    return b;
+                    return if (a > b) a else b;
                 }
             };
         },
         .@"enum" => {
             return struct {
                 pub fn accumulate(_: @This(), a: T, b: T) T {
-                    if (@intFromEnum(a) > @intFromEnum(b)) {
-                        return a;
-                    }
-                    return b;
+                    return if (@intFromEnum(a) > @intFromEnum(b)) a else b;
                 }
             };
         },
@@ -1474,24 +1418,24 @@ fn AutoCompareContext(comptime T: type) type {
         .int, .float => {
             return struct {
                 pub fn compare(_: @This(), a: T, b: T) std.math.Order {
-                    if (a < b) {
-                        return .lt;
-                    } else if (a > b) {
-                        return .gt;
-                    }
-                    return .eq;
+                    return if (a < b)
+                        .lt
+                    else if (a > b)
+                        .gt
+                    else
+                        .eq;
                 }
             };
         },
         .@"enum" => {
             return struct {
                 pub fn compare(_: @This(), a: T, b: T) std.math.Order {
-                    if (@intFromEnum(a) < @intFromEnum(b)) {
-                        return .lt;
-                    } else if (@intFromEnum(a) > @intFromEnum(b)) {
-                        return .gt;
-                    }
-                    return .eq;
+                    return if (@intFromEnum(a) < @intFromEnum(b))
+                        .lt
+                    else if (@intFromEnum(a) > @intFromEnum(b))
+                        .gt
+                    else
+                        .eq;
                 }
             };
         },
