@@ -8,6 +8,60 @@ The main type is `Iter(T)`, which comes with several methods and queries.
 
 The latest release is `v0.2.1`, which leverages Zig 0.14.1.
 
+- [Use This Package](#use-this-package)
+- [Other Releases](#other-releases)
+    - [Main Branch](#main)
+    - [v0.1.1](#v011)
+- [Iter(T) Methods](#itert-methods)
+    - [next()](#next)
+    - [prev()](#prev)
+    - [reset()](#reset)
+    - [scroll()](#scroll)
+    - [len()](#len)
+    - [clone()](#clone)
+    - [deinit()](#deinit)
+- [Instantiation](#instantiation)
+    - [empty](#empty)
+    - [from()](#from)
+    - [fromSliceOwned()](#fromsliceowned)
+    - [fromMulti()](#frommulti)
+    - [fromOther()](#fromother)
+    - [fromOtherBuf()](#fromotherbuf)
+    - [concat()](#concat)
+    - [concatOwned()](#concatOwned)
+- [Queries](#queries)
+    - [append()](#append)
+    - [select()](#select)
+    - [selectAlloc()](#selectalloc)
+    - [where()](#where)
+    - [whereAlloc()](#wherealloc)
+    - [orderBy()](#orderby)
+    - [any()](#any)
+    - [filterNext()](#filternext)
+    - [transformNext()](#transformnext)
+    - [forEach()](#foreach)
+    - [count()](#count)
+    - [all()](#all)
+    - [single()](#single)
+    - [contains()](#contains)
+    - [enumerateToBuffer()](#enumeratetobuffer)
+    - [enumerateToOwnedSlice()](#enumeratetoownedslice)
+    - [fold()](#fold)
+    - [reduce()](#reduce)
+    - [reverse()](#reverse)
+    - [reverseReset()](#reversereset)
+    - [reverseCloneReset()](#reverseclonereset)
+    - [take()](#take)
+    - [takeAlloc()](#takeAlloc)
+- [Auto Contexts](#auto-contexts)
+    - [Auto Comparer](#auto-comparer)
+    - [Auto Sum](#auto-sum)
+    - [Auto Min](#auto-min)
+    - [Auto Max](#auto-max)
+- [Context Helper Functions](#context-helper-functions)
+- [Implementation Details](#implementation-details)
+- [Extensibility](#extensibility)
+
 ## Use This Package
 In your build.zig.zon, add the following dependency:
 ```zig
@@ -193,6 +247,8 @@ Initializes an `Iter(T)` from a slice, except it owns the slice.
 As a result, calling `deinit()` will free the slice.
 Also, an optional action may be passed in that will be called on the slice when the iterator is deinitialized.
 This is useful for individually freeing memory for each element.
+
+Also note: `fromSliceOwnedContext()` allows the caller to pass in a context object and `on_deinit` function: `fn (@TypeOf(context), []T) void`.
 ```zig
 const allocator = @import("std").testing.allocator;
 
@@ -257,6 +313,26 @@ while (iter.prev()) |s| : (expected_tag -= 1) {
 }
 ```
 
+### `fromOther()`
+Take any type, given that defines a method called `next()` that takes no params apart from the receiver and returns `?T`.
+
+Unfortunately, we can only rely on the existence of a `next()` method.
+So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and fill it with the results from `other.next()`.
+Will pare the buffer down to the exact size returned from all the `other.next()` calls.
+
+Be sure to call `deinit()` to free the underlying buffer.
+```zig
+const allocator = @import("std").testing.allocator;
+const str = "this,is,a,string,to,split";
+var split_iter = std.mem.splitAny(u8, str, ",");
+
+var iter: Iter([]const u8) = try .fromOther(allocator, &split_iter, split_iter.buffer.len);
+defer iter.deinit(); // must free
+
+while (iter.next()) |x| {
+    // "this", "is", "a", "string", "to", "split"
+}
+```
 ### `fromOtherBuf()`
 Take any type (or pointer child type) that has a method called `next()` that takes no params apart from the receiver and returns `?T`.
 
@@ -291,26 +367,6 @@ defer clone.deinit();
 try testing.expectEqual(1, clone.next().?.value_ptr.*);
 ```
 
-### `fromOther()`
-Take any type, given that defines a method called `next()` that takes no params apart from the receiver and returns `?T`.
-
-Unfortunately, we can only rely on the existence of a `next()` method.
-So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and fill it with the results from `other.next()`.
-Will pare the buffer down to the exact size returned from all the `other.next()` calls.
-
-Be sure to call `deinit()` to free the underlying buffer.
-```zig
-const allocator = @import("std").testing.allocator;
-const str = "this,is,a,string,to,split";
-var split_iter = std.mem.splitAny(u8, str, ",");
-
-var iter: Iter([]const u8) = try .fromOther(allocator, &split_iter, split_iter.buffer.len);
-defer iter.deinit(); // must free
-
-while (iter.next()) |x| {
-    // "this", "is", "a", "string", "to", "split"
-}
-```
 
 ### `concat()`
 Concatenate any number of iterators into 1.
