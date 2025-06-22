@@ -124,6 +124,8 @@ Additionally, some methods in `v0.2.1` were removed such as `getIndex()`, `setIn
 `VTable(T)` was adjusted so that implementations of `clone()`, `deinit()`, and `scroll()` are optional with default implemenations provided.
 `take()` and `takeAlloc()` were added in v0.3.0 as well as a few more methods/functions for ergonomics.
 
+See full changes [here](#https://github.com/MiahDrao97/iter_z/commit/f5031b899bb58f255c474269db0e7c05d29cd8cc).
+
 Version 0.2.1 can be fetched with the following command:
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz
@@ -134,6 +136,8 @@ Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in func
 dispatch pattern with context types. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
 `MultiArrayList`. Some public functions present in this release were removed in 0.2.0, such as the methods on `AnonymousIterable(T)` (besides `iter()`)
 and the quick-sort function in `util.zig`.
+
+See full changes [here](#https://github.com/MiahDrao97/iter_z/commit/2f435d8d15a57a986186e2ab0177926349f56bb3).
 
 Fetch it with the following command if you wish to use the old API:
 ```
