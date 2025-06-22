@@ -1,9 +1,7 @@
 const std = @import("std");
 const iter = @import("iter.zig");
 const Allocator = std.mem.Allocator;
-const Ordering = iter.Ordering;
 const Iter = iter.Iter;
-const Fn = std.builtin.Type.Fn;
 
 pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}![len]T {
     switch (@typeInfo(T)) {

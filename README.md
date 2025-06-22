@@ -901,7 +901,8 @@ test "reverse clone reset" {
 ```
 
 ### `take()`
-Take `buf.len` and return new iterator from that buffer.
+Take `buf.len` elements and return new iterator from that buffer.
+If there are less elements than the buffer size, that will be reflected in `len()`, as only a fraction of the buffer will be referenced.
 ```zig
 test "take()" {
     var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
@@ -926,6 +927,7 @@ test "take()" {
 
 ### `takeAlloc()`
 Similar to `take()`, except allocating memory rather than using a buffer.
+If there are less elements than the size passed in, the slice will be pared down to the exact number of elements returned.
 ```zig
 test "takeAlloc()" {
     const page_size: isize = 20;
@@ -1008,7 +1010,7 @@ The functions `filterContext()`, `transformContext()`, `accumulateContext()`, an
 context object that matches the corresponding function signature for filtering, transforming, accumulating, or comparing.
 
 This is helper when the original context is a pointer or the function name differs from `filter`, `transform`, `accumulate`, or `compare`.
-Keep in mind the size of the original context will be the size of the wrapped context (may be relevant when choosing between `select()` and `selectAlloc`, for example).
+Keep in mind the size of the original context will be the size of the wrapped context (may be relevant when choosing between `select()` and `selectAlloc()`, for example).
 ```zig
 test "context helper fn" {
     const Multiplier = struct {
