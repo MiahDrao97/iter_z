@@ -6,6 +6,8 @@ pub fn build(b: *Build) void {
     const optimize: std.builtin.OptimizeMode = b.standardOptimizeOption(.{});
 
     const iter_module: *Build.Module = b.addModule("iter_z", .{
+        .target = target,
+        .optimize = optimize,
         .root_source_file = b.path("src/iter.zig"),
     });
 
@@ -14,6 +16,7 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path("test/iter_tests.zig"),
             .target = target,
             .optimize = optimize,
+            .error_tracing = true,
         });
         iter_test.root_module.addImport("iter_z", iter_module);
 
