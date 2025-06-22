@@ -6,7 +6,7 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 
 The main type is `Iter(T)`, which comes with several methods and queries.
 
-The latest release is `v0.2.1`, which leverages Zig 0.14.1.
+The latest release is `v0.3.0`, which leverages Zig 0.14.1.
 
 - [Use This Package](#use-this-package)
 - [Other Releases](#other-releases)
@@ -70,7 +70,7 @@ In your build.zig.zon, add the following dependency:
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
-            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -80,7 +80,7 @@ In your build.zig.zon, add the following dependency:
 
 Get your hash from the following:
 ```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
@@ -115,6 +115,17 @@ The main branch is generally unstable, intended to change as the Zig language ev
 Breaking API changes may be merged into the main branch before a new release is tagged.
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
+```
+
+### v0.2.1
+Before v0.3.0, the API's were less unified regarding the context pattern.
+Additionally, some methods in `v0.2.1` were removed such as `getIndex()`, `setIndex()`, and `singleOrNull()`.
+`VTable(T)` was adjusted so that implementations of `clone()`, `deinit()`, and `scroll()` are optional with default implemenations provided.
+`take()` and `takeAlloc()` were added in v0.3.0 as well as a few more methods/functions for ergonomics.
+
+Version 0.2.1 can be fetched with the following command:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz
 ```
 
 ### v0.1.1
