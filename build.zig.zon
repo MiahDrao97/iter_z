@@ -1,7 +1,7 @@
 .{
     .fingerprint = 0x4415db88c6a4829c,
     .name = .iter_z,
-    .version = "0.2.1",
+    .version = "0.3.0",
     .dependencies = .{},
     .paths = .{""},
     .minimum_zig_version = "0.14.1",

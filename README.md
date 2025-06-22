@@ -6,11 +6,12 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 
 The main type is `Iter(T)`, which comes with several methods and queries.
 
-The latest release is `v0.2.1`, which leverages Zig 0.14.1.
+The latest release is `v0.3.0`, which leverages Zig 0.14.1.
 
 - [Use This Package](#use-this-package)
 - [Other Releases](#other-releases)
     - [Main Branch](#main)
+    - [v0.2.1](#v021)
     - [v0.1.1](#v011)
 - [Iter(T) Methods](#itert-methods)
     - [next()](#next)
@@ -70,7 +71,7 @@ In your build.zig.zon, add the following dependency:
     .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
-            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -80,7 +81,7 @@ In your build.zig.zon, add the following dependency:
 
 Get your hash from the following:
 ```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
@@ -117,11 +118,26 @@ Breaking API changes may be merged into the main branch before a new release is 
 zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
 
+### v0.2.1
+Before v0.3.0, the API's were less unified regarding the context pattern.
+Additionally, some methods in `v0.2.1` were removed such as `getIndex()`, `setIndex()`, and `singleOrNull()`.
+`VTable(T)` was adjusted so that implementations of `clone()`, `deinit()`, and `scroll()` are optional with default implemenations provided.
+`take()` and `takeAlloc()` were added in v0.3.0 as well as a few more methods/functions for ergonomics.
+
+See full changes [here](https://github.com/MiahDrao97/iter_z/commit/f5031b899bb58f255c474269db0e7c05d29cd8cc).
+
+Version 0.2.1 can be fetched with the following command:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.2.1.tar.gz
+```
+
 ### v0.1.1
 Before v0.2.0, queries such as `select()`, `where()`, `any()`, etc. took in function bodies and args before the API was adapted to use the static
 dispatch pattern with context types. The leap from 0.1.1 to 0.2.0 primarily contains API changes and the ability to create an iterator from a
 `MultiArrayList`. Some public functions present in this release were removed in 0.2.0, such as the methods on `AnonymousIterable(T)` (besides `iter()`)
 and the quick-sort function in `util.zig`.
+
+See full changes [here](https://github.com/MiahDrao97/iter_z/commit/2f435d8d15a57a986186e2ab0177926349f56bb3).
 
 Fetch it with the following command if you wish to use the old API:
 ```
