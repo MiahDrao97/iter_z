@@ -129,6 +129,8 @@ zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.1.1.tar.gz
 ```
 
 ## Iter(T) Methods
+While there are more methods than the ones listed in this section, these ones are the groundwork that the queries leverage.
+They also correlate to the v-table methods that can be implemented by user code (see [extensibility section](#extensibility)).
 
 ### `next()`
 Standard iterator method: Returns next element or null if iteration is over.
@@ -181,7 +183,8 @@ _ = iter.scroll(-1); // move prev() 1 time
 ```
 
 ### `len()`
-Maximum length an iterator can be. Generally, it's the same number of elements returned by `next()`, but this length is obscured after undergoing certain transformations such as `where()`.
+Maximum number of elements an iterator can return. Generally, it's the same number of elements returned by `next()`,
+but this length is obscured after undergoing certain transformations such as `where()`.
 ```zig
 const iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 _ = iter.len(); // length is 3
@@ -362,13 +365,7 @@ try testing.expectEqual(1, iter.next().?.value_ptr.*);
 try testing.expectEqual(2, iter.next().?.value_ptr.*);
 try testing.expectEqual(3, iter.next().?.value_ptr.*);
 try testing.expectEqual(null, iter.next());
-
-var clone: Iter(HashMap.Entry) = try iter.cloneReset(testing.allocator);
-defer clone.deinit();
-
-try testing.expectEqual(1, clone.next().?.value_ptr.*);
 ```
-
 
 ### `concat()`
 Concatenate any number of iterators into 1.
@@ -778,20 +775,23 @@ _ = iter.contains(1, iter_z.autoCompare(u8)); // true
 ```
 
 ### `enumerateToBuffer()`
-Enumerate all elements to a buffer passed in from the current. If you wish to start at the beginning, be sure to call `reset()`. Returns a slice of the buffer.
+Enumerate all elements to a buffer passed in from the current.
+If you wish to start at the beginning, be sure to call `reset()` beforehand.
+Returns a slice of the buffer or returns `error.NoSpaceLeft` if we've run out of space.
 ```zig
 var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 var buf: [5]u8 = undefined;
-_ = try iter.enumerateToBuffer(&buf); // success!
+_ = try iter.enumerateToBuffer(&buf); // success! [ 1, 2, 3 ]
 
 var buf2: [2]u8 = undefined;
-var result: []u8 = iter.reset().enumerateToBuffer(&buf2) catch &buf2; // fails, but results are [ 1, 2 ]
+const result: []u8 = iter.reset().enumerateToBuffer(&buf2) catch &buf2; // fails, but buffer contains [ 1, 2 ]
+_ = iter.next(); // 3 is the next element after our error
 ```
 
 ### `enumerateToOwnedSlice()`
 Allocate a slice and enumerate all elements to it from the current offset.
 This will not free the iterator if it owns any memory, so you'll still have to call `deinit()` on it if it does.
-Caller owns the slice. If you wish to start enumerating at the beginning, be sure to call `reset()`.
+Caller owns the slice. If you wish to start enumerating at the beginning, be sure to call `reset()` beforehand.
 ```zig
 const allocator = @import("std").testing.allocator;
 
@@ -844,7 +844,9 @@ _ = iter.reduce(sum{}); // 6
 ### `reverse()`
 Reverses the direction of iteration. However, you will likely want to also `reset()` the iterator if you reverse before calling `next()`.
 It's as if the end of a slice where its beginning, and its beginning is the end.
-WARN : The reversed iterator points to the original, so they move together. If that is undesired behavior, create a clone and reverse that instead.
+
+WARN : The reversed iterator points to the original, so they move together.
+If that is undesired behavior, create a clone and reverse that instead.
 ```zig
 test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
