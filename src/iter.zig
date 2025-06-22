@@ -1227,13 +1227,8 @@ pub fn Iter(comptime T: type) type {
 
                 fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
                     const self_ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-
-                    const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
-                    errdefer allocator.destroy(cloned);
-
-                    cloned.* = .{ .allocator = allocator, .iter = try self_ptr.clone(allocator) };
                     return (AnonymousIterable(T){
-                        .ptr = cloned,
+                        .ptr = try ClonedIter(T).new(allocator, self_ptr.*),
                         .v_table = &.{
                             .next_fn = &implNextAsClone,
                             .prev_fn = &implPrevAsClone,
@@ -1276,13 +1271,8 @@ pub fn Iter(comptime T: type) type {
 
                 fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
                     const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-
-                    const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
-                    errdefer allocator.destroy(cloned);
-
-                    cloned.* = .{ .allocator = allocator, .iter = try clone_ptr.iter.clone(allocator) };
                     return (AnonymousIterable(T){
-                        .ptr = cloned,
+                        .ptr = try clone_ptr.clone(allocator),
                         .v_table = &.{
                             .next_fn = &implNextAsClone,
                             .prev_fn = &implPrevAsClone,
@@ -1301,7 +1291,7 @@ pub fn Iter(comptime T: type) type {
 
                 fn implDeinitAsClone(impl: *anyopaque) void {
                     const clone_ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-                    clone_ptr.allocator.destroy(clone_ptr);
+                    clone_ptr.deinit();
                 }
             };
 
@@ -1580,12 +1570,6 @@ inline fn validateOtherIterator(comptime T: type, other: anytype) void {
         if (!is_ptr or @typeInfo(@TypeOf(other)).pointer.is_const) {
             @compileError("`next()` method receiver requires `*" ++ @typeName(OtherType) ++ "`, but found `*const " ++ @typeName(OtherType) ++ "`");
         }
-    }
-}
-
-inline fn logTrace(comptime scope: @Type(.enum_literal), comptime log: []const u8, args: anytype) void {
-    if (@hasDecl(root, "trace_enabled")) {
-        std.log.scoped(scope).debug(log, args);
     }
 }
 

@@ -48,13 +48,8 @@ pub fn Select(
 
         fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-
-            const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
-            errdefer allocator.destroy(cloned);
-
-            cloned.* = .{ .iter = try ptr.clone(allocator), .allocator = allocator };
             return (AnonymousIterable(TOther){
-                .ptr = cloned,
+                .ptr = try ClonedIter(T).new(allocator, ptr.*),
                 .v_table = &VTable(TOther){
                     .next_fn = &implNextAsClone,
                     .prev_fn = &implPrevAsClone,
@@ -100,10 +95,8 @@ pub fn Select(
 
         fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(TOther) {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
-            cloned.* = .{ .iter = ptr.iter, .allocator = allocator };
             return (AnonymousIterable(TOther){
-                .ptr = cloned,
+                .ptr = try ptr.clone(allocator),
                 .v_table = &VTable(TOther){
                     .next_fn = &implNextAsClone,
                     .prev_fn = &implPrevAsClone,
@@ -118,8 +111,7 @@ pub fn Select(
 
         fn implDeinitAsClone(impl: *anyopaque) void {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            ptr.iter.deinit();
-            ptr.allocator.destroy(ptr);
+            ptr.deinit();
         }
 
         pub fn iter(self: @This()) Iter(TOther) {

@@ -49,13 +49,8 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
 
         fn implClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-
-            const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
-            errdefer allocator.destroy(cloned);
-
-            cloned.* = .{ .iter = try ptr.clone(allocator), .allocator = allocator };
             return (AnonymousIterable(T){
-                .ptr = cloned,
+                .ptr = try ClonedIter(T).new(allocator, ptr.*),
                 .v_table = &VTable(T){
                     .next_fn = &implNextAsClone,
                     .prev_fn = &implPrevAsClone,
@@ -105,10 +100,8 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
 
         fn implCloneAsClone(impl: *anyopaque, allocator: Allocator) Allocator.Error!Iter(T) {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            const cloned: *ClonedIter(T) = try allocator.create(ClonedIter(T));
-            cloned.* = .{ .iter = ptr.iter, .allocator = allocator };
             return (AnonymousIterable(T){
-                .ptr = cloned,
+                .ptr = try ptr.clone(allocator),
                 .v_table = &VTable(T){
                     .next_fn = &implNextAsClone,
                     .prev_fn = &implPrevAsClone,
@@ -123,8 +116,7 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
 
         fn implDeinitAsClone(impl: *anyopaque) void {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            ptr.iter.deinit();
-            ptr.allocator.destroy(ptr);
+            ptr.deinit();
         }
 
         pub fn iter(self: @This()) Iter(T) {
