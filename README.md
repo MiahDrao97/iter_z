@@ -11,6 +11,7 @@ The latest release is `v0.3.0`, which leverages Zig 0.14.1.
 - [Use This Package](#use-this-package)
 - [Other Releases](#other-releases)
     - [Main Branch](#main)
+    - [v0.2.1](#v021)
     - [v0.1.1](#v011)
 - [Iter(T) Methods](#itert-methods)
     - [next()](#next)
