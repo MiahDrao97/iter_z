@@ -1154,6 +1154,14 @@ test "pagination with scroll + take" {
             try testing.expectEqual(expected, actual);
         }
     }
+    {
+        var empty: Iter(u8) = .empty;
+        var page: [20]u8 = undefined;
+        var page_iter: Iter(u8) = empty.take(&page);
+
+        try testing.expectEqual(0, page_iter.len());
+        try testing.expectEqual(null, page_iter.next());
+    }
     // take alloc
     {
         const page_size: isize = 20;
@@ -1176,5 +1184,13 @@ test "pagination with scroll + take" {
         while (page_iter.next()) |actual| : (expected += 1) {
             try testing.expectEqual(expected, actual);
         }
+    }
+    {
+        var empty: Iter(u8) = .empty;
+        var page_iter: Iter(u8) = try empty.takeAlloc(testing.allocator, 20);
+        defer page_iter.deinit();
+
+        try testing.expectEqual(0, page_iter.len());
+        try testing.expectEqual(null, page_iter.next());
     }
 }

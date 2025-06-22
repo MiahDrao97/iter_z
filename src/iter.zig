@@ -398,57 +398,57 @@ pub fn Iter(comptime T: type) type {
 
         /// Get the next element
         pub fn next(self: *Iter(T)) ?T {
-            switch (self.variant) {
-                .slice => |*s| {
+            return switch (self.variant) {
+                .slice => |*s| slice_blk: {
                     if (s.idx >= s.elements.len) {
-                        return null;
+                        break :slice_blk null;
                     }
                     defer s.idx += 1;
-                    return s.elements[s.idx];
+                    break :slice_blk s.elements[s.idx];
                 },
-                .multi_arr_list => |*m| {
+                .multi_arr_list => |*m| multi_blk: {
                     if (Variant(T).multiArrListAllowed()) {
                         if (m.idx >= m.list.len) {
-                            return null;
+                            break :multi_blk null;
                         }
                         defer m.idx += 1;
-                        return m.list.get(m.idx);
+                        break :multi_blk m.list.get(m.idx);
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended => |*x| return x.next(),
-                .anonymous => |a| return a.v_table.next_fn(a.ptr),
-                .empty => return null,
-            }
+                inline .concatenated, .appended => |*x| x.next(),
+                .anonymous => |a| a.v_table.next_fn(a.ptr),
+                .empty => null,
+            };
         }
 
         pub fn prev(self: *Iter(T)) ?T {
-            switch (self.variant) {
-                .slice => |*s| {
+            return switch (self.variant) {
+                .slice => |*s| slice_blk: {
                     if (s.idx == 0) {
-                        return null;
+                        break :slice_blk null;
                     } else if (s.idx > s.elements.len) {
                         s.idx = s.elements.len;
                     }
                     s.idx -|= 1;
-                    return s.elements[s.idx];
+                    break :slice_blk s.elements[s.idx];
                 },
-                .multi_arr_list => |*m| {
+                .multi_arr_list => |*m| multi_blk: {
                     if (Variant(T).multiArrListAllowed()) {
                         if (m.idx == 0) {
-                            return null;
+                            break :multi_blk null;
                         } else if (m.idx > m.list.len) {
                             m.idx = m.list.len;
                         }
                         m.idx -|= 1;
-                        return m.list.get(m.idx);
+                        break :multi_blk m.list.get(m.idx);
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended => |*x| return x.prev(),
-                .anonymous => |a| return a.v_table.prev_fn(a.ptr),
-                .empty => return null,
-            }
+                inline .concatenated, .appended => |*x| x.prev(),
+                .anonymous => |a| a.v_table.prev_fn(a.ptr),
+                .empty => null,
+            };
         }
 
         /// Reset the iterator to its first element.
@@ -505,11 +505,11 @@ pub fn Iter(comptime T: type) type {
 
         /// Produces a clone of `Iter(T)` (note that it is not reset).
         pub fn clone(self: Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
-            switch (self.variant) {
-                .slice => |s| {
-                    // if we have an allocator saved on the struct, we know we own the slice
-                    if (s.allocator) |_| {
-                        return Iter(T){
+            return switch (self.variant) {
+                .slice => |s|
+                // zig fmt: off
+                    if (s.allocator) |_| // if we have an allocator saved on the struct, we know we own the slice
+                        Iter(T){
                             .variant = Variant(T){
                                 .slice = SliceIterable(T){
                                     .elements = try allocator.dupe(T, s.elements),
@@ -519,20 +519,19 @@ pub fn Iter(comptime T: type) type {
                                     // intentionally don't copy `on_deinit` since we're assuming that must be called only once
                                 },
                             },
-                        };
-                    }
-                    return self;
-                },
-                .multi_arr_list => return if (Variant(T).multiArrListAllowed()) self else unreachable, // does not own the MultiArrayList
-                inline .concatenated, .appended => |x| return try x.clone(allocator),
-                .anonymous => |a| {
-                    if (a.v_table.clone_fn) |exec_clone| {
-                        return try exec_clone(a.ptr, allocator);
-                    }
-                    return self;
-                },
-                .empty => return self,
-            }
+                        }
+                    else self,
+                // zig fmt: on
+                .multi_arr_list => if (Variant(T).multiArrListAllowed()) self else unreachable, // does not own the MultiArrayList
+                inline .concatenated, .appended => |x| try x.clone(allocator),
+                .anonymous => |a|
+                // zig fmt: off
+                    if (a.v_table.clone_fn) |exec_clone|
+                        try exec_clone(a.ptr, allocator)
+                    else self,
+                // zig fmt: on
+                .empty => self,
+            };
         }
 
         /// Creates a clone that is then reset. Does not reset the original iterator.
@@ -546,17 +545,16 @@ pub fn Iter(comptime T: type) type {
         /// NOTE : This length is strictly a maximum. If the iterator has indexing, then the actual length will equal the number of elements returned by `next()`.
         /// However, on concatenated or filtered iterators, the length becomes obscured, and only a maximum can be estimated.
         pub fn len(self: Iter(T)) usize {
-            switch (self.variant) {
-                .slice => |s| return s.elements.len,
-                .multi_arr_list => |m| {
-                    if (Variant(T).multiArrListAllowed()) {
-                        return m.list.len;
-                    } else unreachable;
-                },
-                inline .concatenated, .appended => |x| return x.len(),
-                .anonymous => |a| return a.v_table.len_fn(a.ptr),
-                .empty => return 0,
-            }
+            return switch (self.variant) {
+                .slice => |s| s.elements.len,
+                .multi_arr_list => |m| if (Variant(T).multiArrListAllowed())
+                    m.list.len
+                else
+                    unreachable,
+                inline .concatenated, .appended => |x| x.len(),
+                .anonymous => |a| a.v_table.len_fn(a.ptr),
+                .empty => 0,
+            };
         }
 
         /// Free whatever resources may be owned by the iter.
