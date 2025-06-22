@@ -925,7 +925,7 @@ test "take()" {
 ```
 
 ### `takeAlloc()`
-Similar to `task()`, except allocating memory rather than using a buffer.
+Similar to `take()`, except allocating memory rather than using a buffer.
 ```zig
 test "takeAlloc()" {
     const page_size: isize = 20;

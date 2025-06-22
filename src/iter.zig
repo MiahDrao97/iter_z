@@ -398,57 +398,57 @@ pub fn Iter(comptime T: type) type {
 
         /// Get the next element
         pub fn next(self: *Iter(T)) ?T {
-            return switch (self.variant) {
-                .slice => |*s| slice_blk: {
+            switch (self.variant) {
+                .slice => |*s| {
                     if (s.idx >= s.elements.len) {
-                        break :slice_blk null;
+                        return null;
                     }
                     defer s.idx += 1;
-                    break :slice_blk s.elements[s.idx];
+                    return s.elements[s.idx];
                 },
-                .multi_arr_list => |*m| multi_blk: {
+                .multi_arr_list => |*m| {
                     if (Variant(T).multiArrListAllowed()) {
                         if (m.idx >= m.list.len) {
-                            break :multi_blk null;
+                            return null;
                         }
                         defer m.idx += 1;
-                        break :multi_blk m.list.get(m.idx);
+                        return m.list.get(m.idx);
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended => |*x| x.next(),
-                .anonymous => |a| a.v_table.next_fn(a.ptr),
-                .empty => null,
-            };
+                inline .concatenated, .appended => |*x| return x.next(),
+                .anonymous => |a| return a.v_table.next_fn(a.ptr),
+                .empty => return null,
+            }
         }
 
         pub fn prev(self: *Iter(T)) ?T {
-            return switch (self.variant) {
-                .slice => |*s| slice_blk: {
+            switch (self.variant) {
+                .slice => |*s| {
                     if (s.idx == 0) {
-                        break :slice_blk null;
+                        return null;
                     } else if (s.idx > s.elements.len) {
                         s.idx = s.elements.len;
                     }
                     s.idx -|= 1;
-                    break :slice_blk s.elements[s.idx];
+                    return s.elements[s.idx];
                 },
-                .multi_arr_list => |*m| multi_blk: {
+                .multi_arr_list => |*m| {
                     if (Variant(T).multiArrListAllowed()) {
                         if (m.idx == 0) {
-                            break :multi_blk null;
+                            return null;
                         } else if (m.idx > m.list.len) {
                             m.idx = m.list.len;
                         }
                         m.idx -|= 1;
-                        break :multi_blk m.list.get(m.idx);
+                        return m.list.get(m.idx);
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended => |*x| x.prev(),
-                .anonymous => |a| a.v_table.prev_fn(a.ptr),
-                .empty => null,
-            };
+                inline .concatenated, .appended => |*x| return x.prev(),
+                .anonymous => |a| return a.v_table.prev_fn(a.ptr),
+                .empty => return null,
+            }
         }
 
         /// Reset the iterator to its first element.
@@ -1344,16 +1344,14 @@ pub inline fn autoSum(comptime T: type) AutoSumContext(T) {
 }
 
 fn AutoSumContext(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            return struct {
-                pub fn accumulate(_: @This(), a: T, b: T) T {
-                    return a +| b;
-                }
-            };
+    return switch (@typeInfo(T)) {
+        .int, .float => struct {
+            pub fn accumulate(_: @This(), a: T, b: T) T {
+                return a +| b;
+            }
         },
         else => @compileError("Cannot auto-sum non-numeric element type '" ++ @typeName(T) ++ "'."),
-    }
+    };
 }
 
 /// Generate an auto-min function, assuming elements are a numeric type (including enums).
@@ -1362,23 +1360,19 @@ pub inline fn autoMin(comptime T: type) AutoMinContext(T) {
 }
 
 fn AutoMinContext(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            return struct {
-                pub fn accumulate(_: @This(), a: T, b: T) T {
-                    return if (a < b) a else b;
-                }
-            };
+    return switch (@typeInfo(T)) {
+        .int, .float => struct {
+            pub fn accumulate(_: @This(), a: T, b: T) T {
+                return if (a < b) a else b;
+            }
         },
-        .@"enum" => {
-            return struct {
-                pub fn accumulate(_: @This(), a: T, b: T) T {
-                    return if (@intFromEnum(a) < @intFromEnum(b)) a else b;
-                }
-            };
+        .@"enum" => struct {
+            pub fn accumulate(_: @This(), a: T, b: T) T {
+                return if (@intFromEnum(a) < @intFromEnum(b)) a else b;
+            }
         },
         else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
-    }
+    };
 }
 
 /// Generate an auto-max function, assuming elements are a numeric type (including enums).
@@ -1387,23 +1381,19 @@ pub inline fn autoMax(comptime T: type) AutoMaxContext(T) {
 }
 
 fn AutoMaxContext(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            return struct {
-                pub fn accumulate(_: @This(), a: T, b: T) T {
-                    return if (a > b) a else b;
-                }
-            };
+    return switch (@typeInfo(T)) {
+        .int, .float => struct {
+            pub fn accumulate(_: @This(), a: T, b: T) T {
+                return if (a > b) a else b;
+            }
         },
-        .@"enum" => {
-            return struct {
-                pub fn accumulate(_: @This(), a: T, b: T) T {
-                    return if (@intFromEnum(a) > @intFromEnum(b)) a else b;
-                }
-            };
+        .@"enum" => struct {
+            pub fn accumulate(_: @This(), a: T, b: T) T {
+                return if (@intFromEnum(a) > @intFromEnum(b)) a else b;
+            }
         },
         else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
-    }
+    };
 }
 
 /// Generates a simple comparer for a numeric or enum type `T`.
@@ -1412,33 +1402,29 @@ pub inline fn autoCompare(comptime T: type) AutoCompareContext(T) {
 }
 
 fn AutoCompareContext(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            return struct {
-                pub fn compare(_: @This(), a: T, b: T) std.math.Order {
-                    return if (a < b)
-                        .lt
-                    else if (a > b)
-                        .gt
-                    else
-                        .eq;
-                }
-            };
+    return switch (@typeInfo(T)) {
+        .int, .float => struct {
+            pub fn compare(_: @This(), a: T, b: T) std.math.Order {
+                return if (a < b)
+                    .lt
+                else if (a > b)
+                    .gt
+                else
+                    .eq;
+            }
         },
-        .@"enum" => {
-            return struct {
-                pub fn compare(_: @This(), a: T, b: T) std.math.Order {
-                    return if (@intFromEnum(a) < @intFromEnum(b))
-                        .lt
-                    else if (@intFromEnum(a) > @intFromEnum(b))
-                        .gt
-                    else
-                        .eq;
-                }
-            };
+        .@"enum" => struct {
+            pub fn compare(_: @This(), a: T, b: T) std.math.Order {
+                return if (@intFromEnum(a) < @intFromEnum(b))
+                    .lt
+                else if (@intFromEnum(a) > @intFromEnum(b))
+                    .gt
+                else
+                    .eq;
+            }
         },
         else => @compileError("Cannot generate auto-compare context with non-numeric type '" ++ @typeName(T) ++ "'."),
-    }
+    };
 }
 
 /// Sort ascending or descending
