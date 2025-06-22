@@ -731,7 +731,7 @@ const is_even = struct {
 };
 
 const evens = iter.where(is_even{});
-_ = evens.len(); // length is 5 because this iterator is transformed from another
+_ = evens.len(); // length is still 5 because this iterator is derived from another
 _ = evens.count({}); // 2 (because that's how many there are with the `where()` filter applied)
 
 // count on original iterator
@@ -759,10 +759,10 @@ Determine if exactly 1 or 0 elements fulfill a condition or are left in the iter
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 This filter is optional, so you may pass in void literal `{}` or `null` to use no filter.
 ```zig
-var iter1: Iter(u8) = .from("1");
-_ = iter1.single({}); // '1'
+var iter1: Iter(u8) = .from("a");
+_ = iter1.single({}); // 'a'
 
-var iter2: Iter(u8) = .from("12");
+var iter2: Iter(u8) = .from("ab");
 _ = iter2.single({}); // error.MultipleElementsFound
 
 var iter3: Iter(u8) = .from("");
@@ -824,7 +824,7 @@ _ = iter.fold(u16, 0, sum{}); // 6
 ```
 
 ### `reduce()`
-Calls `fold()`, using the first element as the collector value.
+Calls `fold()`, using the first element as the initial value.
 The return type will be the same as the element type.
 If there are no elements or iteration is over, will return null.
 
@@ -833,7 +833,7 @@ If there are no elements or iteration is over, will return null.
 // written out as example; see Auto Contexts section
 const sum = struct {
     pub fn accumulate(_: @This(), a: u8, b: u8) u8 {
-        return a + b;
+        return a +| b;
     }
 };
 
