@@ -426,8 +426,8 @@ Append `self` to `other`, resulting in a new iterator that owns both `self` and 
 This means that on `deinit()`, both `self` and `other` will also be deinitialized.
 If that is undesired behavior, you may want to clone them beforehand.
 ```zig
-const iter_a: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-const iter_b: Iter(u8) = .from(&[_]u8{ 4, 5, 6 });
+var iter_a: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+var iter_b: Iter(u8) = .from(&[_]u8{ 4, 5, 6 });
 
 const allocator = @import("std").testing.allocator;
 var iter: Iter(u8) = iter_a.append(allocator, iter_b);
