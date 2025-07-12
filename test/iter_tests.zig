@@ -3,12 +3,13 @@ const iter_z = @import("iter_z");
 const util = iter_z.util;
 const testing = std.testing;
 const Iter = iter_z.Iter;
-const ContextOwnership = iter_z.ContextOwnership;
 const Allocator = std.mem.Allocator;
 const SplitIterator = std.mem.SplitIterator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const MultiArrayList = std.MultiArrayList;
+const SinglyLinkedList = std.SinglyLinkedList;
+const DoublyLinkedList = std.DoublyLinkedList;
 const autoCompare = iter_z.autoCompare;
 const autoSum = iter_z.autoSum;
 const autoMin = iter_z.autoMin;
@@ -1192,5 +1193,55 @@ test "pagination with scroll + take" {
 
         try testing.expectEqual(0, page_iter.len());
         try testing.expectEqual(null, page_iter.next());
+    }
+}
+test "from linked list" {
+    // single
+    {
+        const S = struct {
+            val: u16,
+            node: SinglyLinkedList.Node = .{},
+        };
+
+        var a: S = .{ .val = 1 };
+        var b: S = .{ .val = 2 };
+        var c: S = .{ .val = 3 };
+
+        var list: SinglyLinkedList = .{};
+        list.prepend(&a.node);
+        a.node.insertAfter(&b.node);
+        b.node.insertAfter(&c.node);
+
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .single, "node", list);
+        defer iter.deinit();
+
+        try testing.expectEqual(1, iter.next().?.val);
+        try testing.expectEqual(2, iter.next().?.val);
+        try testing.expectEqual(3, iter.next().?.val);
+        try testing.expectEqual(null, iter.next());
+    }
+    // double
+    {
+        const S = struct {
+            val: u16,
+            node: DoublyLinkedList.Node = .{},
+        };
+
+        var a: S = .{ .val = 1 };
+        var b: S = .{ .val = 2 };
+        var c: S = .{ .val = 3 };
+
+        var list: DoublyLinkedList = .{};
+        list.append(&a.node);
+        list.append(&b.node);
+        list.append(&c.node);
+
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .double, "node", list);
+        defer iter.deinit();
+
+        try testing.expectEqual(1, iter.next().?.val);
+        try testing.expectEqual(2, iter.next().?.val);
+        try testing.expectEqual(3, iter.next().?.val);
+        try testing.expectEqual(null, iter.next());
     }
 }

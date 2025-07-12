@@ -647,6 +647,28 @@ pub fn Iter(comptime T: type) type {
             unreachable;
         }
 
+        /// Create `Iter(T)` from a linked list:
+        /// Since the length of any linked list cannot be known without iterating through each node, we're simply allocating a slice to put all the nodes into.
+        /// - `allocator` to allocate the slice of all the lists elements
+        /// - `linkage` to specify if the list is singly linked or doubly linked
+        /// - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive.
+        /// - `list` is the list itself
+        pub fn fromLinkedList(
+            allocator: Allocator,
+            comptime linkage: enum { single, double },
+            comptime node_field_name: []const u8,
+            list: if (linkage == .single) SinglyLinkedList else DoublyLinkedList,
+        ) Allocator.Error!Iter(T) {
+            var elements: ArrayList(T) = .empty;
+            errdefer elements.deinit(allocator);
+            var node: if (linkage == .single) ?*SinglyLinkedList.Node else ?*DoublyLinkedList.Node = list.first;
+            while (node) |n| : (node = n.next) {
+                const item: *const T = @fieldParentPtr(node_field_name, n);
+                try elements.append(allocator, item.*);
+            }
+            return fromSliceOwned(allocator, try elements.toOwnedSlice(allocator), null);
+        }
+
         /// Concatenates several iterators into one. They'll iterate in the order they're passed in.
         ///
         /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
@@ -1577,6 +1599,7 @@ const std = @import("std");
 const root = @import("root");
 const Allocator = std.mem.Allocator;
 const MultiArrayList = std.MultiArrayList;
+const ArrayList = std.ArrayListUnmanaged;
 const Fn = std.builtin.Type.Fn;
 const assert = std.debug.assert;
 const builtin = @import("builtin");
@@ -1586,3 +1609,5 @@ const Where = @import("where.zig").Where;
 const WhereAlloc = @import("where.zig").WhereAlloc;
 pub const util = @import("util.zig");
 const ClonedIter = util.ClonedIter;
+const SinglyLinkedList = std.SinglyLinkedList;
+const DoublyLinkedList = std.DoublyLinkedList;
