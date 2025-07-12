@@ -542,8 +542,8 @@ pub fn Iter(comptime T: type) type {
 
         /// Get the length of this iterator.
         ///
-        /// NOTE : This length is strictly a maximum. If the iterator has indexing, then the actual length will equal the number of elements returned by `next()`.
-        /// However, on concatenated or filtered iterators, the length becomes obscured, and only a maximum can be estimated.
+        /// NOTE : This length is strictly a maximum.
+        /// On concatenated or filtered iterators, the length becomes obscured, and only a maximum can be estimated.
         pub fn len(self: Iter(T)) usize {
             return switch (self.variant) {
                 .slice => |s| s.elements.len,
@@ -651,7 +651,7 @@ pub fn Iter(comptime T: type) type {
         /// Since the length of any linked list cannot be known without iterating through each node, we're simply allocating a slice to put all the nodes into.
         /// - `allocator` to allocate the slice of all the lists elements
         /// - `linkage` to specify if the list is singly linked or doubly linked
-        /// - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive.
+        /// - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive
         /// - `list` is the list itself
         pub fn fromLinkedList(
             allocator: Allocator,

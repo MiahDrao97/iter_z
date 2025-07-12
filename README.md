@@ -26,6 +26,7 @@ The latest release is `v0.3.0`, which leverages Zig 0.14.1.
     - [from()](#from)
     - [fromSliceOwned()](#fromsliceowned)
     - [fromMulti()](#frommulti)
+    - [fromLinkedList()](#fromlinkedlist)
     - [fromOther()](#fromother)
     - [fromOtherBuf()](#fromotherbuf)
     - [concat()](#concat)
@@ -331,6 +332,70 @@ while (iter.next()) |s| : (expected_tag += 1) {
 expected_tag = 2;
 while (iter.prev()) |s| : (expected_tag -= 1) {
     try testing.expectEqual(expected_tag, s.tag);
+}
+```
+
+### `fromLinkedList()`
+Instantiate an iterator from a linked list (singly or doubly linked).
+Since the length of either type of linked list cannot be determined without iterating through all the nodes, the nodes are saved into a slice that the resulting `Iter(T)` owns.
+Call `deinit()` to free.
+
+Parameters:
+- `allocator` to allocate the slice of all the lists elements
+- `linkage` to specify if the list is singly linked or doubly linked
+- `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive
+- `list` is the list itself
+
+```zig
+test "from linked list" {
+    // single
+    {
+        const S = struct {
+            val: u16,
+            node: SinglyLinkedList.Node = .{},
+        };
+
+        var a: S = .{ .val = 1 };
+        var b: S = .{ .val = 2 };
+        var c: S = .{ .val = 3 };
+
+        var list: SinglyLinkedList = .{};
+        list.prepend(&a.node);
+        a.node.insertAfter(&b.node);
+        b.node.insertAfter(&c.node);
+
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .single, "node", list);
+        defer iter.deinit();
+
+        try testing.expectEqual(1, iter.next().?.val);
+        try testing.expectEqual(2, iter.next().?.val);
+        try testing.expectEqual(3, iter.next().?.val);
+        try testing.expectEqual(null, iter.next());
+    }
+    // double
+    {
+        const S = struct {
+            val: u16,
+            node: DoublyLinkedList.Node = .{},
+        };
+
+        var a: S = .{ .val = 1 };
+        var b: S = .{ .val = 2 };
+        var c: S = .{ .val = 3 };
+
+        var list: DoublyLinkedList = .{};
+        list.append(&a.node);
+        list.append(&b.node);
+        list.append(&c.node);
+
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .double, "node", list);
+        defer iter.deinit();
+
+        try testing.expectEqual(1, iter.next().?.val);
+        try testing.expectEqual(2, iter.next().?.val);
+        try testing.expectEqual(3, iter.next().?.val);
+        try testing.expectEqual(null, iter.next());
+    }
 }
 ```
 
