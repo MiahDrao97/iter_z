@@ -650,13 +650,13 @@ pub fn Iter(comptime T: type) type {
         /// Create `Iter(T)` from a linked list:
         /// Since the length of any linked list cannot be known without iterating through each node, we're simply allocating a slice to put all the nodes into.
         /// - `allocator` to allocate the slice of all the lists elements
-        /// - `linkage` to specify if the list is singly linked or doubly linked
         /// - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive
+        /// - `linkage` to specify if the list is singly linked or doubly linked
         /// - `list` is the list itself
         pub fn fromLinkedList(
             allocator: Allocator,
-            comptime linkage: enum { single, double },
             comptime node_field_name: []const u8,
+            comptime linkage: enum { single, double },
             list: if (linkage == .single) SinglyLinkedList else DoublyLinkedList,
         ) Allocator.Error!Iter(T) {
             var elements: ArrayList(T) = .empty;

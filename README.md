@@ -342,8 +342,8 @@ Call `deinit()` to free.
 
 Parameters:
 - `allocator` to allocate the slice of all the lists elements
-- `linkage` to specify if the list is singly linked or doubly linked
 - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive
+- `linkage` to specify if the list is singly linked or doubly linked
 - `list` is the list itself
 
 ```zig
@@ -364,7 +364,7 @@ test "from linked list" {
         a.node.insertAfter(&b.node);
         b.node.insertAfter(&c.node);
 
-        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .single, "node", list);
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .single, list);
         defer iter.deinit();
 
         try testing.expectEqual(1, iter.next().?.val);
@@ -388,7 +388,7 @@ test "from linked list" {
         list.append(&b.node);
         list.append(&c.node);
 
-        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .double, "node", list);
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .double, list);
         defer iter.deinit();
 
         try testing.expectEqual(1, iter.next().?.val);

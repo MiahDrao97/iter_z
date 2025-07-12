@@ -1212,7 +1212,7 @@ test "from linked list" {
         a.node.insertAfter(&b.node);
         b.node.insertAfter(&c.node);
 
-        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .single, "node", list);
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .single, list);
         defer iter.deinit();
 
         try testing.expectEqual(1, iter.next().?.val);
@@ -1236,7 +1236,7 @@ test "from linked list" {
         list.append(&b.node);
         list.append(&c.node);
 
-        var iter: Iter(S) = try .fromLinkedList(testing.allocator, .double, "node", list);
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .double, list);
         defer iter.deinit();
 
         try testing.expectEqual(1, iter.next().?.val);
