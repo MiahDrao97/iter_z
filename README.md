@@ -338,6 +338,7 @@ while (iter.prev()) |s| : (expected_tag -= 1) {
 ### `fromLinkedList()`
 Instantiate an iterator from a linked list (singly or doubly linked).
 Since the length of either type of linked list cannot be determined without iterating through all the nodes, the nodes are saved into a slice that the resulting `Iter(T)` owns.
+Therefore, this iterator is snapshot of a given linked list. If it changes at all, the iterator will not represent that.
 Call `deinit()` to free.
 
 Parameters:

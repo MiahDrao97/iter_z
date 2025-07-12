@@ -1215,6 +1215,7 @@ test "from linked list" {
         var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .single, list);
         defer iter.deinit();
 
+        try testing.expectEqual(3, iter.len());
         try testing.expectEqual(1, iter.next().?.val);
         try testing.expectEqual(2, iter.next().?.val);
         try testing.expectEqual(3, iter.next().?.val);
@@ -1239,9 +1240,38 @@ test "from linked list" {
         var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .double, list);
         defer iter.deinit();
 
+        try testing.expectEqual(3, iter.len());
         try testing.expectEqual(1, iter.next().?.val);
         try testing.expectEqual(2, iter.next().?.val);
         try testing.expectEqual(3, iter.next().?.val);
+        try testing.expectEqual(null, iter.next());
+    }
+}
+test "empty linked lists" {
+    // single
+    {
+        const S = struct {
+            val: u16,
+            node: SinglyLinkedList.Node = .{},
+        };
+
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .single, SinglyLinkedList{});
+        defer iter.deinit();
+
+        try testing.expectEqual(0, iter.len());
+        try testing.expectEqual(null, iter.next());
+    }
+    // double
+    {
+        const S = struct {
+            val: u16,
+            node: DoublyLinkedList.Node = .{},
+        };
+
+        var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .double, DoublyLinkedList{});
+        defer iter.deinit();
+
+        try testing.expectEqual(0, iter.len());
         try testing.expectEqual(null, iter.next());
     }
 }

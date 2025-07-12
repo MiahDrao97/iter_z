@@ -649,6 +649,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Create `Iter(T)` from a linked list:
         /// Since the length of any linked list cannot be known without iterating through each node, we're simply allocating a slice to put all the nodes into.
+        /// Be sure to call `deinit()` to free the underlying slice.
         /// - `allocator` to allocate the slice of all the lists elements
         /// - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive
         /// - `linkage` to specify if the list is singly linked or doubly linked
