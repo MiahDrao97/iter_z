@@ -1,8 +1,8 @@
 .{
     .fingerprint = 0x4415db88c6a4829c,
     .name = .iter_z,
-    .version = "0.3.0",
+    .version = "0.3.1-alpha",
     .dependencies = .{},
     .paths = .{""},
-    .minimum_zig_version = "0.14.1",
+    .minimum_zig_version = "0.15.0-dev.936+fc2c1883b",
 }
