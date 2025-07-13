@@ -11,12 +11,17 @@ pub fn build(b: *Build) void {
         .root_source_file = b.path("src/iter.zig"),
         .error_tracing = true,
     });
-
     {
-        const iter_test: *Build.Step.Compile = b.addTest(.{
-            .root_module = iter_module,
+        const test_module: *Build.Module = b.addModule("iter_tests", .{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("test/iter_tests.zig"),
+            .imports = &.{
+                Build.Module.Import{ .name = "iter_z", .module = iter_module },
+            },
         });
-        iter_test.root_module.addImport("iter_z", iter_module);
+
+        const iter_test: *Build.Step.Compile = b.addTest(.{ .root_module = test_module });
 
         const run_test: *Build.Step.Run = b.addRunArtifact(iter_test);
         run_test.has_side_effects = true;
