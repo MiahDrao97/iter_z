@@ -99,7 +99,7 @@ test "select" {
             defer this.allocator.free(actual);
 
             testing.expectEqualStrings(actual, expected) catch |err| {
-                std.debug.print("Test failed: {s} -> {?}", .{ @errorName(err), @errorReturnTrace() });
+                std.debug.print("Test failed: {s} -> {?any}", .{ @errorName(err), @errorReturnTrace() });
                 return err;
             };
         }

@@ -93,18 +93,27 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "my awesome app",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
+    // get your iter_z module
     const iter_z = b.dependency("iter_z", .{
         .target = target,
         .optimize = optimize,
     }).module("iter_z");
-    exe.root_module.addImport("iter_z", iter_z);
+
+    // your app's main module (assuming simple executable in this example)
+    const mod = b.addModule("mod_name", .{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            // add your import
+            std.Build.Module.Import{ .name = "iter_z", .module = iter_z },
+        },
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "my awesome app",
+        .root_module = mod,
+    });
 
     // rest of your build def
 }
