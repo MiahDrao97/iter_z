@@ -68,15 +68,14 @@ The latest release is `v0.3.0`, which leverages Zig 0.14.1.
 In your build.zig.zon, add the following dependency:
 ```zig
 .{
+    // omitting other fields such as paths, version, fingerprint, etc.
     .name = .my_awesome_app,
-    .version = "0.0.0",
     .dependencies = .{
         .iter_z = .{
             .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz",
             .hash = "", // get hash
         },
     },
-    .paths = .{""},
 }
 ```
 
@@ -111,7 +110,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "my awesome app",
+        .name = "my_awesome_app",
         .root_module = mod,
     });
 
