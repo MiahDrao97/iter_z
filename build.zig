@@ -9,14 +9,12 @@ pub fn build(b: *Build) void {
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("src/iter.zig"),
+        .error_tracing = true,
     });
 
     {
         const iter_test: *Build.Step.Compile = b.addTest(.{
-            .root_source_file = b.path("test/iter_tests.zig"),
-            .target = target,
-            .optimize = optimize,
-            .error_tracing = true,
+            .root_module = iter_module,
         });
         iter_test.root_module.addImport("iter_z", iter_module);
 
