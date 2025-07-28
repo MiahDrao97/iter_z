@@ -23,24 +23,6 @@ pub fn Select(
             return null;
         }
 
-        fn implPrev(impl: *anyopaque) ?TOther {
-            const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            if (ptr.prev()) |x| {
-                return context.transform(x);
-            }
-            return null;
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            _ = ptr.scroll(offset);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return ptr.len();
-        }
-
         fn implReset(impl: *anyopaque) void {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
             _ = ptr.reset();
@@ -52,9 +34,6 @@ pub fn Select(
                 .ptr = try ClonedIter(T).new(allocator, ptr.*),
                 .v_table = &VTable(TOther){
                     .next_fn = &implNextAsClone,
-                    .prev_fn = &implPrevAsClone,
-                    .scroll_fn = &implScrollAsClone,
-                    .len_fn = &implLenAsClone,
                     .reset_fn = &implResetAsClone,
                     .clone_fn = &implCloneAsClone,
                     .deinit_fn = &implDeinitAsClone,
@@ -70,24 +49,6 @@ pub fn Select(
             return null;
         }
 
-        fn implPrevAsClone(impl: *anyopaque) ?TOther {
-            const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            if (ptr.iter.prev()) |x| {
-                return context.transform(x);
-            }
-            return null;
-        }
-
-        fn implScrollAsClone(impl: *anyopaque, offset: isize) void {
-            const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            _ = ptr.iter.scroll(offset);
-        }
-
-        fn implLenAsClone(impl: *anyopaque) usize {
-            const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            return ptr.iter.len();
-        }
-
         fn implResetAsClone(impl: *anyopaque) void {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
             _ = ptr.iter.reset();
@@ -99,9 +60,6 @@ pub fn Select(
                 .ptr = try ptr.clone(allocator),
                 .v_table = &VTable(TOther){
                     .next_fn = &implNextAsClone,
-                    .prev_fn = &implPrevAsClone,
-                    .scroll_fn = &implScrollAsClone,
-                    .len_fn = &implLenAsClone,
                     .reset_fn = &implResetAsClone,
                     .clone_fn = &implCloneAsClone,
                     .deinit_fn = &implDeinitAsClone,
@@ -119,9 +77,6 @@ pub fn Select(
                 .ptr = self.inner,
                 .v_table = &VTable(TOther){
                     .next_fn = &implNext,
-                    .prev_fn = &implPrev,
-                    .scroll_fn = &implScroll,
-                    .len_fn = &implLen,
                     .reset_fn = &implReset,
                     .clone_fn = &implClone,
                 },

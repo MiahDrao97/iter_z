@@ -22,26 +22,6 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
             return null;
         }
 
-        fn implPrev(impl: *anyopaque) ?T {
-            const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            while (ptr.prev()) |x| {
-                if (context.filter(x)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            _ = ptr.scroll(offset);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
-            return ptr.len();
-        }
-
         fn implReset(impl: *anyopaque) void {
             const ptr: *Iter(T) = @ptrCast(@alignCast(impl));
             _ = ptr.reset();
@@ -53,9 +33,6 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
                 .ptr = try ClonedIter(T).new(allocator, ptr.*),
                 .v_table = &VTable(T){
                     .next_fn = &implNextAsClone,
-                    .prev_fn = &implPrevAsClone,
-                    .scroll_fn = &implScrollAsClone,
-                    .len_fn = &implLenAsClone,
                     .reset_fn = &implResetAsClone,
                     .clone_fn = &implCloneAsClone,
                     .deinit_fn = &implDeinitAsClone,
@@ -73,26 +50,6 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
             return null;
         }
 
-        fn implPrevAsClone(impl: *anyopaque) ?T {
-            const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            while (ptr.iter.prev()) |x| {
-                if (context.filter(x)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implScrollAsClone(impl: *anyopaque, offset: isize) void {
-            const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            _ = ptr.iter.scroll(offset);
-        }
-
-        fn implLenAsClone(impl: *anyopaque) usize {
-            const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
-            return ptr.iter.len();
-        }
-
         fn implResetAsClone(impl: *anyopaque) void {
             const ptr: *ClonedIter(T) = @ptrCast(@alignCast(impl));
             _ = ptr.iter.reset();
@@ -104,9 +61,6 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
                 .ptr = try ptr.clone(allocator),
                 .v_table = &VTable(T){
                     .next_fn = &implNextAsClone,
-                    .prev_fn = &implPrevAsClone,
-                    .scroll_fn = &implScrollAsClone,
-                    .len_fn = &implLenAsClone,
                     .reset_fn = &implResetAsClone,
                     .clone_fn = &implCloneAsClone,
                     .deinit_fn = &implDeinitAsClone,
@@ -124,9 +78,6 @@ pub fn Where(comptime T: type, comptime TContext: type) type {
                 .ptr = self.inner,
                 .v_table = &VTable(T){
                     .next_fn = &implNext,
-                    .prev_fn = &implPrev,
-                    .scroll_fn = &implScroll,
-                    .len_fn = &implLen,
                     .reset_fn = &implReset,
                     .clone_fn = &implClone,
                 },
@@ -165,26 +116,6 @@ pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
             return null;
         }
 
-        fn implPrev(impl: *anyopaque) ?T {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            while (self.inner.prev()) |x| {
-                if (self.context.filter(x)) {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            _ = self.inner.scroll(offset);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            return self.inner.len();
-        }
-
         fn implReset(impl: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(impl));
             _ = self.inner.reset();
@@ -209,10 +140,7 @@ pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
                 .ptr = cloned,
                 .v_table = &VTable(T){
                     .next_fn = &implNext,
-                    .prev_fn = &implPrev,
                     .reset_fn = &implReset,
-                    .len_fn = &implLen,
-                    .scroll_fn = &implScroll,
                     .clone_fn = &implClone,
                     .deinit_fn = &implDeinitAsClone,
                 },
@@ -236,9 +164,6 @@ pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
                 .ptr = self,
                 .v_table = &VTable(T){
                     .next_fn = &implNext,
-                    .prev_fn = &implPrev,
-                    .scroll_fn = &implScroll,
-                    .len_fn = &implLen,
                     .reset_fn = &implReset,
                     .clone_fn = &implClone,
                     .deinit_fn = &implDeinit,
