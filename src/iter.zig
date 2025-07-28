@@ -141,7 +141,7 @@ fn MultiArrayListIterable(comptime T: type) type {
     };
 }
 
-fn AppendedIterable(comptime T: type) type {
+fn MergedIterable(comptime T: type) type {
     return struct {
         iter_a: *Iter(T),
         iter_b: *Iter(T),
@@ -183,7 +183,7 @@ fn AppendedIterable(comptime T: type) type {
 
             return Iter(T){
                 .variant = Variant(T){
-                    .appended = AppendedIterable(T){
+                    .merged = MergedIterable(T){
                         .iter_a = a_clone,
                         .iter_b = b_clone,
                         .allocator = alloc,
@@ -266,7 +266,7 @@ fn ConcatIterable(comptime T: type) type {
     };
 }
 
-fn LinkedListIterable(
+pub fn LinkedListIterable(
     comptime T: type,
     comptime node_field_name: []const u8,
     comptime linkage: enum { single, double },
@@ -278,14 +278,15 @@ fn LinkedListIterable(
 
         const Self = @This();
 
-        fn init(list: LinkedList) Self {
+        pub fn init(list: LinkedList) Self {
             return .{
                 .list = list,
                 .next_node = list.first,
             };
         }
 
-        fn next(self: *Self) ?T {
+        fn implNext(impl: *anyopaque) ?T {
+            const self: *Self = @ptrCast(@alignCast(impl));
             if (self.next_node) |node| {
                 self.next_node = node.next;
                 return @as(*const T, @fieldParentPtr(node_field_name, node)).*;
@@ -293,8 +294,19 @@ fn LinkedListIterable(
             return null;
         }
 
-        fn reset(self: *Self) void {
+        fn implReset(impl: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(impl));
             self.next_node = self.list.first;
+        }
+
+        pub fn iter(self: *Self) Iter(T) {
+            return (AnonymousIterable(T){
+                .ptr = self,
+                .v_table = VTable(T){
+                    .next_fn = &implNext,
+                    .reset_fn = &implReset,
+                },
+            }).iter();
         }
     };
 }
@@ -309,7 +321,7 @@ fn Variant(comptime T: type) type {
         slice: SliceIterable(T),
         multi_arr_list: if (multi_arr_list_allowed) MultiArrayListIterable(T) else void,
         concatenated: ConcatIterable(T),
-        appended: AppendedIterable(T),
+        merged: MergedIterable(T),
         anonymous: AnonymousIterable(T),
         empty,
 
@@ -324,9 +336,17 @@ pub fn Iter(comptime T: type) type {
     return struct {
         /// Which iterator implementation we're using
         variant: Variant(T),
+        /// Almost never assigned. Not intended to be directly accessed by users.
+        /// When an error causes the iterator to drop the current result, it's saved here instead (example: `enumerateToBuffer()`).
+        _missed: ?T = null,
 
         /// Get the next element
         pub fn next(self: *Iter(T)) ?T {
+            if (self._missed) |m| {
+                self._missed = null;
+                return m;
+            }
+
             switch (self.variant) {
                 .slice => |*s| {
                     if (s.idx >= s.elements.len) {
@@ -345,7 +365,7 @@ pub fn Iter(comptime T: type) type {
                     }
                     unreachable;
                 },
-                inline .concatenated, .appended => |*x| return x.next(),
+                inline .concatenated, .merged => |*x| return x.next(),
                 .anonymous => |a| return a.v_table.next_fn(a.ptr),
                 .empty => return null,
             }
@@ -361,7 +381,7 @@ pub fn Iter(comptime T: type) type {
                         m.idx = 0;
                     } else unreachable;
                 },
-                inline .concatenated, .appended => |*x| x.reset(),
+                inline .concatenated, .merged => |*x| x.reset(),
                 .anonymous => |a| a.v_table.reset_fn(a.ptr),
                 .empty => {},
             }
@@ -388,7 +408,7 @@ pub fn Iter(comptime T: type) type {
                     else self,
                 // zig fmt: on
                 .multi_arr_list => if (Variant(T).multiArrListAllowed()) self else unreachable, // does not own the MultiArrayList
-                inline .concatenated, .appended => |x| try x.clone(allocator),
+                inline .concatenated, .merged => |x| try x.clone(allocator),
                 .anonymous => |a|
                 // zig fmt: off
                     if (a.v_table.clone_fn) |exec_clone|
@@ -421,7 +441,7 @@ pub fn Iter(comptime T: type) type {
                     }
                 },
                 .multi_arr_list => if (Variant(T).multiArrListAllowed()) {} else unreachable, // does not own the list; so another no-op
-                inline .concatenated, .appended => |*x| x.deinit(),
+                inline .concatenated, .merged => |*x| x.deinit(),
                 .anonymous => |a| {
                     if (a.v_table.deinit_fn) |exec_deinit| {
                         exec_deinit(a.ptr);
@@ -503,13 +523,14 @@ pub fn Iter(comptime T: type) type {
         /// - `linkage` to specify if the list is singly linked or doubly linked
         /// - `list` is the list itself
         pub fn fromLinkedList(
+            allocator: Allocator,
             comptime node_field_name: []const u8,
             comptime linkage: enum { single, double },
             list: if (linkage == .single) SinglyLinkedList else DoublyLinkedList,
-        ) Iter(T) {
-            const iterable: LinkedListIterable(T, node_field_name, linkage) = .init(list);
-            _ = iterable;
-            @panic("TODO");
+        ) Allocator.Error!Iter(T) {
+            const iterable = try allocator.create(LinkedListIterable(T, node_field_name, linkage));
+            iterable.* = .init(list);
+            return iterable.iter();
         }
 
         /// Concatenates several iterators into one. They'll iterate in the order they're passed in.
@@ -544,13 +565,13 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
-        /// Append `self` to `other`, resulting in a new iterator that owns both `self` and `other`.
-        /// Note that on `deinit()`, both `self` and `other` will also be deinitialized.
-        /// If that is undesired behavior, you may want to clone them beforehand.
-        pub fn append(self: *Iter(T), other: *Iter(T)) Iter(T) {
+        /// Merge `self` and `other` (in that order), resulting in a new iterator that owns both `self` and `other`.
+        /// On `deinit()`, both `self` and `other` will also be deinitialized.
+        /// If that is undesired behavior, `concat()` will keep the iterators separate.
+        pub fn merge(self: *Iter(T), other: *Iter(T)) Iter(T) {
             return .{
                 .variant = Variant(T){
-                    .appended = AppendedIterable(T){
+                    .merged = MergedIterable(T){
                         .iter_a = self,
                         .iter_b = other,
                     },
@@ -723,8 +744,8 @@ pub fn Iter(comptime T: type) type {
         pub fn enumerateToBuffer(self: *Iter(T), buf: []T) error{NoSpaceLeft}![]T {
             var i: usize = 0;
             while (self.next()) |x| : (i += 1) {
+                errdefer self._missed = x;
                 if (i >= buf.len) {
-                    // _ = self.scroll(-1); <-- How do we replicate this??
                     return error.NoSpaceLeft;
                 }
                 buf[i] = x;
@@ -738,23 +759,14 @@ pub fn Iter(comptime T: type) type {
         ///
         /// Caller owns the resulting slice.
         pub fn enumerateToOwnedSlice(self: *Iter(T), allocator: Allocator) Allocator.Error![]T {
-            const buf: []T = try allocator.alloc(T, 16); // TODO : Use ArrayList(T)
+            var list: ArrayList(T) = try .initCapacity(allocator, 16);
+            errdefer list.deinit(allocator);
 
-            var i: usize = 0;
-            while (self.next()) |x| : (i += 1) {
-                buf[i] = x;
+            while (self.next()) |x| {
+                errdefer self._missed = x;
+                try list.append(x);
             }
-            // just the right size: return our buffer
-            if (i == buf.len) {
-                return buf;
-            }
-            // try to resize first
-            if (allocator.resize(buf, i)) {
-                return buf;
-            }
-            defer allocator.free(buf);
-            // pair buf down to final slice
-            return try allocator.dupe(T, buf[0..i]);
+            return try list.toOwnedSlice(allocator);
         }
 
         /// Enumerates into new sorted slice. This uses an unstable sorting algorithm.
@@ -1028,28 +1040,12 @@ pub fn Iter(comptime T: type) type {
             return self.fold(T, init, accumulate_context);
         }
 
-        /// Reverse the direction of the iterator.
-        ///
-        /// WARN : The reversed iterator points to the original, so they move together.
-        /// If that is undesired behavior, create a clone and reverse that instead or call `reverseCloneReset()`
-        pub fn reverse(self: *Iter(T)) Iter(T) {
-            _ = self;
-            @panic("TODO");
-        }
-
-        /// Reverse an iterator and reset (set to the end of its iteration and reversed its direction).
-        /// NOTE : Moving this iterator modifies the original, unlike `cloneReset()`.
-        /// If you wish to have two independent iterators, use `reverseCloneReset()`.
-        pub fn reverseReset(self: *Iter(T)) Iter(T) {
-            var reversed: Iter(T) = self.reverse();
-            return reversed.reset().*;
-        }
-
-        /// Reverse an iterator, clone it, and reset the clone.
-        /// This keeps the reversed iterator independent of the orignal.
-        pub fn reverseCloneReset(self: *Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
-            var reversed: Iter(T) = self.reverse();
-            return try reversed.cloneReset(allocator);
+        /// Enumerates all the items into a slice and reverses it.
+        /// Resulting iterator owns the slice, so be sure to call `deinit()`.
+        pub fn reverse(self: *Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
+            const items: []T = try self.enumerateToOwnedSlice(allocator);
+            std.mem.reverse(items);
+            return fromSliceOwned(items);
         }
     };
 }
