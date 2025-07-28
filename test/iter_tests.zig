@@ -69,8 +69,6 @@ fn strCompare(_: void, a: []const u8, b: []const u8) std.math.Order {
 test "from" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 
-    try testing.expectEqual(null, iter.prev());
-
     var i: usize = 0;
     while (iter.next()) |x| {
         i += 1;
@@ -78,10 +76,6 @@ test "from" {
     }
 
     try testing.expect(i == 3);
-
-    while (iter.prev()) |x| : (i -= 1) {
-        try testing.expect(i == x);
-    }
 }
 test "select" {
     const Context = struct {
@@ -122,8 +116,6 @@ test "select" {
     var inner: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var iter: Iter(Allocator.Error![]u8) = inner.select(Allocator.Error![]u8, num_to_str_alloc{});
 
-    try testing.expect(iter.len() == 3);
-
     var ctx: Context = .{ .allocator = testing.allocator };
     iter.forEach(&ctx, Context.action, .{ .exec_on_err = Context.onErr });
 
@@ -145,9 +137,6 @@ test "cloneReset" {
     }
 
     try testing.expectEqual(2, iter.next());
-
-    // previous should be 3 (because we hit the end of the iteration, so that puts us at null)
-    try testing.expectEqual(3, clone.prev());
 }
 test "where" {
     const ctx = struct {
@@ -194,13 +183,10 @@ test "enumerateToOwnedSlice" {
         var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
         var iter: Iter(u8) = inner.where(is_even{});
 
-        try testing.expect(iter.len() == 3);
-
         var i: usize = 0;
         while (iter.next()) |x| : (i += 1) {
             try testing.expect(x == 2);
         }
-
         try testing.expect(i == 1);
 
         const slice: []u8 = try iter.reset().enumerateToOwnedSlice(testing.allocator);
@@ -219,24 +205,17 @@ test "enumerateToOwnedSlice" {
 }
 test "empty" {
     var iter: Iter(u8) = .empty;
-
-    try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
 
     var next_iter = iter.where(is_even{});
-
-    try testing.expect(next_iter.len() == 0);
     try testing.expect(next_iter.next() == null);
 
     var next_empty: Iter(u8) = .empty;
-
-    try testing.expect(next_empty.len() == 0);
     try testing.expect(next_empty.next() == null);
 
     var next_empty_2 = try iter.cloneReset(testing.allocator);
     defer next_empty_2.deinit();
 
-    try testing.expect(next_empty_2.len() == 0);
     try testing.expect(next_empty_2.next() == null);
 }
 test "concat" {
@@ -248,19 +227,14 @@ test "concat" {
         };
         var iter: Iter(u8) = .concat(&chain);
 
-        try testing.expectEqual(9, iter.len());
-
         var i: usize = 0;
         while (iter.next()) |x| {
             i += 1;
             try testing.expect(x == i);
         }
-
         try testing.expectEqual(9, i);
 
         var new_iter: Iter(u8) = iter.reset().where(is_even{});
-
-        try testing.expectEqual(9, new_iter.len());
 
         i = 0;
         while (new_iter.next()) |x| {
@@ -268,46 +242,30 @@ test "concat" {
             // should only be the evens
             try testing.expectEqual(i * 2, x);
         }
-
         try testing.expect(i == 4);
-
-        while (new_iter.prev()) |x| : (i -= 1) {
-            // again, should only be the events
-            try testing.expectEqual(i * 2, x);
-        }
     }
     {
         const other: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
         var chain = [_]Iter(u8){ other, .empty };
         var iter: Iter(u8) = .concat(&chain);
 
-        try testing.expect(iter.len() == 3);
-
         var i: usize = 0;
         while (iter.next()) |x| {
             i += 1;
             try testing.expect(x == i);
         }
-
         try testing.expect(i == 3);
 
         // need to reset before concating...
         var chain2 = [_]Iter(u8){ iter.reset().*, .empty };
         var iter2: Iter(u8) = .concat(&chain2);
 
-        try testing.expect(iter2.len() == 3);
-
         i = 0;
         while (iter2.next()) |x| {
             i += 1;
             try testing.expect(x == i);
         }
-
         try testing.expect(i == 3);
-
-        while (iter2.prev()) |x| : (i -= 1) {
-            try testing.expect(x == i);
-        }
     }
 }
 // edge cases
@@ -315,14 +273,13 @@ test "concat empty to empty" {
     var chain = [_]Iter(u8){ .empty, .empty };
     var iter: Iter(u8) = .concat(&chain);
 
-    try testing.expect(iter.len() == 0);
     try testing.expect(iter.next() == null);
-    try testing.expect(iter.prev() == null);
 }
 test "double deinit" {
     var iter: Iter(u8) = .from("blarf");
-    defer iter.deinit();
+    defer iter.deinit(); // triple it for good measure
 
+    iter.deinit();
     // whoopsie, did it twice
     iter.deinit();
     const next: ?u8 = iter.next();
@@ -340,7 +297,6 @@ test "orderBy" {
         i += 1;
         try testing.expectEqual(i, x);
     }
-
     try testing.expect(i == 7);
 
     var inner2: Iter(u8) = .from(&nums);
@@ -350,7 +306,6 @@ test "orderBy" {
     while (iter2.next()) |x| : (i -= 1) {
         try testing.expectEqual(i, x);
     }
-
     try testing.expect(i == 0);
 }
 test "any" {
@@ -382,28 +337,28 @@ test "single" {
         }
     };
 
-    try testing.expectError(error.MultipleElementsFound, iter.single(HasChar{ .char = 'r' }));
+    try testing.expectError(error.MultipleElementsFound, iter.reset().single(HasChar{ .char = 'r' }));
 
-    var result: ?u8 = try iter.single(HasChar{ .char = 'e' });
+    var result: ?u8 = try iter.reset().single(HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    result = try iter.single(HasChar{ .char = 'x' });
+    result = try iter.reset().single(HasChar{ .char = 'x' });
     try testing.expect(result == null);
 
-    result = try iter.single(HasChar{ .char = 'e' });
+    result = try iter.reset().single(HasChar{ .char = 'e' });
     try testing.expect(result.? == 'e');
 
-    try testing.expectEqual(null, try iter.single(HasChar{ .char = 'x' }));
-    try testing.expectError(error.MultipleElementsFound, iter.single(HasChar{ .char = 'r' }));
-    try testing.expectError(error.MultipleElementsFound, iter.single({}));
+    try testing.expectEqual(null, try iter.reset().single(HasChar{ .char = 'x' }));
+    try testing.expectError(error.MultipleElementsFound, iter.reset().single(HasChar{ .char = 'r' }));
+    try testing.expectError(error.MultipleElementsFound, iter.reset().single({}));
 
     iter.deinit();
     iter = .from("");
-    try testing.expectEqual(null, try iter.single({}));
+    try testing.expectEqual(null, try iter.reset().single({}));
 
     iter.deinit();
     iter = .from("x");
-    try testing.expectEqual('x', try iter.single({}));
+    try testing.expectEqual('x', try iter.reset().single({}));
 }
 test "clone" {
     var iter: Iter(u8) = .from("asdf");
@@ -617,8 +572,6 @@ test "owned slice iterator" {
     var iter: Iter(u8) = .fromSliceOwned(testing.allocator, slice, null);
     defer iter.deinit();
 
-    try testing.expectEqual(6, iter.len());
-
     var expected: u8 = 1;
     while (iter.next()) |x| {
         defer expected += 1;
@@ -633,7 +586,6 @@ test "owned slice iterator" {
         defer expected += 1;
         try testing.expectEqual(expected, x);
     }
-
     try testing.expectEqual(7, expected);
 }
 test "owned slice iterator w/ args" {
@@ -672,14 +624,10 @@ test "owned slice iterator w/ args" {
     try testing.expectEqualStrings("asdf", iter.next().?);
     try testing.expectEqual(null, iter.next());
 
-    try testing.expectEqualStrings("asdf", iter.prev().?);
-    try testing.expectEqualStrings("blarf", iter.prev().?);
-    try testing.expectEqual(null, iter.prev());
-
     var clone: Iter([]const u8) = try iter.cloneReset(allocator);
     defer clone.deinit();
 
-    _ = iter.scroll(1);
+    _ = iter.skip(1);
 
     // make sure the clone is independent
     try testing.expectEqualStrings("blarf", clone.next().?);
@@ -693,10 +641,8 @@ test "from other" {
     const str = "this,is,a,string,to,split";
     var split_iter: SplitIterator(u8, .any) = std.mem.splitAny(u8, str, ",");
 
-    var iter: Iter([]const u8) = try .fromOther(testing.allocator, &split_iter, split_iter.buffer.len);
+    var iter: Iter([]const u8) = try .fromOther(testing.allocator, &split_iter);
     defer iter.deinit();
-
-    try testing.expectEqual(6, iter.len());
 
     var result: ?[]const u8 = iter.next();
     try testing.expectEqualStrings("this", result.?);
@@ -720,8 +666,8 @@ test "from other" {
     try testing.expect(result == null);
 
     try testing.expect(iter.reset().contains("a", compareContext([]const u8, {}, strCompare)));
-    try testing.expect(!iter.contains("blarf", compareContext([]const u8, {}, strCompare)));
-    try testing.expect(iter.contains("this", compareContext([]const u8, {}, strCompare)));
+    try testing.expect(!iter.reset().contains("blarf", compareContext([]const u8, {}, strCompare)));
+    try testing.expect(iter.reset().contains("this", compareContext([]const u8, {}, strCompare)));
 
     const StrLength = struct {
         len: usize,
@@ -740,23 +686,25 @@ test "from other" {
         }
     };
 
-    try testing.expectEqual(1, iter.count(StrLength{ .len = 1 }));
-    try testing.expectEqual(2, iter.count(StrLength{ .len = 2 }));
-    try testing.expectEqual(6, iter.count({}));
+    try testing.expectEqual(1, iter.reset().count(StrLength{ .len = 1 }));
+    try testing.expectEqual(2, iter.reset().count(StrLength{ .len = 2 }));
+    try testing.expectEqual(6, iter.reset().count({}));
 
-    try testing.expect(iter.all(HasNoChar{ .char = ',' }));
-    try testing.expect(!iter.all(StrLength{ .len = 1 }));
-    try testing.expect(!iter.all(StrLength{ .len = 2 }));
+    try testing.expect(iter.reset().all(HasNoChar{ .char = ',' }));
+    try testing.expect(!iter.reset().all(StrLength{ .len = 1 }));
+    try testing.expect(!iter.reset().all(StrLength{ .len = 2 }));
 
-    try testing.expectEqualStrings("split", iter.scroll(@bitCast(iter.len())).prev().?);
-    try testing.expectEqualStrings("to", iter.prev().?);
-    try testing.expectEqualStrings("string", iter.prev().?);
-    try testing.expectEqualStrings("a", iter.prev().?);
-    try testing.expectEqualStrings("is", iter.prev().?);
-    try testing.expectEqualStrings("this", iter.prev().?);
-    try testing.expectEqual(null, iter.prev());
+    var reversed: Iter([]const u8) = try iter.reverse(testing.allocator);
+    defer reversed.deinit();
+    try testing.expectEqualStrings("split", reversed.next().?);
+    try testing.expectEqualStrings("to", reversed.next().?);
+    try testing.expectEqualStrings("string", reversed.next().?);
+    try testing.expectEqualStrings("a", reversed.next().?);
+    try testing.expectEqualStrings("is", reversed.next().?);
+    try testing.expectEqualStrings("this", reversed.next().?);
+    try testing.expectEqual(null, reversed.next());
 }
-test "from other - scroll first" {
+test "from other - skip first" {
     const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
     {
         var dictionary: HashMap = .empty;
@@ -767,10 +715,41 @@ test "from other - scroll first" {
         try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
         var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count());
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter);
         defer iter.deinit();
 
-        try testing.expectEqual(3, iter.scroll(2).next().?.value_ptr.*);
+        try testing.expectEqual(3, iter.skip(2).next().?.value_ptr.*);
+        try testing.expectEqual(1, iter.reset().next().?.value_ptr.*);
+        try testing.expectEqual(2, iter.next().?.value_ptr.*);
+        try testing.expectEqual(3, iter.next().?.value_ptr.*);
+        try testing.expectEqual(null, iter.next());
+    }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        const dict_iter: HashMap.Iterator = dictionary.iterator();
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, dict_iter); // pass in a value (not the pointer)
+        defer iter.deinit();
+
+        try testing.expectEqual(null, iter.skip(5).next());
+    }
+    {
+        var dictionary: HashMap = .empty;
+        defer dictionary.deinit(testing.allocator);
+
+        try dictionary.put(testing.allocator, "blarf", 1);
+        try dictionary.put(testing.allocator, "asdf", 2);
+        try dictionary.put(testing.allocator, "ohmylawdy", 3);
+
+        var dict_iter: HashMap.Iterator = dictionary.iterator();
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter);
+        defer iter.deinit();
+
         try testing.expectEqual(1, iter.reset().next().?.value_ptr.*);
         try testing.expectEqual(2, iter.next().?.value_ptr.*);
         try testing.expectEqual(3, iter.next().?.value_ptr.*);
@@ -785,81 +764,16 @@ test "from other - scroll first" {
         try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
         var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count());
-        defer iter.deinit();
-
-        try testing.expectEqual(null, iter.scroll(5).next());
-    }
-    {
-        var dictionary: HashMap = .empty;
-        defer dictionary.deinit(testing.allocator);
-
-        try dictionary.put(testing.allocator, "blarf", 1);
-        try dictionary.put(testing.allocator, "asdf", 2);
-        try dictionary.put(testing.allocator, "ohmylawdy", 3);
-
-        var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count());
-        defer iter.deinit();
-
-        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
-    }
-    {
-        var dictionary: HashMap = .empty;
-        defer dictionary.deinit(testing.allocator);
-
-        try dictionary.put(testing.allocator, "blarf", 1);
-        try dictionary.put(testing.allocator, "asdf", 2);
-        try dictionary.put(testing.allocator, "ohmylawdy", 3);
-
-        var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter, dictionary.count());
+        var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter);
         defer iter.deinit();
 
         // since we capped off the length at 3, we shouldn't see this fourth value
         try dictionary.put(testing.allocator, "neverseethis", 4);
 
-        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
-        try testing.expectEqual(3, iter.next().?.value_ptr.*); // value repeats, which is expected
+        try testing.expectEqual(1, iter.reset().next().?.value_ptr.*);
+        try testing.expectEqual(2, iter.next().?.value_ptr.*);
+        try testing.expectEqual(3, iter.next().?.value_ptr.*);
         try testing.expectEqual(null, iter.next());
-    }
-}
-test "from other buf" {
-    const HashMap = std.StringArrayHashMapUnmanaged(u32); // needs to be array hashmap so that ordering is retained
-    {
-        var dictionary: HashMap = .empty;
-        defer dictionary.deinit(testing.allocator);
-
-        try dictionary.put(testing.allocator, "blarf", 1);
-        try dictionary.put(testing.allocator, "asdf", 2);
-        try dictionary.put(testing.allocator, "ohmylawdy", 3);
-
-        var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var buf: [3]HashMap.Entry = undefined;
-        var iter: Iter(HashMap.Entry) = .fromOtherBuf(&buf, &dict_iter);
-        // no deinit() call necessary
-
-        try testing.expectEqual(3, iter.scroll(5).prev().?.value_ptr.*);
-
-        var clone: Iter(HashMap.Entry) = try iter.cloneReset(testing.allocator);
-        defer clone.deinit();
-
-        try testing.expectEqual(1, clone.next().?.value_ptr.*);
-    }
-    {
-        var dictionary: HashMap = .empty;
-        defer dictionary.deinit(testing.allocator);
-
-        try dictionary.put(testing.allocator, "blarf", 1);
-        try dictionary.put(testing.allocator, "asdf", 2);
-        try dictionary.put(testing.allocator, "ohmylawdy", 3);
-
-        var dict_iter: HashMap.Iterator = dictionary.iterator();
-        var buf: [3]HashMap.Entry = undefined;
-        var iter: Iter(HashMap.Entry) = .fromOtherBuf(&buf, &dict_iter);
-
-        var reversed: Iter(HashMap.Entry) = iter.reverseReset();
-        try testing.expectEqual(3, reversed.next().?.value_ptr.*);
     }
 }
 test "concat owned" {
@@ -871,21 +785,14 @@ test "concat owned" {
     var iter: Iter(u8) = .concatOwned(testing.allocator, chain);
     defer iter.deinit();
 
-    try testing.expectEqual(9, iter.len());
-
     var i: u8 = 0;
     while (iter.next()) |x| {
         i += 1;
         try testing.expectEqual(i, x);
     }
     try testing.expectEqual(9, i);
-
-    while (iter.prev()) |x| {
-        defer i -= 1;
-        try testing.expectEqual(i, x);
-    }
 }
-test "append" {
+test "merge" {
     var iter: Iter(u8) = .from(&try util.range(u8, 1, 4));
 
     var result: ?u8 = iter.next();
@@ -896,27 +803,21 @@ test "append" {
 
     // we interrupt this iteration to abruptly append it to another
     var iter_2: Iter(u8) = .from(&try util.range(u8, 5, 4));
-    var appended: Iter(u8) = iter.append(&iter_2);
-
-    try testing.expectEqual(8, appended.len());
+    var merged: Iter(u8) = iter.merge(&iter_2);
 
     // pick up where we left off
     var i: u8 = 2;
-    while (appended.next()) |x| {
+    while (merged.next()) |x| {
         i += 1;
         try testing.expectEqual(i, x);
     }
     try testing.expectEqual(8, i);
 
-    while (appended.prev()) |y| : (i -= 1) {
-        try testing.expectEqual(i, y);
-    }
-
-    var clone: Iter(u8) = try appended.clone(testing.allocator);
+    var clone: Iter(u8) = try merged.clone(testing.allocator);
     defer clone.deinit();
 
     try testing.expectEqual(1, clone.next().?);
-    try testing.expectEqual(1, appended.next().?);
+    try testing.expectEqual(1, merged.next().?);
 }
 test "enumerate to buffer" {
     {
@@ -1014,81 +915,13 @@ test "reduce auto max" {
 }
 test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var reversed: Iter(u8) = iter.reverse();
+    var reversed: Iter(u8) = try iter.reverse(testing.allocator);
+    defer reversed.deinit();
     try testing.expectEqual(null, reversed.next());
 
-    var double_reversed = reversed.reverse();
-    try testing.expectEqual(1, double_reversed.next().?);
-}
-test "reverse reset" {
-    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var reversed: Iter(u8) = iter.reverseReset();
-
-    // length should be equal
-    try testing.expectEqual(3, reversed.len());
-
-    try testing.expectEqual(3, reversed.next().?);
-    try testing.expectEqual(2, reversed.next().?);
-    try testing.expectEqual(1, reversed.next().?);
-    try testing.expectEqual(null, reversed.next());
-
-    var reversed_clone = try reversed.cloneReset(testing.allocator);
-    defer reversed_clone.deinit();
-
-    try testing.expectEqual(null, reversed.next());
-    // check the clone now
-    try testing.expectEqual(3, reversed_clone.next().?);
-    try testing.expectEqual(2, reversed_clone.next().?);
-    try testing.expectEqual(1, reversed_clone.next().?);
-    try testing.expectEqual(null, reversed_clone.next());
-}
-test "reversing and clones" {
-    {
-        var iter: Iter(u8) = .from(&(util.range(u8, 1, 5) catch unreachable));
-        var reversed: Iter(u8) = try iter.reverseCloneReset(testing.allocator);
-        defer reversed.deinit();
-
-        try testing.expectEqual(1, iter.next().?);
-        try testing.expectEqual(5, reversed.next().?);
-
-        try testing.expectEqual(2, iter.next().?);
-        try testing.expectEqual(4, reversed.next().?);
-
-        try testing.expectEqual(3, iter.next().?);
-        try testing.expectEqual(3, reversed.next().?);
-
-        try testing.expectEqual(4, iter.next().?);
-        try testing.expectEqual(2, reversed.next().?);
-
-        try testing.expectEqual(5, iter.next().?);
-        try testing.expectEqual(1, reversed.next().?);
-
-        try testing.expectEqual(null, iter.next());
-        try testing.expectEqual(null, reversed.next());
-    }
-    {
-        var iter: Iter(u8) = .from(&(util.range(u8, 1, 5) catch unreachable));
-        var clone: Iter(u8) = iter.clone(undefined) catch unreachable;
-        var reversed: Iter(u8) = clone.reverseReset();
-
-        try testing.expectEqual(1, iter.next().?);
-        try testing.expectEqual(5, reversed.next().?);
-
-        try testing.expectEqual(2, iter.next().?);
-        try testing.expectEqual(4, reversed.next().?);
-
-        try testing.expectEqual(3, iter.next().?);
-        try testing.expectEqual(3, reversed.next().?);
-
-        try testing.expectEqual(4, iter.next().?);
-        try testing.expectEqual(2, reversed.next().?);
-
-        try testing.expectEqual(5, iter.next().?);
-        try testing.expectEqual(1, reversed.next().?);
-
-        try testing.expectEqual(null, iter.next());
-        try testing.expectEqual(null, reversed.next());
-    }
+    var double_reversed = try reversed.reverse(testing.allocator);
+    defer reversed.deinit();
+    try testing.expectEqual(1, double_reversed.next());
 }
 test "multi array list" {
     const S = struct {
@@ -1107,10 +940,6 @@ test "multi array list" {
         while (iter.next()) |s| : (expected_tag += 1) {
             try testing.expectEqual(expected_tag, s.tag);
         }
-        expected_tag = 2;
-        while (iter.prev()) |s| : (expected_tag -= 1) {
-            try testing.expectEqual(expected_tag, s.tag);
-        }
 
         var clone: Iter(S) = try iter.clone(testing.allocator);
         // also don't TECHNICALLY need to deinit this since it doesn't really clone anything
@@ -1120,27 +949,13 @@ test "multi array list" {
         try testing.expectEqualStrings("AAA", clone.next().?.str);
         try testing.expectEqualStrings("BBB", clone.next().?.str);
     }
-    {
-        var list: MultiArrayList(S) = .empty;
-        defer list.deinit(testing.allocator);
-        try list.append(testing.allocator, S{ .tag = 1, .str = "AAA" });
-        try list.append(testing.allocator, S{ .tag = 2, .str = "BBB" });
-
-        var iter: Iter(S) = .fromMulti(list);
-        var reversed: Iter(S) = iter.reverseReset();
-
-        var expected_tag: usize = 2;
-        while (reversed.next()) |s| : (expected_tag -= 1) {
-            try testing.expectEqual(expected_tag, s.tag);
-        }
-    }
 }
-test "pagination with scroll + take" {
+test "pagination with skip + take" {
     {
         var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
         var page: [20]u8 = undefined;
         var page_no: usize = 0;
-        var page_iter: Iter(u8) = full_iter.scroll(@bitCast(page_no * page.len)).take(&page);
+        var page_iter: Iter(u8) = full_iter.skip(@bitCast(page_no * page.len)).take(&page);
 
         // first page: expecting values 1-20
         var expected: usize = 1;
@@ -1150,7 +965,7 @@ test "pagination with scroll + take" {
 
         // second page: expecting values 21-40
         page_no += 1;
-        page_iter = full_iter.reset().scroll(@bitCast(page_no * page.len)).take(&page);
+        page_iter = full_iter.reset().skip(@bitCast(page_no * page.len)).take(&page);
         while (page_iter.next()) |actual| : (expected += 1) {
             try testing.expectEqual(expected, actual);
         }
@@ -1160,15 +975,14 @@ test "pagination with scroll + take" {
         var page: [20]u8 = undefined;
         var page_iter: Iter(u8) = empty.take(&page);
 
-        try testing.expectEqual(0, page_iter.len());
         try testing.expectEqual(null, page_iter.next());
     }
     // take alloc
     {
-        const page_size: isize = 20;
+        const page_size: usize = 20;
         var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
-        var page_no: isize = 0;
-        var page_iter: Iter(u8) = try full_iter.scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+        var page_no: usize = 0;
+        var page_iter: Iter(u8) = try full_iter.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
         defer page_iter.deinit();
 
         // first page: expecting values 1-20
@@ -1181,7 +995,7 @@ test "pagination with scroll + take" {
         page_no += 2;
         expected += page_size;
         page_iter.deinit();
-        page_iter = try full_iter.reset().scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+        page_iter = try full_iter.reset().skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
         while (page_iter.next()) |actual| : (expected += 1) {
             try testing.expectEqual(expected, actual);
         }
@@ -1191,7 +1005,6 @@ test "pagination with scroll + take" {
         var page_iter: Iter(u8) = try empty.takeAlloc(testing.allocator, 20);
         defer page_iter.deinit();
 
-        try testing.expectEqual(0, page_iter.len());
         try testing.expectEqual(null, page_iter.next());
     }
 }
@@ -1215,7 +1028,6 @@ test "from linked list" {
         var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .single, list);
         defer iter.deinit();
 
-        try testing.expectEqual(3, iter.len());
         try testing.expectEqual(1, iter.next().?.val);
         try testing.expectEqual(2, iter.next().?.val);
         try testing.expectEqual(3, iter.next().?.val);
@@ -1240,7 +1052,6 @@ test "from linked list" {
         var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .double, list);
         defer iter.deinit();
 
-        try testing.expectEqual(3, iter.len());
         try testing.expectEqual(1, iter.next().?.val);
         try testing.expectEqual(2, iter.next().?.val);
         try testing.expectEqual(3, iter.next().?.val);
@@ -1258,7 +1069,6 @@ test "empty linked lists" {
         var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .single, SinglyLinkedList{});
         defer iter.deinit();
 
-        try testing.expectEqual(0, iter.len());
         try testing.expectEqual(null, iter.next());
     }
     // double
@@ -1271,7 +1081,6 @@ test "empty linked lists" {
         var iter: Iter(S) = try .fromLinkedList(testing.allocator, "node", .double, DoublyLinkedList{});
         defer iter.deinit();
 
-        try testing.expectEqual(0, iter.len());
         try testing.expectEqual(null, iter.next());
     }
 }

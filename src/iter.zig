@@ -266,15 +266,16 @@ fn ConcatIterable(comptime T: type) type {
     };
 }
 
+/// Uses `SinglyLinkedList` or `DoublyLinkedList` and as an iterable source.
 pub fn LinkedListIterable(
     comptime T: type,
     comptime node_field_name: []const u8,
-    comptime linkage: enum { single, double },
+    comptime linkage: Linkage,
 ) type {
     const LinkedList = if (linkage == .single) SinglyLinkedList else DoublyLinkedList;
     return struct {
         list: LinkedList,
-        next_node: LinkedList.Node,
+        next_node: ?*LinkedList.Node,
 
         const Self = @This();
 
@@ -302,7 +303,7 @@ pub fn LinkedListIterable(
         pub fn iter(self: *Self) Iter(T) {
             return (AnonymousIterable(T){
                 .ptr = self,
-                .v_table = VTable(T){
+                .v_table = &VTable(T){
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
                 },
@@ -525,7 +526,7 @@ pub fn Iter(comptime T: type) type {
         pub fn fromLinkedList(
             allocator: Allocator,
             comptime node_field_name: []const u8,
-            comptime linkage: enum { single, double },
+            comptime linkage: Linkage,
             list: if (linkage == .single) SinglyLinkedList else DoublyLinkedList,
         ) Allocator.Error!Iter(T) {
             const iterable = try allocator.create(LinkedListIterable(T, node_field_name, linkage));
@@ -591,57 +592,17 @@ pub fn Iter(comptime T: type) type {
         ///     - length of iteration
         ///
         /// Be sure to call `deinit()` to free the underlying buffer.
-        pub fn fromOther(
-            allocator: Allocator,
-            other: anytype,
-            length: usize,
-        ) Allocator.Error!Iter(T) {
-            validateOtherIterator(T, other);
-            if (length == 0) {
-                return .empty;
+        pub fn fromOther(allocator: Allocator, other: anytype) Allocator.Error!Iter(T) {
+            const other_type = validateOtherIterator(T, other);
+            comptime var OtherType = @TypeOf(other);
+            if (other_type == .ptr) {
+                OtherType = @typeInfo(OtherType).pointer.child;
             }
-
-            const buf: []T = try allocator.alloc(T, length);
-            errdefer allocator.free(buf);
-
-            var i: usize = 0;
-            while (other.next()) |x| : (i += 1) {
-                buf[i] = x;
-            }
-
-            if (i < length) {
-                if (allocator.resize(buf, i)) {
-                    return fromSliceOwned(allocator, buf, null);
-                }
-                defer allocator.free(buf);
-                return fromSliceOwned(allocator, try allocator.dupe(T, buf[0..i]), null);
-            }
-            return fromSliceOwned(allocator, buf, null);
-        }
-
-        /// Take any type (or pointer child type) that has a method called `next()` that takes no params apart from the receiver and returns `?T`.
-        ///
-        /// Unfortunately, we can only rely on the existence of a `next()` method.
-        /// So, we call `other.next()` until the iteration is over or we run out of space in `buf`.
-        ///
-        /// Params:
-        ///     - backing buffer
-        ///     - other iterator
-        pub fn fromOtherBuf(buf: []T, other: anytype) Iter(T) {
-            validateOtherIterator(T, other);
-            if (buf.len == 0) {
-                return .empty;
-            }
-
-            var i: usize = 0;
-            while (other.next()) |x| : (i += 1) {
-                if (i >= buf.len) break;
-                buf[i] = x;
-            }
-            if (i < buf.len) {
-                return from(buf[0..i]);
-            }
-            return from(buf);
+            const iterable: *OtherIterable(T, OtherType) = try .new(
+                allocator,
+                if (other_type == .ptr) other.* else other,
+            );
+            return iterable.iter();
         }
 
         /// Transform an iterator of type `T` to type `TOther`.
@@ -713,7 +674,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Take `amt` elements, allocating a slice owned by the returned iterator to store the results
         pub fn takeAlloc(self: *Iter(T), allocator: Allocator, amt: usize) Allocator.Error!Iter(T) {
-            const buf: []T = try allocator.alloc(T, @min(amt, self.len()));
+            const buf: []T = try allocator.alloc(T, amt);
             errdefer allocator.free(buf);
 
             const result: []T = self.enumerateToBuffer(buf) catch buf;
@@ -764,7 +725,7 @@ pub fn Iter(comptime T: type) type {
 
             while (self.next()) |x| {
                 errdefer self._missed = x;
-                try list.append(x);
+                try list.append(allocator, x);
             }
             return try list.toOwnedSlice(allocator);
         }
@@ -1044,8 +1005,8 @@ pub fn Iter(comptime T: type) type {
         /// Resulting iterator owns the slice, so be sure to call `deinit()`.
         pub fn reverse(self: *Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
             const items: []T = try self.enumerateToOwnedSlice(allocator);
-            std.mem.reverse(items);
-            return fromSliceOwned(items);
+            std.mem.reverse(T, items);
+            return fromSliceOwned(allocator, items, null);
         }
     };
 }
@@ -1144,6 +1105,9 @@ fn AutoCompareContext(comptime T: type) type {
 
 /// Sort ascending or descending
 pub const Ordering = enum { asc, desc };
+
+/// Linked list linkage
+pub const Linkage = enum { single, double };
 
 fn SortContext(comptime T: type, comptime TContext: type) type {
     _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
@@ -1274,7 +1238,7 @@ pub inline fn compareContext(
     return .{ .context = context };
 }
 
-inline fn validateOtherIterator(comptime T: type, other: anytype) void {
+inline fn validateOtherIterator(comptime T: type, other: anytype) enum { ptr, value } {
     comptime var OtherType = @TypeOf(other);
     comptime var is_ptr: bool = false;
     switch (@typeInfo(OtherType)) {
@@ -1291,11 +1255,7 @@ inline fn validateOtherIterator(comptime T: type, other: anytype) void {
     if (method_info.params.len != 1 or method_info.return_type != ?T) {
         @compileError("`next()` method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
     }
-    if (method_info.params[0].type == *OtherType) {
-        if (!is_ptr or @typeInfo(@TypeOf(other)).pointer.is_const) {
-            @compileError("`next()` method receiver requires `*" ++ @typeName(OtherType) ++ "`, but found `*const " ++ @typeName(OtherType) ++ "`");
-        }
-    }
+    return if (is_ptr) .ptr else .value;
 }
 
 const std = @import("std");
@@ -1310,6 +1270,7 @@ const Select = @import("select.zig").Select;
 const SelectAlloc = @import("select.zig").SelectAlloc;
 const Where = @import("where.zig").Where;
 const WhereAlloc = @import("where.zig").WhereAlloc;
+const OtherIterable = @import("from_other.zig").OtherIterable;
 pub const util = @import("util.zig");
 const ClonedIter = util.ClonedIter;
 const SinglyLinkedList = std.SinglyLinkedList;

@@ -117,24 +117,6 @@ pub fn SelectAlloc(
             return null;
         }
 
-        fn implPrev(impl: *anyopaque) ?TOther {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            if (self.inner.prev()) |x| {
-                return self.context.transform(x);
-            }
-            return null;
-        }
-
-        fn implScroll(impl: *anyopaque, offset: isize) void {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            _ = self.inner.scroll(offset);
-        }
-
-        fn implLen(impl: *anyopaque) usize {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            return self.inner.len();
-        }
-
         fn implReset(impl: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(impl));
             _ = self.inner.reset();
@@ -159,10 +141,7 @@ pub fn SelectAlloc(
                 .ptr = cloned,
                 .v_table = &VTable(TOther){
                     .next_fn = &implNext,
-                    .prev_fn = &implPrev,
                     .reset_fn = &implReset,
-                    .len_fn = &implLen,
-                    .scroll_fn = &implScroll,
                     .clone_fn = &implClone,
                     .deinit_fn = &implDeinitAsClone,
                 },
@@ -186,9 +165,6 @@ pub fn SelectAlloc(
                 .ptr = self,
                 .v_table = &VTable(TOther){
                     .next_fn = &implNext,
-                    .prev_fn = &implPrev,
-                    .scroll_fn = &implScroll,
-                    .len_fn = &implLen,
                     .reset_fn = &implReset,
                     .clone_fn = &implClone,
                     .deinit_fn = &implDeinit,
