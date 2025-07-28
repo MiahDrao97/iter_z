@@ -315,14 +315,13 @@ test "any" {
     var result: ?u8 = iter.any(is_even{});
     try testing.expect(result == null);
 
-    // should have scrolled back
-    result = iter.next();
+    result = iter.reset().next();
     try testing.expect(result.? == 1);
 
     result = iter.any({});
     try testing.expect(result.? == 3);
 
-    result = iter.next();
+    result = iter.reset().next();
     try testing.expect(result.? == 3);
 }
 test "single" {
@@ -627,7 +626,7 @@ test "owned slice iterator w/ args" {
     var clone: Iter([]const u8) = try iter.cloneReset(allocator);
     defer clone.deinit();
 
-    _ = iter.skip(1);
+    _ = iter.reset().skip(1);
 
     // make sure the clone is independent
     try testing.expectEqualStrings("blarf", clone.next().?);
@@ -694,7 +693,7 @@ test "from other" {
     try testing.expect(!iter.reset().all(StrLength{ .len = 1 }));
     try testing.expect(!iter.reset().all(StrLength{ .len = 2 }));
 
-    var reversed: Iter([]const u8) = try iter.reverse(testing.allocator);
+    var reversed: Iter([]const u8) = try iter.reset().reverse(testing.allocator);
     defer reversed.deinit();
     try testing.expectEqualStrings("split", reversed.next().?);
     try testing.expectEqualStrings("to", reversed.next().?);
@@ -816,8 +815,8 @@ test "merge" {
     var clone: Iter(u8) = try merged.clone(testing.allocator);
     defer clone.deinit();
 
-    try testing.expectEqual(1, clone.next().?);
-    try testing.expectEqual(1, merged.next().?);
+    try testing.expectEqual(1, clone.reset().next().?);
+    try testing.expectEqual(1, merged.reset().next().?);
 }
 test "enumerate to buffer" {
     {
@@ -946,7 +945,7 @@ test "multi array list" {
         defer clone.deinit();
 
         _ = iter.next();
-        try testing.expectEqualStrings("AAA", clone.next().?.str);
+        try testing.expectEqualStrings("AAA", clone.reset().next().?.str);
         try testing.expectEqualStrings("BBB", clone.next().?.str);
     }
 }

@@ -276,14 +276,18 @@ pub fn LinkedListIterable(
     return struct {
         list: LinkedList,
         next_node: ?*LinkedList.Node,
+        allocator: Allocator,
 
         const Self = @This();
 
-        pub fn init(list: LinkedList) Self {
-            return .{
+        pub fn new(allocator: Allocator, list: LinkedList) Allocator.Error!*Self {
+            const self: *Self = try allocator.create(Self);
+            self.* = .{
                 .list = list,
                 .next_node = list.first,
+                .allocator = allocator,
             };
+            return self;
         }
 
         fn implNext(impl: *anyopaque) ?T {
@@ -300,12 +304,25 @@ pub fn LinkedListIterable(
             self.next_node = self.list.first;
         }
 
+        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
+            const self: *Self = @ptrCast(@alignCast(impl));
+            const clone: *Self = alloc.create(Self);
+            clone.* = self.*;
+            return clone.iter();
+        }
+
+        fn implDeinit(impl: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(impl));
+            self.allocator.destroy(self);
+        }
+
         pub fn iter(self: *Self) Iter(T) {
             return (AnonymousIterable(T){
                 .ptr = self,
                 .v_table = &VTable(T){
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
+                    .deinit_fn = &implDeinit,
                 },
             }).iter();
         }
@@ -529,8 +546,7 @@ pub fn Iter(comptime T: type) type {
             comptime linkage: Linkage,
             list: if (linkage == .single) SinglyLinkedList else DoublyLinkedList,
         ) Allocator.Error!Iter(T) {
-            const iterable = try allocator.create(LinkedListIterable(T, node_field_name, linkage));
-            iterable.* = .init(list);
+            const iterable: *LinkedListIterable(T, node_field_name, linkage) = try .new(allocator, list);
             return iterable.iter();
         }
 
@@ -809,6 +825,7 @@ pub fn Iter(comptime T: type) type {
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn any(self: *Iter(T), filter_context: anytype) ?T {
+            // FIXME : What is the point of this method now that scrolling has been eliminated?
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
                 else => blk: {
