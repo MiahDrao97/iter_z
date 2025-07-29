@@ -65,7 +65,12 @@ fn strCompare(_: void, a: []const u8, b: []const u8) std.math.Order {
     else
         .eq;
 }
-
+test "negative start range" {
+    const arr: [3]i8 = util.range(i8, -1, 3);
+    try std.testing.expectEqual(-1, arr[0]);
+    try std.testing.expectEqual(0, arr[1]);
+    try std.testing.expectEqual(1, arr[2]);
+}
 test "from" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
 

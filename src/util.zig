@@ -3,26 +3,22 @@ const iter = @import("iter.zig");
 const Allocator = std.mem.Allocator;
 const Iter = iter.Iter;
 
-pub fn range(comptime T: type, start: T, len: comptime_int) [len]T {
+pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
     switch (@typeInfo(T)) {
         .int => {},
         else => @compileError("Integer type required."),
     }
-    if (len < 0) {
-        @compileError("Non-negative length required. Was: " ++ len);
-    }
     if (len == 0) {
         return .{};
     }
-    if (start +% @as(T, @truncate(len)) < start or std.math.maxInt(T) < len) {
+    if (@as(isize, start) +% len <= start or std.math.maxInt(T) < len) {
+        var err_buf: [128]u8 = undefined;
         // if we wrap around, we know that the length goes longer than `T` can possibly hold
-        @panic("Length is greater than " ++ @typeName(T) ++ " can hold.");
+        @panic(std.fmt.bufPrint(&err_buf, @typeName(T) ++ " cannot hold {d} elements starting at {d} without overflow.", .{ len, start }) catch unreachable);
     }
 
-    var arr = [_]T{0} ** len;
-    for (0..@as(usize, len)) |i| {
-        arr[i] = start + @as(T, @truncate(i));
-    }
+    var arr: [len]T = undefined;
+    for (&arr, 0..) |*x, i| x.* = start + @as(T, @intCast(i));
 
     return arr;
 }
