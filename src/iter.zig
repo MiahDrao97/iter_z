@@ -392,6 +392,9 @@ pub fn Iter(comptime T: type) type {
         /// Reset the iterator to its first element.
         /// Returns `self`.
         pub fn reset(self: *Iter(T)) *Iter(T) {
+            if (self._missed) |_| {
+                self._missed = null;
+            }
             switch (self.variant) {
                 .slice => |*s| s.idx = 0,
                 .multi_arr_list => |*m| {
@@ -694,6 +697,10 @@ pub fn Iter(comptime T: type) type {
             errdefer allocator.free(buf);
 
             const result: []T = self.enumerateToBuffer(buf) catch buf;
+            if (result.len == 0) {
+                allocator.free(buf);
+                return .empty;
+            }
             if (result.len < buf.len) {
                 if (allocator.resize(buf, result.len)) {
                     return fromSliceOwned(allocator, buf, null);
@@ -820,33 +827,11 @@ pub fn Iter(comptime T: type) type {
             return fromSliceOwned(allocator, slice, null);
         }
 
-        /// Determine if the sequence contains any element with a given filter context
-        /// (or pass in void literal `{}` or `null` to simply peek at the next element).
-        ///
-        /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
-        pub fn any(self: *Iter(T), filter_context: anytype) ?T {
-            // FIXME : What is the point of this method now that scrolling has been eliminated?
-            const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
-                .void, .null => false,
-                else => blk: {
-                    _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
-                    break :blk true;
-                },
-            };
-
-            while (self.next()) |n| {
-                if (filterProvided and !filter_context.filter(n)) continue;
-                return n;
-            }
-            return null;
-        }
-
         /// Find the next element that fulfills a given filter.
         /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
         /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
-        /// ```
         pub fn filterNext(
             self: *Iter(T),
             filter_context: anytype,
@@ -867,7 +852,6 @@ pub fn Iter(comptime T: type) type {
         /// Transform the next element from type `T` to type `TOther` (or return null if iteration is over)
         /// `transform_context` must define the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
         /// NOTE : This method is preferred over `select()` when simply iterating with a transformation.
-        /// ```
         pub fn transformNext(self: *Iter(T), comptime TOther: type, transform_context: anytype) ?TOther {
             _ = @as(fn (@TypeOf(transform_context), T) TOther, @TypeOf(transform_context).transform);
             return if (self.next()) |x|
@@ -880,7 +864,6 @@ pub fn Iter(comptime T: type) type {
         /// The filter is optional, and you may pass in void literal `{}` or `null` if you do not wish to apply a filter.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
-        /// ```
         pub fn single(
             self: *Iter(T),
             filter_context: anytype,
@@ -950,14 +933,14 @@ pub fn Iter(comptime T: type) type {
                     };
                 }
             };
-            return self.any(Ctx{ .ctx_item = item, .inner = compare_context }) != null;
+            var moved: usize = undefined;
+            return self.filterNext(Ctx{ .ctx_item = item, .inner = compare_context }, &moved) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining.
         /// If you do not wish to apply a filter, pass in void literal `{}` or `null` to `context`.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
-        /// ```
         pub fn count(self: *Iter(T), filter_context: anytype) usize {
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
@@ -1158,7 +1141,7 @@ fn FilterContext(
 }
 
 /// Given a context and a filter function `fn (@TypeOf(context), T) bool`,
-/// returns a structure that fulfills the type requirements to use `where()`, `any()`, etc. by wrapping `context`.
+/// returns a structure that fulfills the type requirements to use `where()`, etc. by wrapping `context`.
 ///
 /// This helper function is intended to be used if the filter function has a name other than `filter` or the context is a pointer type.
 /// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.

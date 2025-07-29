@@ -308,22 +308,6 @@ test "orderBy" {
     }
     try testing.expect(i == 0);
 }
-test "any" {
-    var iter: Iter(u8) = .from(&[_]u8{ 1, 3, 5 });
-    defer iter.deinit();
-
-    var result: ?u8 = iter.any(is_even{});
-    try testing.expect(result == null);
-
-    result = iter.reset().next();
-    try testing.expect(result.? == 1);
-
-    result = iter.any({});
-    try testing.expect(result.? == 3);
-
-    result = iter.reset().next();
-    try testing.expect(result.? == 3);
-}
 test "single" {
     var iter: Iter(u8) = .from("racecar");
     defer iter.deinit();
@@ -735,7 +719,17 @@ test "from other - skip first" {
         var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, dict_iter); // pass in a value (not the pointer)
         defer iter.deinit();
 
-        try testing.expectEqual(null, iter.skip(5).next());
+        var clone: Iter(HashMap.Entry) = try iter.clone(testing.allocator);
+        defer clone.deinit();
+
+        try testing.expectEqual(1, iter.reset().next().?.value_ptr.*);
+        try testing.expectEqual(1, clone.reset().next().?.value_ptr.*);
+        try testing.expectEqual(2, clone.next().?.value_ptr.*);
+        try testing.expectEqual(2, iter.next().?.value_ptr.*);
+        try testing.expectEqual(3, iter.next().?.value_ptr.*);
+        try testing.expectEqual(3, clone.next().?.value_ptr.*);
+        try testing.expectEqual(null, clone.next());
+        try testing.expectEqual(null, iter.next());
     }
     {
         var dictionary: HashMap = .empty;
@@ -749,9 +743,16 @@ test "from other - skip first" {
         var iter: Iter(HashMap.Entry) = try .fromOther(testing.allocator, &dict_iter);
         defer iter.deinit();
 
+        var clone: Iter(HashMap.Entry) = try iter.clone(testing.allocator);
+        defer clone.deinit();
+
         try testing.expectEqual(1, iter.reset().next().?.value_ptr.*);
+        try testing.expectEqual(1, clone.reset().next().?.value_ptr.*);
+        try testing.expectEqual(2, clone.next().?.value_ptr.*);
         try testing.expectEqual(2, iter.next().?.value_ptr.*);
         try testing.expectEqual(3, iter.next().?.value_ptr.*);
+        try testing.expectEqual(3, clone.next().?.value_ptr.*);
+        try testing.expectEqual(null, clone.next());
         try testing.expectEqual(null, iter.next());
     }
     {
@@ -916,10 +917,10 @@ test "reverse" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
     var reversed: Iter(u8) = try iter.reverse(testing.allocator);
     defer reversed.deinit();
-    try testing.expectEqual(null, reversed.next());
+    try testing.expectEqual(3, reversed.next());
 
-    var double_reversed = try reversed.reverse(testing.allocator);
-    defer reversed.deinit();
+    var double_reversed: Iter(u8) = try reversed.reverse(testing.allocator);
+    defer double_reversed.deinit();
     try testing.expectEqual(1, double_reversed.next());
 }
 test "multi array list" {
@@ -954,7 +955,7 @@ test "pagination with skip + take" {
         var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
         var page: [20]u8 = undefined;
         var page_no: usize = 0;
-        var page_iter: Iter(u8) = full_iter.skip(@bitCast(page_no * page.len)).take(&page);
+        var page_iter: Iter(u8) = full_iter.skip(page_no * page.len).take(&page);
 
         // first page: expecting values 1-20
         var expected: usize = 1;
@@ -964,7 +965,7 @@ test "pagination with skip + take" {
 
         // second page: expecting values 21-40
         page_no += 1;
-        page_iter = full_iter.reset().skip(@bitCast(page_no * page.len)).take(&page);
+        page_iter = full_iter.reset().skip(page_no * page.len).take(&page);
         while (page_iter.next()) |actual| : (expected += 1) {
             try testing.expectEqual(expected, actual);
         }
