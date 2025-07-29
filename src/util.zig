@@ -3,7 +3,7 @@ const iter = @import("iter.zig");
 const Allocator = std.mem.Allocator;
 const Iter = iter.Iter;
 
-pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}![len]T {
+pub fn range(comptime T: type, start: T, len: comptime_int) [len]T {
     switch (@typeInfo(T)) {
         .int => {},
         else => @compileError("Integer type required."),
@@ -12,11 +12,11 @@ pub fn range(comptime T: type, start: T, len: comptime_int) error{InvalidRange}!
         @compileError("Non-negative length required. Was: " ++ len);
     }
     if (len == 0) {
-        return [_]T{};
+        return .{};
     }
     if (start +% @as(T, @truncate(len)) < start or std.math.maxInt(T) < len) {
         // if we wrap around, we know that the length goes longer than `T` can possibly hold
-        return error.InvalidRange;
+        @panic("Length is greater than " ++ @typeName(T) ++ " can hold.");
     }
 
     var arr = [_]T{0} ** len;

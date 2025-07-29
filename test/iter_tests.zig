@@ -180,7 +180,7 @@ test "does the context seg-fault?" {
 }
 test "enumerateToOwnedSlice" {
     {
-        var inner: Iter(u8) = .from(&try util.range(u8, 1, 3));
+        var inner: Iter(u8) = .from(&util.range(u8, 1, 3));
         var iter: Iter(u8) = inner.where(is_even{});
 
         var i: usize = 0;
@@ -400,7 +400,7 @@ test "clone with select" {
         }
     };
 
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 6));
+    var iter: Iter(u8) = .from(&util.range(u8, 1, 6));
     var outer: Iter([]const u8) = iter.select([]const u8, as_digit{});
     defer outer.deinit();
 
@@ -460,7 +460,7 @@ test "Overlapping select edge cases" {
         }
     }.getMultiplier;
 
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 3));
+    var iter: Iter(u8) = .from(&util.range(u8, 1, 3));
     var clone: Iter(u8) = try iter.clone(testing.allocator);
     defer clone.deinit();
 
@@ -778,9 +778,9 @@ test "from other - skip first" {
 }
 test "concat owned" {
     const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
-    chain[0] = .from(&try util.range(u8, 1, 3));
-    chain[1] = .from(&try util.range(u8, 4, 3));
-    chain[2] = .from(&try util.range(u8, 7, 3));
+    chain[0] = .from(&util.range(u8, 1, 3));
+    chain[1] = .from(&util.range(u8, 4, 3));
+    chain[2] = .from(&util.range(u8, 7, 3));
 
     var iter: Iter(u8) = .concatOwned(testing.allocator, chain);
     defer iter.deinit();
@@ -793,7 +793,7 @@ test "concat owned" {
     try testing.expectEqual(9, i);
 }
 test "merge" {
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 4));
+    var iter: Iter(u8) = .from(&util.range(u8, 1, 4));
 
     var result: ?u8 = iter.next();
     try testing.expectEqual(1, result);
@@ -802,7 +802,7 @@ test "merge" {
     try testing.expectEqual(2, result);
 
     // we interrupt this iteration to abruptly append it to another
-    var iter_2: Iter(u8) = .from(&try util.range(u8, 5, 4));
+    var iter_2: Iter(u8) = .from(&util.range(u8, 5, 4));
     var merged: Iter(u8) = iter.merge(&iter_2);
 
     // pick up where we left off
@@ -821,7 +821,7 @@ test "merge" {
 }
 test "enumerate to buffer" {
     {
-        var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+        var iter: Iter(u8) = .from(&util.range(u8, 1, 8));
         var buf1: [8]u8 = undefined;
 
         const result: []u8 = try iter.enumerateToBuffer(&buf1);
@@ -846,7 +846,7 @@ test "enumerate to buffer" {
     }
 }
 test "allocator mix n match" {
-    var iter: Iter(u8) = .from(&try util.range(u8, 1, 8));
+    var iter: Iter(u8) = .from(&util.range(u8, 1, 8));
     var filtered: Iter(u8) = iter.where(is_even{});
 
     var arena: ArenaAllocator = .init(testing.allocator);
@@ -952,7 +952,7 @@ test "multi array list" {
 }
 test "pagination with skip + take" {
     {
-        var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
+        var full_iter: Iter(u8) = .from(&util.range(u8, 1, 200));
         var page: [20]u8 = undefined;
         var page_no: usize = 0;
         var page_iter: Iter(u8) = full_iter.skip(page_no * page.len).take(&page);
@@ -980,7 +980,7 @@ test "pagination with skip + take" {
     // take alloc
     {
         const page_size: usize = 20;
-        var full_iter: Iter(u8) = .from(&try util.range(u8, 1, 200));
+        var full_iter: Iter(u8) = .from(&util.range(u8, 1, 200));
         var page_no: usize = 0;
         var page_iter: Iter(u8) = try full_iter.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
         defer page_iter.deinit();
