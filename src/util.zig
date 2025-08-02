@@ -1,8 +1,4 @@
-const std = @import("std");
-const iter = @import("iter.zig");
-const Allocator = std.mem.Allocator;
-const Iter = iter.Iter;
-
+/// Generate an array from `start` to `start + len`
 pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
     switch (@typeInfo(T)) {
         .int => {},
@@ -53,3 +49,8 @@ pub fn ClonedIter(comptime T: type) type {
         }
     };
 }
+
+const std = @import("std");
+const iter = @import("iter.zig");
+const Allocator = std.mem.Allocator;
+const Iter = iter.Iter;

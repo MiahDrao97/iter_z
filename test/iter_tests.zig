@@ -1,24 +1,3 @@
-const std = @import("std");
-const iter_z = @import("iter_z");
-const util = iter_z.util;
-const testing = std.testing;
-const Iter = iter_z.Iter;
-const Allocator = std.mem.Allocator;
-const SplitIterator = std.mem.SplitIterator;
-const ArenaAllocator = std.heap.ArenaAllocator;
-const FixedBufferAllocator = std.heap.FixedBufferAllocator;
-const MultiArrayList = std.MultiArrayList;
-const SinglyLinkedList = std.SinglyLinkedList;
-const DoublyLinkedList = std.DoublyLinkedList;
-const autoCompare = iter_z.autoCompare;
-const autoSum = iter_z.autoSum;
-const autoMin = iter_z.autoMin;
-const autoMax = iter_z.autoMax;
-const filterContext = iter_z.filterContext;
-const transformContext = iter_z.transformContext;
-const accumulateContext = iter_z.accumulateContext;
-const compareContext = iter_z.compareContext;
-
 const is_even = struct {
     pub fn filter(_: is_even, num: u8) bool {
         return num % 2 == 0;
@@ -1089,3 +1068,24 @@ test "empty linked lists" {
         try testing.expectEqual(null, iter.next());
     }
 }
+
+const std = @import("std");
+const iter_z = @import("iter_z");
+const util = iter_z.util;
+const testing = std.testing;
+const Iter = iter_z.Iter;
+const Allocator = std.mem.Allocator;
+const SplitIterator = std.mem.SplitIterator;
+const ArenaAllocator = std.heap.ArenaAllocator;
+const FixedBufferAllocator = std.heap.FixedBufferAllocator;
+const MultiArrayList = std.MultiArrayList;
+const SinglyLinkedList = std.SinglyLinkedList;
+const DoublyLinkedList = std.DoublyLinkedList;
+const autoCompare = iter_z.autoCompare;
+const autoSum = iter_z.autoSum;
+const autoMin = iter_z.autoMin;
+const autoMax = iter_z.autoMax;
+const filterContext = iter_z.filterContext;
+const transformContext = iter_z.transformContext;
+const accumulateContext = iter_z.accumulateContext;
+const compareContext = iter_z.compareContext;
