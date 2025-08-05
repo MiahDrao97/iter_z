@@ -175,7 +175,7 @@ pub fn SelectAlloc(
 }
 
 const std = @import("std");
-const iter = @import("iter.zig");
+const iter = @import("iter_old.zig");
 const Iter = iter.Iter;
 const ClonedIter = @import("util.zig").ClonedIter;
 const AnonymousIterable = iter.AnonymousIterable;

@@ -174,7 +174,7 @@ pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
 }
 
 const std = @import("std");
-const iter = @import("iter.zig");
+const iter = @import("iter_old.zig");
 const util = @import("util.zig");
 const Allocator = std.mem.Allocator;
 const Iter = iter.Iter;

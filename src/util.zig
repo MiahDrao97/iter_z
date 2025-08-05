@@ -51,6 +51,6 @@ pub fn ClonedIter(comptime T: type) type {
 }
 
 const std = @import("std");
-const iter = @import("iter.zig");
+const iter = @import("iter_old.zig");
 const Allocator = std.mem.Allocator;
 const Iter = iter.Iter;

@@ -1,720 +1,481 @@
 //! iter_z namespace:
 //! - `Iter(T)`: primary iterator interface
-//! - `VTable(T)`: functions used by `AnonymousIterable(T)`
-//! - `AnonymousIterable(T)`: extensible structure that uses `VTable(T)` and converts to `Iter(T)`
+//! - `VTable(T)`: functions to implement
 //! - `Ordering`: `asc` or `desc`, which are used when sorting
 //! - auto contexts: `autoCompare(T)`, `autoSum(T)`, `autoMin(T)`, `autoMax(T)`
 //! - helper functions that can wrap external context objects into types that are usable by this API, such as `filterContext()`.
 
-/// Virtual table of functions leveraged by the anonymous variant of `Iter(T)`
+/// Virtual table of functions that defines how `Iter(T)` is implemented
 pub fn VTable(comptime T: type) type {
     return struct {
         /// Get the next element or null if iteration is over.
-        next_fn: *const fn (*anyopaque) ?T,
+        next_fn: *const fn (*Iter(T)) ?T,
         /// Reset the iterator the beginning.
-        reset_fn: *const fn (*anyopaque) void,
-        /// Clone into a new iterator, which results in separate state (e.g. two or more iterators on the same slice).
-        /// If left null, a default implementation will be used:
-        ///     Simply returns the iterator
-        clone_fn: ?*const fn (*anyopaque, Allocator) Allocator.Error!Iter(T) = null,
-        /// Deinitialize and free memory as needed.
-        /// If left null, this becomes a no-op.
-        deinit_fn: ?*const fn (*anyopaque) void = null,
+        reset_fn: *const fn (*Iter(T)) *Iter(T),
     };
 }
 
-/// User may implement this interface to define their own `Iter(T)`
-pub fn AnonymousIterable(comptime T: type) type {
-    return struct {
-        /// Type-erased pointer to implementation
-        ptr: *anyopaque,
-        /// Function pointers to the specific implementation functions
-        v_table: *const VTable(T),
-
-        /// Convert to `Iter(T)`
-        pub fn iter(this: @This()) Iter(T) {
-            return .{
-                .variant = Variant(T){ .anonymous = this },
-            };
-        }
-    };
-}
-
-/// Iter source from a slice
-fn SliceIterable(comptime T: type) type {
-    return struct {
-        elements: []const T,
-        idx: usize = 0,
-        on_deinit: ?*const fn ([]T) void = null,
-        allocator: ?Allocator = null,
-    };
-}
-
-fn SliceIterableContext(
-    comptime T: type,
-    comptime TContext: type,
-    on_deinit: fn (TContext, []T) void,
-) type {
-    return struct {
-        elements: []const T,
-        idx: usize = 0,
-        context: TContext,
-        allocator: Allocator,
-
-        const Self = @This();
-
-        fn new(
-            allocator: Allocator,
-            elements: []const T,
-            context: TContext,
-        ) Allocator.Error!*Self {
-            const ptr: *Self = try allocator.create(Self);
-            ptr.* = .{
-                .elements = elements,
-                .context = context,
-                .allocator = allocator,
-            };
-            return ptr;
-        }
-
-        fn iter(self: *Self) Iter(T) {
-            const ctx = struct {
-                fn implNext(impl: *anyopaque) ?T {
-                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    if (self_ptr.idx >= self_ptr.elements.len) {
-                        return null;
-                    }
-                    defer self_ptr.idx += 1;
-                    return self_ptr.elements[self_ptr.idx];
-                }
-
-                fn implReset(impl: *anyopaque) void {
-                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    self_ptr.idx = 0;
-                }
-
-                fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
-                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    return .{
-                        .variant = Variant(T){
-                            .slice = SliceIterable(T){
-                                .allocator = alloc,
-                                .elements = try alloc.dupe(T, self_ptr.elements),
-                                .idx = self_ptr.idx,
-                            },
-                        },
-                    };
-                }
-
-                fn implDeinit(impl: *anyopaque) void {
-                    const self_ptr: *Self = @ptrCast(@alignCast(impl));
-                    on_deinit(self_ptr.context, @constCast(self_ptr.elements));
-                    self_ptr.allocator.free(self_ptr.elements);
-                    self_ptr.allocator.destroy(self_ptr);
-                }
-            };
-
-            return (AnonymousIterable(T){
-                .ptr = self,
-                .v_table = &.{
-                    .next_fn = &ctx.implNext,
-                    .reset_fn = &ctx.implReset,
-                    .clone_fn = &ctx.implClone,
-                    .deinit_fn = &ctx.implDeinit,
-                },
-            }).iter();
-        }
-    };
-}
-
-fn MultiArrayListIterable(comptime T: type) type {
-    return struct {
-        /// `MultiArrayList(T)` we're iterating through
-        list: MultiArrayList(T),
-        /// Current index
-        idx: usize = 0,
-
-        /// Initialize from a multi array list
-        fn init(list: MultiArrayList(T)) @This() {
-            return .{ .list = list };
-        }
-    };
-}
-
-fn MergedIterable(comptime T: type) type {
-    return struct {
-        iter_a: *Iter(T),
-        iter_b: *Iter(T),
-        current: enum { a, b } = .a,
-        allocator: ?Allocator = null,
-
-        const Self = @This();
-
-        fn next(self: *Self) ?T {
-            switch (self.current) {
-                .a => {
-                    if (self.iter_a.next()) |x| {
-                        return x;
-                    }
-                    self.current = .b;
-                    return self.next();
-                },
-                .b => return self.iter_b.next(),
-            }
-        }
-
-        fn reset(self: *Self) void {
-            _ = self.iter_a.reset();
-            _ = self.iter_b.reset();
-            self.current = .a;
-        }
-
-        fn clone(self: Self, alloc: Allocator) Allocator.Error!Iter(T) {
-            const a_clone: *Iter(T) = try alloc.create(Iter(T));
-            errdefer alloc.destroy(a_clone);
-
-            a_clone.* = try self.iter_a.clone(alloc);
-            errdefer a_clone.deinit();
-
-            const b_clone: *Iter(T) = try alloc.create(Iter(T));
-            errdefer alloc.destroy(b_clone);
-
-            b_clone.* = try self.iter_b.clone(alloc);
-
-            return Iter(T){
-                .variant = Variant(T){
-                    .merged = MergedIterable(T){
-                        .iter_a = a_clone,
-                        .iter_b = b_clone,
-                        .allocator = alloc,
-                    },
-                },
-            };
-        }
-
-        fn deinit(self: *Self) void {
-            self.iter_a.deinit();
-            self.iter_b.deinit();
-            if (self.allocator) |alloc| {
-                alloc.destroy(self.iter_a);
-                alloc.destroy(self.iter_b);
-            }
-            self.* = undefined;
-        }
-    };
-}
-
-fn ConcatIterable(comptime T: type) type {
-    return struct {
-        const Self = @This();
-
-        sources: []Iter(T),
-        idx: usize = 0,
-        allocator: ?Allocator = null,
-
-        fn next(self: *Self) ?T {
-            while (self.idx < self.sources.len) : (self.idx += 1) {
-                const current: *Iter(T) = &self.sources[self.idx];
-                if (current.next()) |x| {
-                    return x;
-                }
-            }
-            return null;
-        }
-
-        fn reset(self: *Self) void {
-            for (self.sources) |*s| {
-                _ = s.reset();
-            }
-            self.idx = 0;
-        }
-
-        fn clone(self: Self, allocator: Allocator) Allocator.Error!Iter(T) {
-            var success_counter: usize = 0;
-            const sources_cpy: []Iter(T) = try allocator.alloc(Iter(T), self.sources.len);
-            errdefer {
-                for (sources_cpy[0..success_counter]) |*src| {
-                    src.deinit();
-                }
-                allocator.free(sources_cpy);
-            }
-
-            for (0..self.sources.len) |i| {
-                sources_cpy[i] = try self.sources[i].clone(allocator);
-                success_counter += 1;
-            }
-            return Iter(T){
-                .variant = Variant(T){
-                    .concatenated = ConcatIterable(T){
-                        .sources = sources_cpy,
-                        .idx = self.idx,
-                        .allocator = allocator,
-                    },
-                },
-            };
-        }
-
-        fn deinit(self: *Self) void {
-            // the existence of the allocator field indicates that we own the sources
-            if (self.allocator) |alloc| {
-                for (self.sources) |*s| {
-                    s.deinit();
-                }
-                alloc.free(self.sources);
-            }
-        }
-    };
-}
-
-/// Uses `SinglyLinkedList` or `DoublyLinkedList` and as an iterable source.
-pub fn LinkedListIterable(
-    comptime T: type,
-    comptime node_field_name: []const u8,
-    comptime linkage: Linkage,
-) type {
-    const LinkedList = if (linkage == .single) SinglyLinkedList else DoublyLinkedList;
-    return struct {
-        list: LinkedList,
-        next_node: ?*LinkedList.Node,
-        allocator: Allocator,
-
-        const Self = @This();
-
-        pub fn new(allocator: Allocator, list: LinkedList) Allocator.Error!*Self {
-            const self: *Self = try allocator.create(Self);
-            self.* = .{
-                .list = list,
-                .next_node = list.first,
-                .allocator = allocator,
-            };
-            return self;
-        }
-
-        fn implNext(impl: *anyopaque) ?T {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            if (self.next_node) |node| {
-                self.next_node = node.next;
-                return @as(*const T, @fieldParentPtr(node_field_name, node)).*;
-            }
-            return null;
-        }
-
-        fn implReset(impl: *anyopaque) void {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            self.next_node = self.list.first;
-        }
-
-        fn implClone(impl: *anyopaque, alloc: Allocator) Allocator.Error!Iter(T) {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            const clone: *Self = alloc.create(Self);
-            clone.* = self.*;
-            return clone.iter();
-        }
-
-        fn implDeinit(impl: *anyopaque) void {
-            const self: *Self = @ptrCast(@alignCast(impl));
-            self.allocator.destroy(self);
-        }
-
-        pub fn iter(self: *Self) Iter(T) {
-            return (AnonymousIterable(T){
-                .ptr = self,
-                .v_table = &VTable(T){
-                    .next_fn = &implNext,
-                    .reset_fn = &implReset,
-                    .deinit_fn = &implDeinit,
-                },
-            }).iter();
-        }
-    };
-}
-
-fn Variant(comptime T: type) type {
-    const multi_arr_list_allowed: bool = switch (@typeInfo(T)) {
-        .@"struct" => true,
-        .@"union" => |u| if (u.tag_type) |_| true else false,
-        else => false,
-    };
-    return union(enum) {
-        slice: SliceIterable(T),
-        multi_arr_list: if (multi_arr_list_allowed) MultiArrayListIterable(T) else void,
-        concatenated: ConcatIterable(T),
-        merged: MergedIterable(T),
-        anonymous: AnonymousIterable(T),
-        empty,
-
-        inline fn multiArrListAllowed() bool {
-            return multi_arr_list_allowed;
-        }
-    };
-}
-
-/// This struct is an iterator that offers some basic filtering and transformations.
+/// Iterator interface for a variety of sources and offers various queries
 pub fn Iter(comptime T: type) type {
     return struct {
-        /// Which iterator implementation we're using
-        variant: Variant(T),
-        /// Almost never assigned. Not intended to be directly accessed by users.
+        /// Virtual table
+        vtable: *const VTable(T),
+        /// Not intended to be directly accessed by users.
         /// When an error causes the iterator to drop the current result, it's saved here instead (example: `enumerateToBuffer()`).
         _missed: ?T = null,
 
-        /// Get the next element
+        /// Returns the next element or `null` if the iteration is over.
         pub fn next(self: *Iter(T)) ?T {
-            if (self._missed) |m| {
+            if (self._missed) |x| {
                 self._missed = null;
-                return m;
+                return x;
             }
-
-            switch (self.variant) {
-                .slice => |*s| {
-                    if (s.idx >= s.elements.len) {
-                        return null;
-                    }
-                    defer s.idx += 1;
-                    return s.elements[s.idx];
-                },
-                .multi_arr_list => |*m| {
-                    if (Variant(T).multiArrListAllowed()) {
-                        if (m.idx >= m.list.len) {
-                            return null;
-                        }
-                        defer m.idx += 1;
-                        return m.list.get(m.idx);
-                    }
-                    unreachable;
-                },
-                inline .concatenated, .merged => |*x| return x.next(),
-                .anonymous => |a| return a.v_table.next_fn(a.ptr),
-                .empty => return null,
-            }
+            return self.vtable.next_fn(self);
         }
 
-        /// Reset the iterator to its first element.
+        /// Reset the iterator to the beginning.
         /// Returns `self`.
         pub fn reset(self: *Iter(T)) *Iter(T) {
-            if (self._missed) |_| {
-                self._missed = null;
-            }
-            switch (self.variant) {
-                .slice => |*s| s.idx = 0,
-                .multi_arr_list => |*m| {
-                    if (Variant(T).multiArrListAllowed()) {
-                        m.idx = 0;
-                    } else unreachable;
-                },
-                inline .concatenated, .merged => |*x| x.reset(),
-                .anonymous => |a| a.v_table.reset_fn(a.ptr),
-                .empty => {},
-            }
-            return self;
+            if (self._missed) |_| self._missed = null;
+            return self.vtable.reset_fn(self);
         }
 
-        /// Produces a clone of `Iter(T)` (note that it is not reset).
-        pub fn clone(self: Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
-            return switch (self.variant) {
-                .slice => |s|
-                // zig fmt: off
-                    if (s.allocator) |_| // if we have an allocator saved on the struct, we know we own the slice
-                        Iter(T){
-                            .variant = Variant(T){
-                                .slice = SliceIterable(T){
-                                    .elements = try allocator.dupe(T, s.elements),
-                                    .idx = s.idx,
-                                    // assign the allocator member to the allocator passed in rather than from the iterator being cloned
-                                    .allocator = allocator,
-                                    // intentionally don't copy `on_deinit` since we're assuming that must be called only once
-                                },
-                            },
-                        }
-                    else self,
-                // zig fmt: on
-                .multi_arr_list => if (Variant(T).multiArrListAllowed()) self else unreachable, // does not own the MultiArrayList
-                inline .concatenated, .merged => |x| try x.clone(allocator),
-                .anonymous => |a|
-                // zig fmt: off
-                    if (a.v_table.clone_fn) |exec_clone|
-                        try exec_clone(a.ptr, allocator)
-                    else self,
-                // zig fmt: on
-                .empty => self,
-            };
-        }
-
-        /// Creates a clone that is then reset. Does not reset the original iterator.
-        pub fn cloneReset(self: Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
-            var cpy: Iter(T) = try self.clone(allocator);
-            return cpy.reset().*;
-        }
-
-        /// Free whatever resources may be owned by the iter.
-        /// In general, this is a no-op unless the iterator owns a slice or is a clone.
-        ///
-        /// NOTE : Will set `self` to empty on deinit.
-        /// This allows for redundant deinit calls when clones depend on iterators that own memory.
-        pub fn deinit(self: *Iter(T)) void {
-            switch (self.variant) {
-                .slice => |*s| {
-                    if (s.allocator) |alloc| {
-                        if (s.on_deinit) |exec_on_deinit| {
-                            exec_on_deinit(@constCast(s.elements));
-                        }
-                        alloc.free(s.elements);
+        /// Empty iterator
+        pub const empty: Iter(T) = .{
+            .vtable = &VTable(T){
+                .next_fn = &struct {
+                    pub fn next(_: *Iter(T)) ?T {
+                        return null;
                     }
+                }.next,
+                .reset_fn = &struct {
+                    pub fn reset(_: *Iter(T)) void {}
+                }.reset,
+            },
+        };
+
+        /// Implementation from a slice
+        pub const SliceIterable = struct {
+            slice: []const T,
+            idx: usize = 0,
+            interface: Iter(T) = .{
+                .vtable = &VTable(T){
+                    .next_fn = &implNext,
+                    .reset_fn = &implReset,
                 },
-                .multi_arr_list => if (Variant(T).multiArrListAllowed()) {} else unreachable, // does not own the list; so another no-op
-                inline .concatenated, .merged => |*x| x.deinit(),
-                .anonymous => |a| {
-                    if (a.v_table.deinit_fn) |exec_deinit| {
-                        exec_deinit(a.ptr);
+            },
+
+            pub fn next(self: *SliceIterable) ?T {
+                if (self.idx >= self.slice.len) {
+                    return null;
+                }
+                defer self.idx += 1;
+                return self.slice[self.idx];
+            }
+
+            pub fn reset(self: *SliceIterable) *Iter(T) {
+                self.idx = 0;
+                return &self.interface;
+            }
+
+            fn implNext(iter: *Iter(T)) ?T {
+                const self: *SliceIterable = @fieldParentPtr("interface", iter);
+                return self.next();
+            }
+
+            fn implReset(iter: *Iter(T)) *Iter(T) {
+                const self: *SliceIterable = @fieldParentPtr("interface", iter);
+                return self.reset();
+            }
+        };
+
+        /// Implementation from a slice, where the slice is owned by the iterator.
+        /// Call `deinit()` to free that memory.
+        pub const OwnedSliceIterable = struct {
+            slice: []const T,
+            idx: usize = 0,
+            allocator: Allocator,
+            on_deinit: ?*const fn (Allocator, []T) void = null,
+            interface: Iter(T) = .{
+                .vtable = &VTable(T){
+                    .next_fn = &implNext,
+                    .reset_fn = &implReset,
+                },
+            },
+
+            pub fn next(self: *OwnedSliceIterable) ?T {
+                if (self.idx >= self.slice.len) {
+                    return null;
+                }
+                defer self.idx += 1;
+                return self.slice[self.idx];
+            }
+
+            pub fn reset(self: *OwnedSliceIterable) *Iter(T) {
+                self.idx = 0;
+                return &self.interface;
+            }
+
+            pub fn deinit(self: *OwnedSliceIterable) void {
+                if (self.on_deinit) |exec| {
+                    exec(self.allocator, @constCast(self.slice));
+                }
+                self.allocator.free(self.slice);
+            }
+
+            fn implNext(iter: *Iter(T)) ?T {
+                const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
+                return self.next();
+            }
+
+            fn implReset(iter: *Iter(T)) *Iter(T) {
+                const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
+                return self.reset();
+            }
+        };
+
+        /// Initialize a `SliceIterable`
+        pub fn slice(s: []const T) SliceIterable {
+            return .{ .slice = s };
+        }
+
+        /// Initialize a `SliceIterable` that owns the slice.
+        /// Must call `deinit()` on the iterator.
+        pub fn ownedSlice(allocator: Allocator, s: []const T, on_deinit: ?*const fn (Allocator, []T) void) OwnedSliceIterable {
+            return .{
+                .slice = s,
+                .allocator = allocator,
+                .on_deinit = on_deinit,
+            };
+        }
+
+        /// Implementation from a `MultiArrayList` source
+        pub const MultiArrayListIterable = if (switch (@typeInfo(T)) {
+            .@"struct" => true,
+            .@"union" => |u| u.tag_type != null,
+            else => false,
+        })
+            struct {
+                list: std.MultiArrayList(T),
+                idx: usize = 0,
+                interface: Iter(T) = .{
+                    .vtable = &VTable(T){
+                        .next_fn = &implNext,
+                        .reset_fn = &implReset,
+                    },
+                },
+
+                const Self = @This();
+
+                pub fn next(self: *Self) ?T {
+                    if (self.idx >= self.list.len) {
+                        return null;
                     }
-                },
-                .empty => {},
+                    defer self.idx += 1;
+                    return self.list.get(self.idx);
+                }
+
+                pub fn reset(self: *Self) *Iter(T) {
+                    self.idx = 0;
+                    return &self.interface;
+                }
+
+                fn implNext(iter: *Iter(T)) ?T {
+                    const self: *MultiArrayListIterable = @fieldParentPtr("interface", iter);
+                    return self.next();
+                }
+
+                fn implReset(iter: *Iter(T)) void {
+                    const self: *MultiArrayListIterable = @fieldParentPtr("interface", iter);
+                    return self.reset();
+                }
             }
-            self.* = .empty;
+        else
+            @compileError("MultiArrayList cannot be used for type " ++ @typeName(T));
+
+        /// Initialize `MultiArrayListIterable`
+        pub fn multi(list: std.MultiArrayList(T)) MultiArrayListIterable {
+            return .{ .list = list };
         }
 
-        /// Default iterator that has no underlying source. It has 0 elements, and `next()` always returns null.
-        pub const empty: Iter(T) = .{ .variant = .empty };
-
-        /// Instantiate a new iterator, using `slice` as our source.
-        /// The iterator does not own `slice`, however, and so a `deinit()` call is not neccesary.
-        pub fn from(slice: []const T) Iter(T) {
-            return .{
-                .variant = Variant(T){
-                    .slice = SliceIterable(T){
-                        .elements = slice,
+        /// Implementation from a linked list source
+        pub fn LinkedListIterable(comptime linkage: Linkage, comptime node_field_name: []const u8) type {
+            return struct {
+                list: List,
+                current_node: ?*List.Node,
+                interface: Iter(T) = .{
+                    .vtable = &VTable(T){
+                        .next_fn = &implNext,
+                        .reset_fn = &implReset,
                     },
                 },
+
+                const Self = @This();
+                /// Linked list type, depending on the `linkage`
+                pub const List = if (linkage == .single) SinglyLinkedList else DoublyLinkedList;
+
+                pub fn init(list: List) Self {
+                    return .{
+                        .list = list,
+                        .current_node = list.first,
+                    };
+                }
+
+                pub fn next(self: *Self) ?T {
+                    if (self.current_node) |node| {
+                        defer self.current_node = node.next;
+                        return @as(*const T, @fieldParentPtr(node_field_name, node));
+                    }
+                    return null;
+                }
+
+                pub fn reset(self: *Self) *Iter(T) {
+                    self.current_node = self.list.first;
+                    return &self.interface;
+                }
+
+                fn implNext(iter: *Iter(T)) ?T {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.next();
+                }
+
+                fn implReset(iter: *Iter(T)) void {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.reset();
+                }
             };
         }
 
-        /// Instantiate a new iterator, using `slice` as our source.
-        /// This iterator owns slice: calling `deinit()` will free it.
-        pub fn fromSliceOwned(
-            allocator: Allocator,
-            slice: []const T,
-            on_deinit: ?*const fn ([]T) void,
-        ) Iter(T) {
-            return .{
-                .variant = Variant(T){
-                    .slice = SliceIterable(T){
-                        .elements = slice,
-                        .on_deinit = on_deinit,
-                        .allocator = allocator,
-                    },
-                },
-            };
-        }
-
-        /// Instantiate a new iterator, using `slice` as our source.
-        /// Differs from `fromSliceOwned()` because the `on_deinit` function can take a `context` object.
-        /// This iterator owns slice: calling `deinit()` will free it.
-        ///
-        /// NOTE : If this iterator is cloned, the clone will not call `on_deinit`.
-        /// The reason for this is that, while the underlying slice is duplicated, each element the slice points to is not.
-        /// Thus, `on_deinit` may cause unexpected behavior such as double-free's if you are attempting to free each element in the slice.
-        pub fn fromSliceOwnedContext(
-            allocator: Allocator,
-            slice: []const T,
-            context: anytype,
-            on_deinit: fn (@TypeOf(context), []T) void,
-        ) Allocator.Error!Iter(T) {
-            const slice_iter: *SliceIterableContext(T, @TypeOf(context), on_deinit) = try .new(allocator, slice, context);
-            return slice_iter.iter();
-        }
-
-        /// Create an iterator for a multi-array list. Keep in mind that the iterator does not own the backing list.
-        /// Calls to `clone()` and `deinit()` are no-ops.
-        pub fn fromMulti(list: MultiArrayList(T)) Iter(T) {
-            if (Variant(T).multiArrListAllowed()) {
-                return .{
-                    .variant = Variant(T){
-                        .multi_arr_list = MultiArrayListIterable(T).init(list),
-                    },
-                };
-            }
-            unreachable;
-        }
-
-        /// Create `Iter(T)` from a linked list:
-        /// Since the length of any linked list cannot be known without iterating through each node, we're simply allocating a slice to put all the nodes into.
-        /// Be sure to call `deinit()` to free the underlying slice.
-        /// - `allocator` to allocate the slice of all the lists elements
-        /// - `node_field_name` is used to get `*T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive
-        /// - `linkage` to specify if the list is singly linked or doubly linked
-        /// - `list` is the list itself
-        pub fn fromLinkedList(
-            allocator: Allocator,
-            comptime node_field_name: []const u8,
+        /// Initiate a `LinkedListIterable`
+        pub fn linkedList(
             comptime linkage: Linkage,
-            list: if (linkage == .single) SinglyLinkedList else DoublyLinkedList,
-        ) Allocator.Error!Iter(T) {
-            const iterable: *LinkedListIterable(T, node_field_name, linkage) = try .new(allocator, list);
-            return iterable.iter();
+            comptime node_field_name: []const u8,
+            list: LinkedListIterable(linkage, node_field_name).List,
+        ) LinkedListIterable(linkage, node_field_name) {
+            return .init(list);
         }
 
-        /// Concatenates several iterators into one. They'll iterate in the order they're passed in.
-        ///
-        /// Note that the resulting iterator does not own the sources, so they may have to be deinitialized afterward.
-        pub fn concat(sources: []Iter(T)) Iter(T) {
-            return if (sources.len == 0)
-                .empty
-            else if (sources.len == 1)
-                sources[0]
-            else
-                Iter(T){
-                    .variant = Variant(T){
-                        .concatenated = ConcatIterable(T){
-                            .sources = sources,
-                        },
-                    },
-                };
-        }
-
-        /// Merge several sources into one, and this resulting iterator owns `sources`.
-        ///
-        /// Be sure to call `deinit()` to free.
-        pub fn concatOwned(allocator: Allocator, sources: []Iter(T)) Iter(T) {
-            return .{
-                .variant = Variant(T){
-                    .concatenated = ConcatIterable(T){
-                        .sources = sources,
-                        .allocator = allocator,
+        /// Implementation with any context that defines the following method: `fn next(*TContext) ?T` or `fn next(TContext) ?T`
+        pub fn AnyIterable(comptime TContext: type) type {
+            return struct {
+                other: TContext,
+                _reset: TContext,
+                interface: Iter(T) = .{
+                    .vtable = &VTable(T){
+                        .next_fn = &implNext,
+                        .reset_fn = &implReset,
                     },
                 },
+
+                const Self = @This();
+
+                pub fn init(o: TContext) Self {
+                    return .{
+                        .other = o,
+                        ._reset = o,
+                    };
+                }
+
+                pub fn next(self: *Self) ?T {
+                    return self.other.next();
+                }
+
+                pub fn reset(self: *Self) *Iter(T) {
+                    self.other = self._reset;
+                    return &self.interface;
+                }
+
+                fn implNext(iter: *Iter(T)) ?T {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.next();
+                }
+
+                fn implReset(iter: *Iter(T)) *Iter(T) {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.reset();
+                }
             };
         }
 
-        /// Merge `self` and `other` (in that order), resulting in a new iterator that owns both `self` and `other`.
-        /// On `deinit()`, both `self` and `other` will also be deinitialized.
-        /// If that is undesired behavior, `concat()` will keep the iterators separate.
-        pub fn merge(self: *Iter(T), other: *Iter(T)) Iter(T) {
-            return .{
-                .variant = Variant(T){
-                    .merged = MergedIterable(T){
-                        .iter_a = self,
-                        .iter_b = other,
-                    },
+        /// Initialize an `AnyIterable` source
+        pub fn any(o: anytype) AnyIterable(@TypeOf(o)) {
+            comptime var OtherType = @TypeOf(o);
+            comptime var is_ptr: bool = false;
+            switch (@typeInfo(OtherType)) {
+                .pointer => |p| {
+                    is_ptr = true;
+                    OtherType = p.child;
                 },
-            };
-        }
-
-        /// Take any type, given that defines a method called `next()` that takes no params apart from the receiver and returns `?T`.
-        ///
-        /// Unfortunately, we can only rely on the existence of a `next()` method.
-        /// So to get all the functionality in `Iter(T)` from another iterator, we allocate a `length`-sized buffer and fill it with the results from `other.next()`.
-        /// Will pare the buffer down to the exact size returned from all the `other.next()` calls.
-        ///
-        /// Params:
-        ///     - allocator,
-        ///     - other iterator
-        ///     - length of iteration
-        ///
-        /// Be sure to call `deinit()` to free the underlying buffer.
-        pub fn fromOther(allocator: Allocator, other: anytype) Allocator.Error!Iter(T) {
-            const other_type = validateOtherIterator(T, other);
-            comptime var OtherType = @TypeOf(other);
-            if (other_type == .ptr) {
-                OtherType = @typeInfo(OtherType).pointer.child;
+                else => {}
             }
-            const iterable: *OtherIterable(T, OtherType) = try .new(
-                allocator,
-                if (other_type == .ptr) other.* else other,
-            );
-            return iterable.iter();
+
+            return .init(if (is_ptr) o.* else o);
         }
 
-        /// Transform an iterator of type `T` to type `TOther`.
-        /// `transform_context` must define the following method: `fn transform(@TypeOf(transform_context), T) TOther`
-        ///
-        /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
-        /// Use `selectAlloc()` for nonzero-sized contexts.
+        /// Iterable implemenation that only returned elements that pass through a certain filter.
+        pub fn Where(comptime TContext: type, comptime filter: fn (TContext, T) bool) type {
+            return struct {
+                context: TContext,
+                og: *Iter(T),
+                interface: Iter(T) = .{
+                    .vtable = &VTable(T){
+                        .next_fn = &implNext,
+                        .reset_fn = &implReset,
+                    },
+                },
+
+                const Self = @This();
+
+                pub fn next(self: *Self) ?T {
+                    while (self.og.next()) |x| {
+                        if (filter(self.context, x)) return x;
+                    }
+                    return null;
+                }
+
+                pub fn reset(self: *Self) *Iter(T) {
+                    _ = self.og.reset();
+                    return &self.interface;
+                }
+
+                fn implNext(iter: *Iter(T)) ?T {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.next();
+                }
+
+                fn implReset(iter: *Iter(T)) *Iter(T) {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.reset();
+                }
+            };
+        }
+
+        /// Initialize `Where` iterable source
+        pub fn where(self: *Iter(T), context: anytype) Where(@TypeOf(context), @TypeOf(context).filter) {
+            return .{ .context = context, .og = self };
+        }
+
+        /// Iterable implemenation that transforms each element
+        pub fn Select(comptime TOther: type, comptime TContext: type, comptime transform: fn (TContext, T) TOther) type {
+            return struct {
+                context: TContext,
+                og: *Iter(T),
+                interface: Iter(TOther) = .{
+                    .vtable = &VTable(TOther){
+                        .next_fn = &implNext,
+                        .reset_fn = &implReset,
+                    },
+                },
+
+                const Self = @This();
+
+                pub fn next(self: *Self) ?TOther {
+                    return if (self.og.next()) |x|
+                        transform(self.context, x)
+                    else
+                        null;
+                }
+
+                pub fn reset(self: *Self) *Iter(TOther) {
+                    _ = self.og.reset();
+                    return &self.interface;
+                }
+
+                fn implNext(iter: *Iter(TOther)) ?TOther {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.next();
+                }
+
+                fn implReset(iter: *Iter(TOther)) *Iter(TOther) {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    return self.reset();
+                }
+            };
+        }
+
+        /// Initialize `Select` iterable source
         pub fn select(
             self: *Iter(T),
             comptime TOther: type,
-            transform_context: anytype,
-        ) Iter(TOther) {
-            const selector: Select(T, TOther, @TypeOf(transform_context)) = .{ .inner = self };
-            return selector.iter();
+            context: anytype,
+        ) Select(TOther, @TypeOf(context), @TypeOf(context).transform) {
+            return .{ .context = context, .og = self };
         }
 
-        /// Transform an iterator of type `T` to type `TOther`.
-        /// `transform_context` must define the following method: `fn transform(@TypeOf(transform_context), T) TOther`
-        ///
-        /// This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
-        /// If you wish to avoid the allocation, use `select()`.
-        ///
-        /// Since this method creates a pointer, be sure to call `deinit()` after usage.
-        pub fn selectAlloc(
-            self: *Iter(T),
-            comptime TOther: type,
-            allocator: Allocator,
-            transform_context: anytype,
-        ) Allocator.Error!Iter(TOther) {
-            const selector: *SelectAlloc(T, TOther, @TypeOf(transform_context)) = try .new(
-                allocator,
-                self,
-                transform_context,
-            );
-            return selector.iter();
-        }
+        /// Iterable that is two `Iter(T)`'s appended together
+        pub const ConcatIterable = struct {
+            sources: []const *Iter(T),
+            idx: usize = 0,
+            interface: Iter(T) = .{
+                .vtable = &VTable(T){
+                    .next_fn = &implNext,
+                    .reset_fn = &implReset,
+                },
+            },
 
-        /// Return a pared-down iterator that matches the criteria specified in `filter()`.
-        /// `filter_context` must define the following method: `fn filter(@TypeOf(filter_context), T) bool`
-        ///
-        /// This method is intended for zero-sized contexts, and will invoke a `@compileError` when `context` is nonzero-sized.
-        /// Use `whereAlloc()` for nonzero-sized contexts.
-        pub fn where(self: *Iter(T), filter_context: anytype) Iter(T) {
-            const w: Where(T, @TypeOf(filter_context)) = .{ .inner = self };
-            return w.iter();
-        }
-
-        /// Return a pared-down iterator that matches the criteria specified in `filter()`.
-        /// `filter_context` must define the following method: `fn filter(@TypeOf(filter_context), T) bool`
-        ///
-        /// This method is intended for nonzero-sized contexts, but will still compile if a zero-sized context is passed in.
-        /// If you wish to avoid the allocation, use `where()`.
-        ///
-        /// Since this method creates a pointer, be sure to call `deinit()` after usage.
-        pub fn whereAlloc(
-            self: *Iter(T),
-            allocator: Allocator,
-            filter_context: anytype,
-        ) Allocator.Error!Iter(T) {
-            const w: *WhereAlloc(T, @TypeOf(filter_context)) = try .new(allocator, self, filter_context);
-            return w.iter();
-        }
-
-        /// Take `buf.len` and return new iterator from that buffer.
-        pub fn take(self: *Iter(T), buf: []T) Iter(T) {
-            const result: []T = self.enumerateToBuffer(buf) catch buf;
-            return from(result);
-        }
-
-        /// Take `amt` elements, allocating a slice owned by the returned iterator to store the results
-        pub fn takeAlloc(self: *Iter(T), allocator: Allocator, amt: usize) Allocator.Error!Iter(T) {
-            const buf: []T = try allocator.alloc(T, amt);
-            errdefer allocator.free(buf);
-
-            const result: []T = self.enumerateToBuffer(buf) catch buf;
-            if (result.len == 0) {
-                allocator.free(buf);
-                return .empty;
-            }
-            if (result.len < buf.len) {
-                if (allocator.resize(buf, result.len)) {
-                    return fromSliceOwned(allocator, buf, null);
+            pub fn next(self: *ConcatIterable) ?T {
+                while (self.idx < self.sources.len) : (self.idx += 1) {
+                    const current: *Iter(T) = self.sources[self.idx];
+                    if (current.next()) |x| {
+                        return x;
+                    }
                 }
-                defer allocator.free(buf);
-                return fromSliceOwned(allocator, try allocator.dupe(T, result), null);
+                return null;
             }
-            return fromSliceOwned(allocator, result, null);
+
+            pub fn reset(self: *ConcatIterable) *Iter(T) {
+                for (self.sources) |source| _ = source.reset();
+                self.idx = 0;
+                return &self.interface;
+            }
+
+            fn implNext(iter: *Iter(T)) ?T {
+                const self: *ConcatIterable = @ptrCast(@alignCast(iter));
+                return self.next();
+            }
+
+            fn implReset(iter: *Iter(T)) *Iter(T) {
+                const self: *ConcatIterable = @ptrCast(@alignCast(iter));
+                return self.reset();
+            }
+        };
+
+        /// Concat several iterators into one
+        pub fn concat(sources: []const *Iter(T)) ConcatIterable {
+            return .{ .sources = sources };
+        }
+
+        /// Returns a copy of the concrete type
+        pub fn clone(self: *Iter(T), comptime TConcrete: type) TConcrete {
+            return @as(*const TConcrete, @fieldParentPtr("interface", self)).*;
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
         pub fn skip(self: *Iter(T), amt: usize) *Iter(T) {
             for (0..amt) |_| _ = self.next() orelse break;
             return self;
+        }
+
+        /// Take `buf.len` and return new iterator from that buffer.
+        pub fn take(self: *Iter(T), buf: []T) SliceIterable {
+            const result: []T = self.enumerateToBuffer(buf) catch buf;
+            return slice(result);
+        }
+
+        /// Take `amt` elements, allocating a slice owned by the returned iterator to store the results
+        pub fn takeAlloc(self: *Iter(T), allocator: Allocator, amt: usize) Allocator.Error!OwnedSliceIterable {
+            const buf: []T = try allocator.alloc(T, amt);
+            errdefer allocator.free(buf);
+
+            const result: []T = self.enumerateToBuffer(buf) catch buf;
+            if (result.len < buf.len) {
+                if (allocator.resize(buf, result.len)) {
+                    return ownedSlice(allocator, buf, null);
+                }
+                defer allocator.free(buf);
+                return ownedSlice(allocator, try allocator.dupe(T, result), null);
+            }
+            return ownedSlice(allocator, result, null);
         }
 
         /// Enumerates into `buf`, starting at `self`'s current `next()` call.
@@ -742,7 +503,7 @@ pub fn Iter(comptime T: type) type {
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
         ///
         /// Caller owns the resulting slice.
-        pub fn enumerateToOwnedSlice(self: *Iter(T), allocator: Allocator) Allocator.Error![]T {
+        pub fn toOwnedSlice(self: *Iter(T), allocator: Allocator) Allocator.Error![]T {
             var list: ArrayList(T) = try .initCapacity(allocator, 16);
             errdefer list.deinit(allocator);
 
@@ -754,26 +515,26 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Enumerates into new sorted slice. This uses an unstable sorting algorithm.
-        /// If stable sorting is required, use `toSortedSliceOwnedStable()`.
+        /// If stable sorting is required, use `toOwnedSliceSortedStable()`.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// Note that `self` may need to be deallocated via calling `deinit()` or reset again for later enumeration.
         /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
-        pub fn toSortedSliceOwned(
+        pub fn toOwnedSliceSorted(
             self: *Iter(T),
             allocator: Allocator,
             compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            const slice: []T = try self.enumerateToOwnedSlice(allocator);
+            const s: []T = try self.toOwnedSlice(allocator);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
-                .slice = slice,
+                .slice = s,
                 .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sortUnstable(T, slice, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return slice;
+            std.mem.sortUnstable(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
+            return s;
         }
 
         /// Enumerates into new sorted slice, using a stable sorting algorithm.
@@ -782,20 +543,20 @@ pub fn Iter(comptime T: type) type {
         /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
         /// Caller owns the resulting slice.
-        pub fn toSortedSliceOwnedStable(
+        pub fn toOwnedSliceSortedStable(
             self: *Iter(T),
             allocator: Allocator,
             compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            const slice: []T = try self.enumerateToOwnedSlice(allocator);
+            const s: []T = try self.toOwnedSlice(allocator);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
-                .slice = slice,
+                .slice = s,
                 .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sort(T, slice, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return slice;
+            std.mem.sort(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
+            return s;
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
@@ -808,9 +569,9 @@ pub fn Iter(comptime T: type) type {
             allocator: Allocator,
             compare_context: anytype,
             ordering: Ordering,
-        ) Allocator.Error!Iter(T) {
-            const slice: []T = try self.toSortedSliceOwned(allocator, compare_context, ordering);
-            return fromSliceOwned(allocator, slice, null);
+        ) Allocator.Error!OwnedSliceIterable {
+            const s: []T = try self.toOwnedSliceSorted(allocator, compare_context, ordering);
+            return ownedSlice(allocator, s, null);
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
@@ -822,9 +583,9 @@ pub fn Iter(comptime T: type) type {
             allocator: Allocator,
             compare_context: anytype,
             ordering: Ordering,
-        ) Allocator.Error!Iter(T) {
-            const slice: []T = try self.toSortedSliceOwnedStable(allocator, compare_context, ordering);
-            return fromSliceOwned(allocator, slice, null);
+        ) Allocator.Error!OwnedSliceIterable {
+            const s: []T = try self.toOwnedSliceSortedStable(allocator, compare_context, ordering);
+            return ownedSlice(allocator, s, null);
         }
 
         /// Find the next element that fulfills a given filter.
@@ -837,7 +598,6 @@ pub fn Iter(comptime T: type) type {
             filter_context: anytype,
             moved_forward: *usize,
         ) ?T {
-            _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
             var moved: usize = 0;
             defer moved_forward.* = moved;
             while (self.next()) |n| {
@@ -853,7 +613,6 @@ pub fn Iter(comptime T: type) type {
         /// `transform_context` must define the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
         /// NOTE : This method is preferred over `select()` when simply iterating with a transformation.
         pub fn transformNext(self: *Iter(T), comptime TOther: type, transform_context: anytype) ?TOther {
-            _ = @as(fn (@TypeOf(transform_context), T) TOther, @TypeOf(transform_context).transform);
             return if (self.next()) |x|
                 transform_context.transform(x)
             else
@@ -871,7 +630,6 @@ pub fn Iter(comptime T: type) type {
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
                 else => blk: {
-                    _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
                     break :blk true;
                 },
             };
@@ -890,38 +648,9 @@ pub fn Iter(comptime T: type) type {
             return found;
         }
 
-        /// Run `action` for each element in the iterator
-        /// - `self`: method receiver (non-const pointer)
-        /// - `context`: context object that may hold data
-        /// - `action`: action performed on each element
-        /// - `handleErrOpts`: options for handling an error if encountered while executing `action`:
-        ///     - `exec_on_err`: executed if an error is returned while executing `action`
-        ///     - `terminate_iteration`: if true, terminates iteration when an error is encountered
-        ///
-        /// Note that you may need to reset this iterator after calling this method.
-        pub fn forEach(
-            self: *Iter(T),
-            context: anytype,
-            action: fn (@TypeOf(context), T) anyerror!void,
-            handleErrOpts: struct {
-                exec_on_err: ?fn (@TypeOf(context), anyerror, T) void = null,
-                terminate_iteration: bool = true,
-            },
-        ) void {
-            while (self.next()) |x| {
-                action(context, x) catch |err| {
-                    if (handleErrOpts.exec_on_err) |onErr| {
-                        onErr(context, err, x);
-                    }
-                    if (handleErrOpts.terminate_iteration) break;
-                };
-            }
-        }
-
         /// Determine if this iterator contains a specific `item`.
         /// `compare_context` must define the method: `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         pub fn contains(self: *Iter(T), item: T, compare_context: anytype) bool {
-            _ = @as(fn (@TypeOf(compare_context), T, T) std.math.Order, @TypeOf(compare_context).compare);
             const Ctx = struct {
                 ctx_item: T,
                 inner: @TypeOf(compare_context),
@@ -944,10 +673,7 @@ pub fn Iter(comptime T: type) type {
         pub fn count(self: *Iter(T), filter_context: anytype) usize {
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void, .null => false,
-                else => blk: {
-                    _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
-                    break :blk true;
-                },
+                else => true,
             };
 
             var result: usize = 0;
@@ -962,8 +688,6 @@ pub fn Iter(comptime T: type) type {
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn all(self: *Iter(T), filter_context: anytype) bool {
-            _ = @as(fn (@TypeOf(filter_context), T) bool, @TypeOf(filter_context).filter);
-
             while (self.next()) |x| {
                 if (!filter_context.filter(x)) {
                     return false;
@@ -983,11 +707,9 @@ pub fn Iter(comptime T: type) type {
             init: TOther,
             accumulate_context: anytype,
         ) TOther {
-            _ = @as(fn (@TypeOf(accumulate_context), TOther, T) TOther, @TypeOf(accumulate_context).accumulate);
             var result: TOther = init;
-            while (self.next()) |x| {
+            while (self.next()) |x|
                 result = accumulate_context.accumulate(result, x);
-            }
             return result;
         }
 
@@ -996,17 +718,38 @@ pub fn Iter(comptime T: type) type {
         ///
         /// `accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), T, T) T`
         pub fn reduce(self: *Iter(T), accumulate_context: anytype) ?T {
-            _ = @as(fn (@TypeOf(accumulate_context), T, T) T, @TypeOf(accumulate_context).accumulate);
             const init: T = self.next() orelse return null;
             return self.fold(T, init, accumulate_context);
         }
 
         /// Enumerates all the items into a slice and reverses it.
         /// Resulting iterator owns the slice, so be sure to call `deinit()`.
-        pub fn reverse(self: *Iter(T), allocator: Allocator) Allocator.Error!Iter(T) {
-            const items: []T = try self.enumerateToOwnedSlice(allocator);
+        pub fn reverse(self: *Iter(T), allocator: Allocator) Allocator.Error!OwnedSliceIterable {
+            const items: []T = try self.toOwnedSlice(allocator);
             std.mem.reverse(T, items);
-            return fromSliceOwned(allocator, items, null);
+            return ownedSlice(allocator, items, null);
+        }
+    };
+}
+
+/// Sort ascending or descending
+pub const Ordering = enum { asc, desc };
+
+/// Linked list linkage
+pub const Linkage = enum { single, double };
+
+fn SortContext(comptime T: type, comptime TContext: type) type {
+    return struct {
+        ctx: TContext,
+        slice: []T,
+        ordering: Ordering,
+
+        pub fn lessThan(this: @This(), a: T, b: T) bool {
+            const comparison: std.math.Order = this.ctx.compare(a, b);
+            return switch (this.ordering) {
+                .asc => comparison == .lt,
+                .desc => comparison == .gt,
+            };
         }
     };
 }
@@ -1015,11 +758,11 @@ pub fn Iter(comptime T: type) type {
 ///
 /// Take note that this function performs saturating addition.
 /// Rather than integer overflow, the sum returns `T`'s max value.
-pub inline fn autoSum(comptime T: type) AutoSumContext(T) {
+pub fn autoSum(comptime T: type) AutoSumContext(T) {
     return .{};
 }
 
-fn AutoSumContext(comptime T: type) type {
+pub fn AutoSumContext(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int, .float => struct {
             pub fn accumulate(_: @This(), a: T, b: T) T {
@@ -1031,11 +774,11 @@ fn AutoSumContext(comptime T: type) type {
 }
 
 /// Generate an auto-min function, assuming elements are a numeric type (including enums).
-pub inline fn autoMin(comptime T: type) AutoMinContext(T) {
+pub fn autoMin(comptime T: type) AutoMinContext(T) {
     return .{};
 }
 
-fn AutoMinContext(comptime T: type) type {
+pub fn AutoMinContext(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int, .float => struct {
             pub fn accumulate(_: @This(), a: T, b: T) T {
@@ -1052,11 +795,11 @@ fn AutoMinContext(comptime T: type) type {
 }
 
 /// Generate an auto-max function, assuming elements are a numeric type (including enums).
-pub inline fn autoMax(comptime T: type) AutoMaxContext(T) {
+pub fn autoMax(comptime T: type) AutoMaxContext(T) {
     return .{};
 }
 
-fn AutoMaxContext(comptime T: type) type {
+pub fn AutoMaxContext(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int, .float => struct {
             pub fn accumulate(_: @This(), a: T, b: T) T {
@@ -1073,11 +816,11 @@ fn AutoMaxContext(comptime T: type) type {
 }
 
 /// Generates a simple comparer for a numeric or enum type `T`.
-pub inline fn autoCompare(comptime T: type) AutoCompareContext(T) {
+pub fn autoCompare(comptime T: type) AutoCompareContext(T) {
     return .{};
 }
 
-fn AutoCompareContext(comptime T: type) type {
+pub fn AutoCompareContext(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int, .float => struct {
             pub fn compare(_: @This(), a: T, b: T) std.math.Order {
@@ -1103,30 +846,7 @@ fn AutoCompareContext(comptime T: type) type {
     };
 }
 
-/// Sort ascending or descending
-pub const Ordering = enum { asc, desc };
-
-/// Linked list linkage
-pub const Linkage = enum { single, double };
-
-fn SortContext(comptime T: type, comptime TContext: type) type {
-    _ = @as(fn (TContext, T, T) std.math.Order, TContext.compare);
-    return struct {
-        ctx: TContext,
-        slice: []T,
-        ordering: Ordering,
-
-        pub fn lessThan(this: @This(), a: T, b: T) bool {
-            const comparison: std.math.Order = this.ctx.compare(a, b);
-            return switch (this.ordering) {
-                .asc => comparison == .lt,
-                .desc => comparison == .gt,
-            };
-        }
-    };
-}
-
-fn FilterContext(
+pub fn FilterContext(
     comptime T: type,
     comptime TContext: type,
     filterFn: fn (TContext, T) bool,
@@ -1145,7 +865,7 @@ fn FilterContext(
 ///
 /// This helper function is intended to be used if the filter function has a name other than `filter` or the context is a pointer type.
 /// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
-pub inline fn filterContext(
+pub fn filterContext(
     comptime T: type,
     context: anytype,
     filter: fn (@TypeOf(context), T) bool,
@@ -1153,7 +873,7 @@ pub inline fn filterContext(
     return .{ .context = context };
 }
 
-fn TransformContext(
+pub fn TransformContext(
     comptime T: type,
     comptime TOther: type,
     comptime TContext: type,
@@ -1173,7 +893,7 @@ fn TransformContext(
 ///
 /// This helper function is intended to be used if the filter function has a name other than `transform` or the context is a pointer type.
 /// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
-pub inline fn transformContext(
+pub fn transformContext(
     comptime T: type,
     comptime TOther: type,
     context: anytype,
@@ -1182,7 +902,7 @@ pub inline fn transformContext(
     return .{ .context = context };
 }
 
-fn AccumulateContext(
+pub fn AccumulateContext(
     comptime T: type,
     comptime TOther: type,
     comptime TContext: type,
@@ -1202,7 +922,7 @@ fn AccumulateContext(
 ///
 /// This helper function is intended to be used if the filter function has a name other than `accumulate` or the context is a pointer type.
 /// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
-pub inline fn accumulateContext(
+pub fn accumulateContext(
     comptime T: type,
     comptime TOther: type,
     context: anytype,
@@ -1211,7 +931,7 @@ pub inline fn accumulateContext(
     return .{ .context = context };
 }
 
-fn CompareContext(
+pub fn CompareContext(
     comptime T: type,
     comptime TContext: type,
     compareFn: fn (TContext, T, T) std.math.Order,
@@ -1226,11 +946,11 @@ fn CompareContext(
 }
 
 /// Given a context and a compare function `fn (@TypeOf(context), T, T) std.math.Order`,
-/// returns a structure that fulfills the type requirements to use `orderBy()`, `contains()`, `toSortedSliceOwned()`, etc. by wrapping `context`.
+/// returns a structure that fulfills the type requirements to use `orderBy()`, `contains()`, `toOwnedSliceSorted()`, etc. by wrapping `context`.
 ///
 /// This helper function is intended to be used if the filter function has a name other than `compare` or the context is a pointer type.
 /// Keep in mind, however, the size of `context` as that will be the size of the resulting structure.
-pub inline fn compareContext(
+pub fn compareContext(
     comptime T: type,
     context: anytype,
     compare: fn (@TypeOf(context), T, T) std.math.Order,
@@ -1238,40 +958,10 @@ pub inline fn compareContext(
     return .{ .context = context };
 }
 
-inline fn validateOtherIterator(comptime T: type, other: anytype) enum { ptr, value } {
-    comptime var OtherType = @TypeOf(other);
-    comptime var is_ptr: bool = false;
-    switch (@typeInfo(OtherType)) {
-        .pointer => |p| {
-            OtherType = p.child;
-            is_ptr = true;
-        },
-        else => {},
-    }
-    if (!std.meta.hasMethod(OtherType, "next")) {
-        @compileError(@typeName(OtherType) ++ " does not define a method called `next()`.");
-    }
-    const method_info: Fn = @typeInfo(@TypeOf(@field(OtherType, "next"))).@"fn";
-    if (method_info.params.len != 1 or method_info.return_type != ?T) {
-        @compileError("`next()` method on type '" ++ @typeName(OtherType) ++ "' does not return " ++ @typeName(?T) ++ ".");
-    }
-    return if (is_ptr) .ptr else .value;
-}
-
 const std = @import("std");
-const root = @import("root");
-const Allocator = std.mem.Allocator;
-const MultiArrayList = std.MultiArrayList;
-const ArrayList = std.ArrayListUnmanaged;
-const Fn = std.builtin.Type.Fn;
-const assert = std.debug.assert;
-const builtin = @import("builtin");
-const Select = @import("select.zig").Select;
-const SelectAlloc = @import("select.zig").SelectAlloc;
-const Where = @import("where.zig").Where;
-const WhereAlloc = @import("where.zig").WhereAlloc;
-const OtherIterable = @import("from_other.zig").OtherIterable;
 pub const util = @import("util.zig");
-const ClonedIter = util.ClonedIter;
+pub const iter_deprecated = @import("iter_old.zig");
+const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 const DoublyLinkedList = std.DoublyLinkedList;
+const ArrayList = std.ArrayListUnmanaged;
