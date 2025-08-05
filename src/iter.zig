@@ -49,7 +49,9 @@ pub fn Iter(comptime T: type) type {
                     }
                 }.next,
                 .reset_fn = &struct {
-                    pub fn reset(_: *Iter(T)) void {}
+                    pub fn reset(iter: *Iter(T)) *Iter(T) {
+                        return iter;
+                    }
                 }.reset,
             },
         };
@@ -185,7 +187,7 @@ pub fn Iter(comptime T: type) type {
                     return self.next();
                 }
 
-                fn implReset(iter: *Iter(T)) void {
+                fn implReset(iter: *Iter(T)) *Iter(T) {
                     const self: *MultiArrayListIterable = @fieldParentPtr("interface", iter);
                     return self.reset();
                 }
@@ -224,7 +226,7 @@ pub fn Iter(comptime T: type) type {
                 pub fn next(self: *Self) ?T {
                     if (self.current_node) |node| {
                         defer self.current_node = node.next;
-                        return @as(*const T, @fieldParentPtr(node_field_name, node));
+                        return @as(*const T, @fieldParentPtr(node_field_name, node)).*;
                     }
                     return null;
                 }
@@ -239,7 +241,7 @@ pub fn Iter(comptime T: type) type {
                     return self.next();
                 }
 
-                fn implReset(iter: *Iter(T)) void {
+                fn implReset(iter: *Iter(T)) *Iter(T) {
                     const self: *Self = @fieldParentPtr("interface", iter);
                     return self.reset();
                 }
@@ -298,17 +300,14 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Initialize an `AnyIterable` source
-        pub fn any(o: anytype) AnyIterable(@TypeOf(o)) {
-            comptime var OtherType = @TypeOf(o);
-            comptime var is_ptr: bool = false;
-            switch (@typeInfo(OtherType)) {
-                .pointer => |p| {
-                    is_ptr = true;
-                    OtherType = p.child;
-                },
-                else => {}
-            }
-
+        pub fn any(o: anytype) AnyIterable(switch (@typeInfo(@TypeOf(o))) {
+            .pointer => |p| p.child,
+            else => @TypeOf(o),
+        }) {
+            const is_ptr = switch (@typeInfo(@TypeOf(o))) {
+                .pointer => true,
+                else => false,
+            };
             return .init(if (is_ptr) o.* else o);
         }
 
@@ -414,6 +413,7 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *ConcatIterable) ?T {
+                std.debug.print("Concat iterable index: {d} of {d} sources\n", .{ self.idx, self.sources.len });
                 while (self.idx < self.sources.len) : (self.idx += 1) {
                     const current: *Iter(T) = self.sources[self.idx];
                     if (current.next()) |x| {
@@ -445,9 +445,67 @@ pub fn Iter(comptime T: type) type {
             return .{ .sources = sources };
         }
 
-        /// Returns a copy of the concrete type
-        pub fn clone(self: *Iter(T), comptime TConcrete: type) TConcrete {
-            return @as(*const TConcrete, @fieldParentPtr("interface", self)).*;
+        /// Clone of an iterator
+        pub const Clone = struct {
+            og: *Iter(T),
+            deinit_fn: *const fn (Allocator, *Iter(T)) void,
+            allocator: Allocator,
+            interface: Iter(T) = .{
+                .vtable = &VTable(T){
+                    .next_fn = &implNext,
+                    .reset_fn = &implReset,
+                },
+            },
+
+            pub fn next(self: *Clone) ?T {
+                return self.og.next();
+            }
+
+            pub fn reset(self: *Clone) *Iter(T) {
+                _ = self.og.reset();
+                return &self.interface;
+            }
+
+            pub fn deinit(self: Clone) void {
+                self.deinit_fn(self.allocator, self.og);
+            }
+
+            fn implNext(iter: *Iter(T)) ?T {
+                const self: *Clone = @fieldParentPtr("interface", iter);
+                return self.next();
+            }
+
+            fn implReset(iter: *Iter(T)) *Iter(T) {
+                const self: *Clone = @fieldParentPtr("interface", iter);
+                return self.reset();
+            }
+        };
+
+        /// Clone the iterator using the concrete type
+        ///
+        /// Concrete types must have an "interface" field of type `Iter(T)`
+        pub fn clone(allocator: Allocator, noalias concrete_iter: anytype) Allocator.Error!Clone {
+            comptime var ConcreteType = @TypeOf(concrete_iter);
+            comptime var is_ptr: bool = false;
+            switch (@typeInfo(ConcreteType)) {
+                .pointer => |p| {
+                    ConcreteType = p.child;
+                    is_ptr = true;
+                },
+                else => {}
+            }
+            const clone_ptr: *ConcreteType = try allocator.create(ConcreteType);
+            clone_ptr.* = if (is_ptr) concrete_iter.* else concrete_iter;
+            return Clone{
+                .og = @as(*Iter(T), &clone_ptr.interface),
+                .allocator = allocator,
+                .deinit_fn = &struct {
+                    fn deinit(gpa: Allocator, iter: *Iter(T)) void {
+                        const concrete: *ConcreteType = @fieldParentPtr("interface", iter);
+                        gpa.destroy(concrete);
+                    }
+                }.deinit,
+            };
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
