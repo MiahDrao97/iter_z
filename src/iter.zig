@@ -509,6 +509,12 @@ pub fn Iter(comptime T: type) type {
             errdefer allocator.free(buf);
 
             const result: []T = self.enumerateToBuffer(buf) catch buf;
+            if (result.len == 0) {
+                // segmentation fault otherwise
+                allocator.free(buf);
+                return ownedSlice(allocator, "", null);
+            }
+
             if (result.len < buf.len) {
                 if (allocator.resize(buf, result.len)) {
                     return ownedSlice(allocator, buf, null);

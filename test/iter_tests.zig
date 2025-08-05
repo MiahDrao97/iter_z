@@ -162,9 +162,6 @@ test "empty" {
 }
 test "concat" {
     {
-        testing.log_level = .debug;
-        defer testing.log_level = .warn;
-
         var iter1 = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
         var iter2 = Iter(u8).slice(&[_]u8{ 4, 5, 6 });
         var iter3 = Iter(u8).slice(&[_]u8{ 7, 8, 9 });
@@ -192,7 +189,6 @@ test "concat" {
 
         var new_iter = iter.reset().where(is_even{});
         i = 0;
-        std.debug.print("New iterator: {any}\n", .{new_iter});
         while (new_iter.next()) |x| {
             i += 1;
             // should only be the evens
@@ -710,15 +706,13 @@ test "pagination with skip + take" {
             try testing.expectEqual(expected, actual);
         }
     }
-    // TODO : Ok, we gotta fix this too
-    // {
-    //     var empty: Iter(u8) = .empty;
-    //     var page_iter = try empty.takeAlloc(testing.allocator, 20);
-    //     defer page_iter.deinit();
+    {
+        var empty: Iter(u8) = .empty;
+        var page_iter = try empty.takeAlloc(testing.allocator, 20);
+        defer page_iter.deinit();
 
-    //     std.debug.print("Page iterator: {any}", .{page_iter});
-    //     try testing.expectEqual(null, page_iter.next());
-    // }
+        try testing.expectEqual(null, page_iter.next());
+    }
 }
 test "from linked list" {
     // single
