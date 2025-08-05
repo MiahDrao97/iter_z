@@ -64,7 +64,7 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *SliceIterable) ?T {
-                log.debug("Calling next() on {s}: {any}", .{ @typeName(SliceIterable), self.* });
+                log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(SliceIterable), self, self.* });
                 if (self.interface._missed) |m| {
                     self.interface._missed = null;
                     return m;
@@ -108,7 +108,7 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *OwnedSliceIterable) ?T {
-                log.debug("Calling next() on {s}: {any}", .{ @typeName(OwnedSliceIterable), self.* });
+                log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(OwnedSliceIterable), self, self.* });
                 if (self.interface._missed) |m| {
                     self.interface._missed = null;
                     return m;
@@ -180,7 +180,7 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}: {any}", .{ @typeName(MultiArrayListIterable), self.* });
+                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(MultiArrayListIterable), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -240,7 +240,7 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -301,7 +301,7 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -354,7 +354,7 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -403,7 +403,7 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?TOther {
-                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -453,7 +453,7 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *ConcatIterable) ?T {
-                log.debug("Calling next() on {s}: {any}", .{ @typeName(ConcatIterable), self.* });
+                log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(ConcatIterable), self, self.* });
                 log.debug("Concat iterable index: {d} of {d} sources\n", .{ self.idx, self.sources.len });
                 if (self.interface._missed) |m| {
                     self.interface._missed = null;
@@ -476,12 +476,12 @@ pub fn Iter(comptime T: type) type {
             }
 
             fn implNext(iter: *Iter(T)) ?T {
-                const self: *ConcatIterable = @ptrCast(@alignCast(iter));
+                const self: *ConcatIterable = @fieldParentPtr("interface", iter);
                 return self.next();
             }
 
             fn implReset(iter: *Iter(T)) *Iter(T) {
-                const self: *ConcatIterable = @ptrCast(@alignCast(iter));
+                const self: *ConcatIterable = @fieldParentPtr("interface", iter);
                 return self.reset();
             }
         };
