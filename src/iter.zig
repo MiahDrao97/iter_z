@@ -22,21 +22,17 @@ pub fn Iter(comptime T: type) type {
         vtable: *const VTable(T),
         /// Not intended to be directly accessed by users.
         /// When an error causes the iterator to drop the current result, it's saved here instead (example: `enumerateToBuffer()`).
+        /// It's the responsibility of the implementations to use this missed value and/or clear it.
         _missed: ?T = null,
 
         /// Returns the next element or `null` if the iteration is over.
-        pub fn next(self: *Iter(T)) ?T {
-            if (self._missed) |x| {
-                self._missed = null;
-                return x;
-            }
+        pub inline fn next(self: *Iter(T)) ?T {
             return self.vtable.next_fn(self);
         }
 
         /// Reset the iterator to the beginning.
         /// Returns `self`.
-        pub fn reset(self: *Iter(T)) *Iter(T) {
-            if (self._missed) |_| self._missed = null;
+        pub inline fn reset(self: *Iter(T)) *Iter(T) {
             return self.vtable.reset_fn(self);
         }
 
@@ -68,6 +64,11 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *SliceIterable) ?T {
+                log.debug("Calling next() on {s}: {any}", .{ @typeName(SliceIterable), self.* });
+                if (self.interface._missed) |m| {
+                    self.interface._missed = null;
+                    return m;
+                }
                 if (self.idx >= self.slice.len) {
                     return null;
                 }
@@ -77,6 +78,7 @@ pub fn Iter(comptime T: type) type {
 
             pub fn reset(self: *SliceIterable) *Iter(T) {
                 self.idx = 0;
+                self.interface._missed = null;
                 return &self.interface;
             }
 
@@ -106,6 +108,11 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *OwnedSliceIterable) ?T {
+                log.debug("Calling next() on {s}: {any}", .{ @typeName(OwnedSliceIterable), self.* });
+                if (self.interface._missed) |m| {
+                    self.interface._missed = null;
+                    return m;
+                }
                 if (self.idx >= self.slice.len) {
                     return null;
                 }
@@ -115,6 +122,7 @@ pub fn Iter(comptime T: type) type {
 
             pub fn reset(self: *OwnedSliceIterable) *Iter(T) {
                 self.idx = 0;
+                self.interface._missed = null;
                 return &self.interface;
             }
 
@@ -122,7 +130,9 @@ pub fn Iter(comptime T: type) type {
                 if (self.on_deinit) |exec| {
                     exec(self.allocator, @constCast(self.slice));
                 }
-                self.allocator.free(self.slice);
+                if (self.slice.len > 0) {
+                    self.allocator.free(self.slice);
+                }
             }
 
             fn implNext(iter: *Iter(T)) ?T {
@@ -170,6 +180,11 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
+                    log.debug("Calling next() on {s}: {any}", .{ @typeName(MultiArrayListIterable), self.* });
+                    if (self.interface._missed) |m| {
+                        self.interface._missed = null;
+                        return m;
+                    }
                     if (self.idx >= self.list.len) {
                         return null;
                     }
@@ -179,6 +194,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     self.idx = 0;
+                    self.interface._missed = null;
                     return &self.interface;
                 }
 
@@ -224,6 +240,11 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
+                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    if (self.interface._missed) |m| {
+                        self.interface._missed = null;
+                        return m;
+                    }
                     if (self.current_node) |node| {
                         defer self.current_node = node.next;
                         return @as(*const T, @fieldParentPtr(node_field_name, node)).*;
@@ -233,6 +254,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     self.current_node = self.list.first;
+                    self.interface._missed = null;
                     return &self.interface;
                 }
 
@@ -279,11 +301,17 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
+                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    if (self.interface._missed) |m| {
+                        self.interface._missed = null;
+                        return m;
+                    }
                     return self.other.next();
                 }
 
                 pub fn reset(self: *Self) *Iter(T) {
                     self.other = self._reset;
+                    self.interface._missed = null;
                     return &self.interface;
                 }
 
@@ -326,6 +354,11 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
+                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    if (self.interface._missed) |m| {
+                        self.interface._missed = null;
+                        return m;
+                    }
                     while (self.og.next()) |x| {
                         if (filter(self.context, x)) return x;
                     }
@@ -334,6 +367,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     _ = self.og.reset();
+                    self.interface._missed = null;
                     return &self.interface;
                 }
 
@@ -369,6 +403,11 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?TOther {
+                    log.debug("Calling next() on {s}: {any}", .{ @typeName(Self), self.* });
+                    if (self.interface._missed) |m| {
+                        self.interface._missed = null;
+                        return m;
+                    }
                     return if (self.og.next()) |x|
                         transform(self.context, x)
                     else
@@ -377,6 +416,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(TOther) {
                     _ = self.og.reset();
+                    self.interface._missed = null;
                     return &self.interface;
                 }
 
@@ -413,7 +453,12 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *ConcatIterable) ?T {
-                std.debug.print("Concat iterable index: {d} of {d} sources\n", .{ self.idx, self.sources.len });
+                log.debug("Calling next() on {s}: {any}", .{ @typeName(ConcatIterable), self.* });
+                log.debug("Concat iterable index: {d} of {d} sources\n", .{ self.idx, self.sources.len });
+                if (self.interface._missed) |m| {
+                    self.interface._missed = null;
+                    return m;
+                }
                 while (self.idx < self.sources.len) : (self.idx += 1) {
                     const current: *Iter(T) = self.sources[self.idx];
                     if (current.next()) |x| {
@@ -426,6 +471,7 @@ pub fn Iter(comptime T: type) type {
             pub fn reset(self: *ConcatIterable) *Iter(T) {
                 for (self.sources) |source| _ = source.reset();
                 self.idx = 0;
+                self.interface._missed = null;
                 return &self.interface;
             }
 
@@ -443,69 +489,6 @@ pub fn Iter(comptime T: type) type {
         /// Concat several iterators into one
         pub fn concat(sources: []const *Iter(T)) ConcatIterable {
             return .{ .sources = sources };
-        }
-
-        /// Clone of an iterator
-        pub const Clone = struct {
-            og: *Iter(T),
-            deinit_fn: *const fn (Allocator, *Iter(T)) void,
-            allocator: Allocator,
-            interface: Iter(T) = .{
-                .vtable = &VTable(T){
-                    .next_fn = &implNext,
-                    .reset_fn = &implReset,
-                },
-            },
-
-            pub fn next(self: *Clone) ?T {
-                return self.og.next();
-            }
-
-            pub fn reset(self: *Clone) *Iter(T) {
-                _ = self.og.reset();
-                return &self.interface;
-            }
-
-            pub fn deinit(self: Clone) void {
-                self.deinit_fn(self.allocator, self.og);
-            }
-
-            fn implNext(iter: *Iter(T)) ?T {
-                const self: *Clone = @fieldParentPtr("interface", iter);
-                return self.next();
-            }
-
-            fn implReset(iter: *Iter(T)) *Iter(T) {
-                const self: *Clone = @fieldParentPtr("interface", iter);
-                return self.reset();
-            }
-        };
-
-        /// Clone the iterator using the concrete type
-        ///
-        /// Concrete types must have an "interface" field of type `Iter(T)`
-        pub fn clone(allocator: Allocator, noalias concrete_iter: anytype) Allocator.Error!Clone {
-            comptime var ConcreteType = @TypeOf(concrete_iter);
-            comptime var is_ptr: bool = false;
-            switch (@typeInfo(ConcreteType)) {
-                .pointer => |p| {
-                    ConcreteType = p.child;
-                    is_ptr = true;
-                },
-                else => {}
-            }
-            const clone_ptr: *ConcreteType = try allocator.create(ConcreteType);
-            clone_ptr.* = if (is_ptr) concrete_iter.* else concrete_iter;
-            return Clone{
-                .og = @as(*Iter(T), &clone_ptr.interface),
-                .allocator = allocator,
-                .deinit_fn = &struct {
-                    fn deinit(gpa: Allocator, iter: *Iter(T)) void {
-                        const concrete: *ConcreteType = @fieldParentPtr("interface", iter);
-                        gpa.destroy(concrete);
-                    }
-                }.deinit,
-            };
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
@@ -1016,6 +999,7 @@ pub fn compareContext(
     return .{ .context = context };
 }
 
+const log = std.log.scoped(.iter);
 const std = @import("std");
 pub const util = @import("util.zig");
 pub const iter_deprecated = @import("iter_old.zig");
