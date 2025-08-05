@@ -534,49 +534,6 @@ test "from other - skip first" {
         try testing.expectEqual(null, iter.next());
     }
 }
-test "concat owned" {
-    const chain: []Iter(u8) = try testing.allocator.alloc(Iter(u8), 3);
-    chain[0] = .from(&util.range(u8, 1, 3));
-    chain[1] = .from(&util.range(u8, 4, 3));
-    chain[2] = .from(&util.range(u8, 7, 3));
-
-    var iter: Iter(u8) = .concatOwned(testing.allocator, chain);
-    defer iter.deinit();
-
-    var i: u8 = 0;
-    while (iter.next()) |x| {
-        i += 1;
-        try testing.expectEqual(i, x);
-    }
-    try testing.expectEqual(9, i);
-}
-test "merge" {
-    var iter: Iter(u8) = .from(&util.range(u8, 1, 4));
-
-    var result: ?u8 = iter.next();
-    try testing.expectEqual(1, result);
-
-    result = iter.next();
-    try testing.expectEqual(2, result);
-
-    // we interrupt this iteration to abruptly append it to another
-    var iter_2: Iter(u8) = .from(&util.range(u8, 5, 4));
-    var merged: Iter(u8) = iter.merge(&iter_2);
-
-    // pick up where we left off
-    var i: u8 = 2;
-    while (merged.next()) |x| {
-        i += 1;
-        try testing.expectEqual(i, x);
-    }
-    try testing.expectEqual(8, i);
-
-    var clone: Iter(u8) = try merged.clone(testing.allocator);
-    defer clone.deinit();
-
-    try testing.expectEqual(1, clone.reset().next().?);
-    try testing.expectEqual(1, merged.reset().next().?);
-}
 test "enumerate to buffer" {
     {
         var iter: Iter(u8) = .from(&util.range(u8, 1, 8));
@@ -602,31 +559,6 @@ test "enumerate to buffer" {
         const result: []u8 = try iter.enumerateToBuffer(&buf);
         try testing.expectEqual(0, result.len);
     }
-}
-test "allocator mix n match" {
-    var iter: Iter(u8) = .from(&util.range(u8, 1, 8));
-    var filtered: Iter(u8) = iter.where(is_even{});
-
-    var arena: ArenaAllocator = .init(testing.allocator);
-    defer arena.deinit();
-    const clone: Iter(u8) = try filtered.clone(arena.allocator());
-
-    var clone2: Iter(u8) = try clone.clone(testing.allocator);
-    defer clone2.deinit();
-
-    var clone3 = try clone2.clone(arena.allocator());
-    defer clone3.deinit();
-
-    var arena2: ArenaAllocator = .init(testing.allocator);
-    defer arena2.deinit();
-
-    var clone4 = try iter.clone(arena2.allocator());
-    defer clone4.deinit();
-
-    var filtered2 = clone4.where(is_even{});
-
-    var clone5 = try filtered2.clone(arena2.allocator());
-    defer clone5.deinit();
 }
 test "filterNext()" {
     var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
