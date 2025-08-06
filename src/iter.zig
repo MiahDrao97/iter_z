@@ -13,12 +13,37 @@ pub fn VTable(comptime T: type) type {
         /// Reset the iterator the beginning.
         reset_fn: *const fn (*Iter(T)) *Iter(T),
         /// Clone the iterator.
+        /// The resulting clone will be given to `Iter(T).Allocated`.
         clone_fn: *const fn (*Iter(T), Allocator) Allocator.Error!*Iter(T),
-        /// Deinitialize the iterator if it owned any memory.
-        /// Iterators owning memory apply to specific concrete implementations and clones, so this is usually a no-op.
-        deinit_fn: *const fn (*Iter(T), Allocator) void = &noopDeinit,
+        /// This implementation is for de-initializing a clone created with `clone_fn`.
+        /// Will be called by `Iter(T).Allocated`.
+        deinit_clone_fn: *const fn (*Iter(T), Allocator) void,
 
-        pub fn noopDeinit(_: *Iter(T), _: Allocator) void {}
+        /// This is provided for a convenient default implementation:
+        /// Simply assumes that the `*Iter(T)` is a property named "interface" contained on the concrete type.
+        /// Creates `*TConcrete` and copies its value from the original.
+        pub fn defaultCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) Allocator.Error!*Iter(T) {
+            return struct {
+                pub fn clone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                    const concrete: *TConcrete = @fieldParentPtr("interface", iter);
+                    const c: *TConcrete = try allocator.create(TConcrete);
+                    c.* = concrete.*;
+                    return @as(*Iter(T), &c.interface);
+                }
+            }.clone;
+        }
+
+        /// This is provided for a convenient default implementation:
+        /// Simply assumes that the `*Iter(T)` is a property named "interface" contained on the concrete type.
+        /// Destroys the pointer to the concrete type.
+        pub fn defaultDeinitCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) void {
+            return struct {
+                pub fn deinit(iter: *Iter(T), allocator: Allocator) void {
+                    const concrete: *TConcrete = @fieldParentPtr("interface", iter);
+                    allocator.destroy(concrete);
+                }
+            }.deinit;
+        }
     };
 }
 
@@ -43,14 +68,14 @@ pub fn Iter(comptime T: type) type {
             return self.vtable.reset_fn(self);
         }
 
-        /// Clone the interface
-        pub inline fn clone(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
-            self.vtable.clone_fn(self, allocator);
+        /// Clone the interface.
+        inline fn clone(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+            return try self.vtable.clone_fn(self, allocator);
         }
 
         /// Deinitialize any memory owned by the iterator (if any).
-        pub inline fn deinit(self: *Iter(T), allocator: Allocator) void {
-            self.vtable.deinit_fn(self, allocator);
+        inline fn deinitClone(self: *Iter(T), allocator: Allocator) void {
+            self.vtable.deinit_clone_fn(self, allocator);
         }
 
         /// Empty iterator
@@ -71,6 +96,9 @@ pub fn Iter(comptime T: type) type {
                         return iter;
                     }
                 }.clone,
+                .deinit_clone_fn = &struct {
+                    pub fn deinitClone(_: *Iter(T), _: Allocator) void {}
+                }.deinitClone,
             },
         };
 
@@ -82,6 +110,8 @@ pub fn Iter(comptime T: type) type {
                 .vtable = &VTable(T){
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
+                    .clone_fn = &VTable(T).defaultCloneFn(SliceIterable),
+                    .deinit_clone_fn = &VTable(T).defaultDeinitCloneFn(SliceIterable),
                 },
             },
 
@@ -126,6 +156,8 @@ pub fn Iter(comptime T: type) type {
                 .vtable = &VTable(T){
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
+                    .clone_fn = &implClone,
+                    .deinit_clone_fn = &implDeinitClone,
                 },
             },
 
@@ -166,6 +198,26 @@ pub fn Iter(comptime T: type) type {
                 const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
                 return self.reset();
             }
+
+            fn implClone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
+                const c: *OwnedSliceIterable = try allocator.create(OwnedSliceIterable);
+                errdefer allocator.destroy(c);
+
+                c.* = .{
+                    .slice = try allocator.dupe(T, self.slice),
+                    .idx = self.idx,
+                    .allocator = allocator,
+                    .on_deinit = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
+                };
+                return &c.interface;
+            }
+
+            fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
+                const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
+                self.deinit(); // free slice
+                allocator.destroy(self);
+            }
         };
 
         /// Initialize a `SliceIterable`
@@ -196,6 +248,8 @@ pub fn Iter(comptime T: type) type {
                     .vtable = &VTable(T){
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
+                        .clone_fn = &VTable(T).defaultCloneFn(MultiArrayListIterable),
+                        .deinit_clone_fn = &VTable(T).defaultDeinitCloneFn(MultiArrayListIterable),
                     },
                 },
 
@@ -247,6 +301,8 @@ pub fn Iter(comptime T: type) type {
                     .vtable = &VTable(T){
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
+                        .clone_fn = &VTable(T).defaultCloneFn(Self),
+                        .deinit_clone_fn = &VTable(T).defaultDeinitCloneFn(Self),
                     },
                 },
 
@@ -310,6 +366,8 @@ pub fn Iter(comptime T: type) type {
                     .vtable = &VTable(T){
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
+                        .clone_fn = &VTable(T).defaultCloneFn(Self),
+                        .deinit_clone_fn = &VTable(T).defaultDeinitCloneFn(Self),
                     },
                 },
 
@@ -370,6 +428,8 @@ pub fn Iter(comptime T: type) type {
                     .vtable = &VTable(T){
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
+                        .clone_fn = &implClone,
+                        .deinit_clone_fn = &implDeinitClone,
                     },
                 },
 
@@ -402,6 +462,24 @@ pub fn Iter(comptime T: type) type {
                     const self: *Self = @fieldParentPtr("interface", iter);
                     return self.reset();
                 }
+
+                fn implClone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    const c: *Self = try allocator.create(Self);
+                    errdefer allocator.destroy(c);
+
+                    c.* = .{
+                        .og = try self.og.clone(allocator),
+                        .context = self.context,
+                    };
+                    return &c.interface;
+                }
+
+                fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    self.og.deinitClone(allocator);
+                    allocator.destroy(self);
+                }
             };
         }
 
@@ -419,6 +497,8 @@ pub fn Iter(comptime T: type) type {
                     .vtable = &VTable(TOther){
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
+                        .clone_fn = &implClone,
+                        .deinit_clone_fn = &implDeinitClone,
                     },
                 },
 
@@ -451,6 +531,24 @@ pub fn Iter(comptime T: type) type {
                     const self: *Self = @fieldParentPtr("interface", iter);
                     return self.reset();
                 }
+
+                fn implClone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    const c: *Self = try allocator.create(Self);
+                    errdefer allocator.destroy(c);
+
+                    c.* = .{
+                        .og = try self.og.clone(allocator),
+                        .context = self.context,
+                    };
+                    return &c.interface;
+                }
+
+                fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
+                    const self: *Self = @fieldParentPtr("interface", iter);
+                    self.og.deinitClone(allocator);
+                    allocator.destroy(self);
+                }
             };
         }
 
@@ -471,6 +569,8 @@ pub fn Iter(comptime T: type) type {
                 .vtable = &VTable(T){
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
+                    .clone_fn = &implClone,
+                    .deinit_clone_fn = &implDeinitClone,
                 },
             },
 
@@ -506,6 +606,37 @@ pub fn Iter(comptime T: type) type {
                 const self: *ConcatIterable = @fieldParentPtr("interface", iter);
                 return self.reset();
             }
+
+            fn implClone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                const self: *ConcatIterable = @fieldParentPtr("interface", iter);
+                const c: *ConcatIterable = try allocator.create(ConcatIterable);
+                errdefer allocator.destroy(c);
+
+                var succeses: usize = 0;
+                const c_sources: []*Iter(T) = try allocator.alloc(*Iter(T), self.sources.len);
+                errdefer {
+                    for (0..succeses) |i| c_sources[i].deinitClone(allocator);
+                    allocator.free(c_sources);
+                }
+
+                for (c_sources, self.sources) |*c_iter, source| {
+                    c_iter.* = try source.clone(allocator);
+                    succeses += 1;
+                }
+
+                c.* = .{
+                    .sources = c_sources,
+                    .idx = self.idx,
+                };
+                return &c.interface;
+            }
+
+            fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
+                const self: *ConcatIterable = @fieldParentPtr("interface", iter);
+                for (self.sources) |source| source.deinitClone(allocator);
+                allocator.free(self.sources);
+                allocator.destroy(self);
+            }
         };
 
         /// Concat several iterators into one
@@ -513,7 +644,7 @@ pub fn Iter(comptime T: type) type {
             return .{ .sources = sources };
         }
 
-        /// Represents an allocated iterator.
+        /// Represents an allocated iterator, created with `VTable(T).clone_fn`.
         /// Must be freed with `deinit()`.
         pub const Allocated = struct {
             interface: *Iter(T),
@@ -528,12 +659,13 @@ pub fn Iter(comptime T: type) type {
             }
 
             pub fn deinit(self: Allocated) void {
-                self.interface.deinit(self.allocator);
+                self.interface.deinitClone(self.allocator);
             }
         };
 
         /// Allocate the implementation of the iterator with `allocator`.
         /// This is how you can clone an iterator or simply store it on the heap.
+        /// Calls `VTable(T).clone_fn`.
         pub fn alloc(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
             return .{
                 .interface = try iter.clone(allocator),
