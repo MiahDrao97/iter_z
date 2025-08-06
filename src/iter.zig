@@ -674,7 +674,8 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Allocate the iterator and reset it.
-        /// NOTE : This is different than `reset().alloc()` because that would reset the original iterator, whereas this method ONLY resets the allocated instance.
+        /// NOTE : This is different than `reset().alloc()`, which resets the original iterator beforehand.
+        /// This method ONLY resets the allocated instance (the original remains in the same position).
         pub fn allocReset(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
             const allocated: Allocated = try iter.alloc(allocator);
             _ = allocated.reset();

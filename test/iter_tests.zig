@@ -472,7 +472,7 @@ test "any" {
     try testing.expect(!clone.reset().all(StrLength{ .len = 1 }));
     try testing.expect(!clone.reset().all(StrLength{ .len = 2 }));
 
-    var reversed = try iter.reset().reverse(testing.allocator);
+    var reversed = try iter.interface.reverse(testing.allocator);
     defer reversed.deinit();
 
     try testing.expectEqualStrings("split", reversed.next().?);
