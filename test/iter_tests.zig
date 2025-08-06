@@ -15,19 +15,12 @@ const ZeroRemainder = struct {
 fn getEvensIter(
     allocator: Allocator,
     iter: *Iter(u8),
-) Allocator.Error!*Iter(u8).Where(
-    FilterContext(u8, ZeroRemainder, ZeroRemainder.noRemainder),
-    FilterContext(u8, ZeroRemainder, ZeroRemainder.noRemainder).filter,
-) {
+) Allocator.Error!Iter(u8).Allocated {
     var divisor: u8 = 2;
     _ = &divisor;
     const ctx: ZeroRemainder = .{ .divisor = divisor };
-    const filtered = try allocator.create(Iter(u8).Where(
-        FilterContext(u8, ZeroRemainder, ZeroRemainder.noRemainder),
-        FilterContext(u8, ZeroRemainder, ZeroRemainder.noRemainder).filter,
-    ));
-    filtered.* = iter.where(filterContext(u8, ctx, ZeroRemainder.noRemainder));
-    return filtered;
+    var filtered = iter.where(filterContext(u8, ctx, ZeroRemainder.noRemainder));
+    return try filtered.interface.alloc(allocator);
 }
 
 const NumToString = struct {
@@ -75,8 +68,8 @@ test "make a copy" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
     try testing.expect(iter.next() == 1);
 
-    var iter_cpy: Iter(u8).SliceIterable = iter;
-    _ = iter_cpy.reset();
+    const iter_cpy: Iter(u8).Allocated = try iter.interface.allocReset(testing.allocator);
+    defer iter_cpy.deinit();
 
     var i: usize = 1;
     while (iter_cpy.next()) |x| : (i += 1) {
@@ -95,38 +88,34 @@ test "where" {
     var filtered = iter.interface.where(
         filterContext(u8, ctx{}, ctx.isEven),
     );
-    // var clone: Iter(u8).Clone = try Iter(u8).clone(testing.allocator, filtered);
-    // defer clone.deinit();
+    const clone: Iter(u8).Allocated = try filtered.interface.alloc(testing.allocator);
+    defer clone.deinit();
 
     try testing.expectEqual(2, filtered.next());
-    // try testing.expectEqual(2, clone.next());
+    try testing.expectEqual(2, clone.next());
     try testing.expectEqual(4, filtered.next());
-    // try testing.expectEqual(4, clone.next());
+    try testing.expectEqual(4, clone.next());
     try testing.expectEqual(6, filtered.next());
-    // try testing.expectEqual(6, clone.next());
+    try testing.expectEqual(6, clone.next());
     try testing.expectEqual(null, filtered.next());
-    // try testing.expectEqual(null, clone.next());
+    try testing.expectEqual(null, clone.next());
 }
 test "does the context seg-fault?" {
-    return error.SkipZigTest;
-    // var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    // const filtered: *Iter(u8).Where(
-    //     FilterContext(u8, ZeroRemainder, ZeroRemainder.noRemainder),
-    //     FilterContext(u8, ZeroRemainder, ZeroRemainder.noRemainder).filter,
-    // ) = try getEvensIter(testing.allocator, &iter.interface);
-    // defer testing.allocator.destroy(filtered);
+    var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3, 4, 5, 6 });
+    const filtered: Iter(u8).Allocated = try getEvensIter(testing.allocator, &iter.interface);
+    defer filtered.deinit();
 
-    // var clone: Iter(u8).Clone = try Iter(u8).clone(filtered);
-    // defer clone.deinit();
+    const clone: Iter(u8).Allocated = try filtered.interface.alloc(testing.allocator);
+    defer clone.deinit();
 
-    // try testing.expectEqual(2, filtered.next());
-    // try testing.expectEqual(2, clone.next());
-    // try testing.expectEqual(4, filtered.next());
-    // try testing.expectEqual(4, clone.next());
-    // try testing.expectEqual(6, filtered.next());
-    // try testing.expectEqual(6, clone.next());
-    // try testing.expectEqual(null, filtered.next());
-    // try testing.expectEqual(null, clone.next());
+    try testing.expectEqual(2, filtered.next());
+    try testing.expectEqual(2, clone.next());
+    try testing.expectEqual(4, filtered.next());
+    try testing.expectEqual(4, clone.next());
+    try testing.expectEqual(6, filtered.next());
+    try testing.expectEqual(6, clone.next());
+    try testing.expectEqual(null, filtered.next());
+    try testing.expectEqual(null, clone.next());
 }
 test "toOwnedSlice" {
     {
@@ -281,99 +270,98 @@ test "single" {
     try testing.expectEqual('x', try iter.interface.single({}));
 }
 test "clone with select" {
-    return error.SkipZigTest;
-    // const as_digit = struct {
-    //     var representation: enum { hex, decimal } = undefined;
-    //     var buffer: [16]u8 = undefined;
+    const as_digit = struct {
+        var representation: enum { hex, decimal } = undefined;
+        var buffer: [16]u8 = undefined;
 
-    //     pub fn transform(_: @This(), byte: u8) []const u8 {
-    //         return switch (representation) {
-    //             .decimal => std.fmt.bufPrint(&buffer, "{d}", .{byte}) catch unreachable,
-    //             .hex => std.fmt.bufPrint(&buffer, "0x{x:0>2}", .{byte}) catch unreachable,
-    //         };
-    //     }
-    // };
+        pub fn transform(_: @This(), byte: u8) []const u8 {
+            return switch (representation) {
+                .decimal => std.fmt.bufPrint(&buffer, "{d}", .{byte}) catch unreachable,
+                .hex => std.fmt.bufPrint(&buffer, "0x{x:0>2}", .{byte}) catch unreachable,
+            };
+        }
+    };
 
-    // var iter = Iter(u8).slice(&util.range(u8, 1, 6));
-    // var outer = iter.interface.select([]const u8, as_digit{});
+    var iter = Iter(u8).slice(&util.range(u8, 1, 6));
+    var outer = iter.interface.select([]const u8, as_digit{});
 
-    // as_digit.representation = .decimal;
-    // try testing.expectEqualStrings("1", outer.next().?);
+    as_digit.representation = .decimal;
+    try testing.expectEqualStrings("1", outer.next().?);
 
-    // var clone: Iter(u8).Select([]const u8, as_digit, as_digit.transform) = outer;
-    // _ = clone.reset();
+    const clone: Iter([]const u8).Allocated = try outer.interface.allocReset(testing.allocator);
+    defer clone.deinit();
 
-    // try testing.expectEqualStrings("2", outer.next().?);
-    // try testing.expectEqualStrings("3", outer.next().?);
+    try testing.expectEqualStrings("2", outer.next().?);
+    try testing.expectEqualStrings("3", outer.next().?);
 
-    // try testing.expectEqualStrings("1", clone.next().?);
-    // try testing.expectEqualStrings("2", clone.next().?);
-    // try testing.expectEqualStrings("3", clone.next().?);
+    try testing.expectEqualStrings("1", clone.next().?);
+    try testing.expectEqualStrings("2", clone.next().?);
+    try testing.expectEqualStrings("3", clone.next().?);
 
-    // try testing.expectEqualStrings("4", outer.next().?);
+    try testing.expectEqualStrings("4", outer.next().?);
 
-    // // test static behavior of context
-    // as_digit.representation = .hex;
-    // try testing.expectEqualStrings("0x05", outer.next().?);
-    // as_digit.representation = .decimal;
-    // try testing.expectEqualStrings("6", outer.next().?);
-    // // check the clone
-    // try testing.expectEqualStrings("4", clone.next().?);
+    // test static behavior of context
+    as_digit.representation = .hex;
+    try testing.expectEqualStrings("0x05", outer.next().?);
+    as_digit.representation = .decimal;
+    try testing.expectEqualStrings("6", outer.next().?);
+    // check the clone
+    try testing.expectEqualStrings("4", clone.next().?);
 }
 test "Overlapping select edge cases" {
-    return error.SkipZigTest;
-    // const Multiplier = struct {
-    //     factor: u8,
-    //     last: u32 = undefined,
+    const Multiplier = struct {
+        factor: u8,
+        last: u32 = undefined,
 
-    //     pub fn mul(this: *@This(), val: u8) u32 {
-    //         this.last = val * this.factor;
-    //         return this.last;
-    //     }
-    // };
+        pub fn mul(this: *@This(), val: u8) u32 {
+            this.last = val * this.factor;
+            return this.last;
+        }
+    };
 
-    // const getMultiplier = struct {
-    //     fn getMultiplier(
-    //         iterator: *Iter(u8),
-    //         multiplier: *Multiplier,
-    //     ) Iter(u8).Select(
-    //         u32,
-    //         TransformContext(u8, u32, *Multiplier, Multiplier.mul),
-    //         TransformContext(u8, u32, *Multiplier, Multiplier.mul).transform,
-    //     ) {
-    //         return iterator.select(
-    //             u32,
-    //             transformContext(u8, u32, multiplier, Multiplier.mul),
-    //         );
-    //     }
-    // }.getMultiplier;
+    const getMultiplier = struct {
+        fn getMultiplier(
+            iterator: *Iter(u8),
+            multiplier: *Multiplier,
+        ) Iter(u8).Select(
+            u32,
+            TransformContext(u8, u32, *Multiplier, Multiplier.mul),
+            TransformContext(u8, u32, *Multiplier, Multiplier.mul).transform,
+        ) {
+            return iterator.select(
+                u32,
+                transformContext(u8, u32, multiplier, Multiplier.mul),
+            );
+        }
+    }.getMultiplier;
 
-    // var iter = Iter(u8).slice(&util.range(u8, 1, 3));
-    // var clone: Iter(u8).SliceIterable = iter;
+    var iter = Iter(u8).slice(&util.range(u8, 1, 3));
+    const clone: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
+    defer clone.deinit();
 
-    // var doubler_ctx: Multiplier = .{ .factor = 2 };
-    // var doubler = getMultiplier(&iter.interface, &doubler_ctx);
+    var doubler_ctx: Multiplier = .{ .factor = 2 };
+    var doubler = getMultiplier(&iter.interface, &doubler_ctx);
 
-    // var tripler_ctx: Multiplier = .{ .factor = 3 };
-    // var tripler = getMultiplier(&clone.interface, &tripler_ctx);
+    var tripler_ctx: Multiplier = .{ .factor = 3 };
+    var tripler = getMultiplier(clone.interface, &tripler_ctx);
 
-    // var result: ?u32 = doubler.next();
-    // try testing.expectEqual(2, result);
+    var result: ?u32 = doubler.next();
+    try testing.expectEqual(2, result);
 
-    // result = tripler.next();
-    // try testing.expectEqual(3, result);
+    result = tripler.next();
+    try testing.expectEqual(3, result);
 
-    // result = doubler.next();
-    // try testing.expectEqual(4, result);
+    result = doubler.next();
+    try testing.expectEqual(4, result);
 
-    // result = tripler.next();
-    // try testing.expectEqual(6, result);
+    result = tripler.next();
+    try testing.expectEqual(6, result);
 
-    // result = doubler.next();
-    // try testing.expectEqual(6, result);
+    result = doubler.next();
+    try testing.expectEqual(6, result);
 
-    // result = tripler.next();
-    // try testing.expectEqual(9, result);
+    result = tripler.next();
+    try testing.expectEqual(9, result);
 }
 test "owned slice iterator" {
     const slice: []u8 = try testing.allocator.alloc(u8, 6);

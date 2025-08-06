@@ -532,7 +532,7 @@ pub fn Iter(comptime T: type) type {
                     return self.reset();
                 }
 
-                fn implClone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                fn implClone(iter: *Iter(TOther), allocator: Allocator) Allocator.Error!*Iter(TOther) {
                     const self: *Self = @fieldParentPtr("interface", iter);
                     const c: *Self = try allocator.create(Self);
                     errdefer allocator.destroy(c);
@@ -544,7 +544,7 @@ pub fn Iter(comptime T: type) type {
                     return &c.interface;
                 }
 
-                fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
+                fn implDeinitClone(iter: *Iter(TOther), allocator: Allocator) void {
                     const self: *Self = @fieldParentPtr("interface", iter);
                     self.og.deinitClone(allocator);
                     allocator.destroy(self);
@@ -671,6 +671,13 @@ pub fn Iter(comptime T: type) type {
                 .interface = try iter.clone(allocator),
                 .allocator = allocator,
             };
+        }
+
+        /// Allocate the iterator and reset it.
+        pub fn allocReset(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
+            const allocated: Allocated = try iter.alloc(allocator);
+            _ = allocated.reset();
+            return allocated;
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
