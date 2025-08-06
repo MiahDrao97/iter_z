@@ -321,17 +321,15 @@ test "Overlapping select edge cases" {
 
     const getMultiplier = struct {
         fn getMultiplier(
+            allocator: Allocator,
             iterator: *Iter(u8),
             multiplier: *Multiplier,
-        ) Iter(u8).Select(
-            u32,
-            TransformContext(u8, u32, *Multiplier, Multiplier.mul),
-            TransformContext(u8, u32, *Multiplier, Multiplier.mul).transform,
-        ) {
-            return iterator.select(
+        ) Allocator.Error!Iter(u32).Allocated {
+            var transformed = iterator.select(
                 u32,
                 transformContext(u8, u32, multiplier, Multiplier.mul),
             );
+            return try transformed.interface.alloc(allocator);
         }
     }.getMultiplier;
 
@@ -340,10 +338,12 @@ test "Overlapping select edge cases" {
     defer clone.deinit();
 
     var doubler_ctx: Multiplier = .{ .factor = 2 };
-    var doubler = getMultiplier(&iter.interface, &doubler_ctx);
+    const doubler: Iter(u32).Allocated = try getMultiplier(testing.allocator, &iter.interface, &doubler_ctx);
+    defer doubler.deinit();
 
     var tripler_ctx: Multiplier = .{ .factor = 3 };
-    var tripler = getMultiplier(clone.interface, &tripler_ctx);
+    const tripler: Iter(u32).Allocated = try getMultiplier(testing.allocator, clone.interface, &tripler_ctx);
+    defer tripler.deinit();
 
     var result: ?u32 = doubler.next();
     try testing.expectEqual(2, result);
@@ -365,9 +365,7 @@ test "Overlapping select edge cases" {
 }
 test "owned slice iterator" {
     const slice: []u8 = try testing.allocator.alloc(u8, 6);
-    for (0..6) |i| {
-        slice[i] = @as(u8, @truncate(i + 1));
-    }
+    for (slice, 0..) |*x, i| x.* = @as(u8, @truncate(i + 1));
 
     var iter = Iter(u8).ownedSlice(testing.allocator, slice, null);
     defer iter.deinit();
@@ -407,6 +405,13 @@ test "owned slice iterator w/ args" {
     try testing.expectEqualStrings("blarf", iter.next().?);
     try testing.expectEqualStrings("asdf", iter.next().?);
     try testing.expectEqual(null, iter.next());
+
+    const clone: Iter([]const u8).Allocated = try iter.interface.allocReset(testing.allocator);
+    defer clone.deinit();
+
+    try testing.expectEqualStrings("blarf", clone.next().?);
+    try testing.expectEqualStrings("asdf", clone.next().?);
+    try testing.expectEqual(null, clone.next());
 }
 test "any" {
     const str = "this,is,a,string,to,split";
@@ -559,7 +564,7 @@ test "enumerate to buffer" {
         var buf2: [4]u8 = undefined;
         try testing.expectError(error.NoSpaceLeft, iter.reset().enumerateToBuffer(&buf2));
         for (buf2, 1..) |x, i| {
-            return testing.expectEqual(i, x);
+            try testing.expectEqual(i, x);
         }
 
         try testing.expectEqual(5, iter.next());
