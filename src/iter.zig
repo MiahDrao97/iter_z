@@ -12,6 +12,13 @@ pub fn VTable(comptime T: type) type {
         next_fn: *const fn (*Iter(T)) ?T,
         /// Reset the iterator the beginning.
         reset_fn: *const fn (*Iter(T)) *Iter(T),
+        /// Clone the iterator.
+        clone_fn: *const fn (*Iter(T), Allocator) Allocator.Error!*Iter(T),
+        /// Deinitialize the iterator if it owned any memory.
+        /// Iterators owning memory apply to specific concrete implementations and clones, so this is usually a no-op.
+        deinit_fn: *const fn (*Iter(T), Allocator) void = &noopDeinit,
+
+        pub fn noopDeinit(_: *Iter(T), _: Allocator) void {}
     };
 }
 
@@ -36,6 +43,16 @@ pub fn Iter(comptime T: type) type {
             return self.vtable.reset_fn(self);
         }
 
+        /// Clone the interface
+        pub inline fn clone(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+            self.vtable.clone_fn(self, allocator);
+        }
+
+        /// Deinitialize any memory owned by the iterator (if any).
+        pub inline fn deinit(self: *Iter(T), allocator: Allocator) void {
+            self.vtable.deinit_fn(self, allocator);
+        }
+
         /// Empty iterator
         pub const empty: Iter(T) = .{
             .vtable = &VTable(T){
@@ -49,6 +66,11 @@ pub fn Iter(comptime T: type) type {
                         return iter;
                     }
                 }.reset,
+                .clone_fn = &struct {
+                    pub fn clone(iter: *Iter(T), _: Allocator) Allocator.Error!*Iter(T) {
+                        return iter;
+                    }
+                }.clone,
             },
         };
 
@@ -489,6 +511,34 @@ pub fn Iter(comptime T: type) type {
         /// Concat several iterators into one
         pub fn concat(sources: []const *Iter(T)) ConcatIterable {
             return .{ .sources = sources };
+        }
+
+        /// Represents an allocated iterator.
+        /// Must be freed with `deinit()`.
+        pub const Allocated = struct {
+            interface: *Iter(T),
+            allocator: Allocator,
+
+            pub fn next(self: Allocated) ?T {
+                return self.interface.next();
+            }
+
+            pub fn reset(self: Allocated) *Iter(T) {
+                return self.interface.reset();
+            }
+
+            pub fn deinit(self: Allocated) void {
+                self.interface.deinit(self.allocator);
+            }
+        };
+
+        /// Allocate the implementation of the iterator with `allocator`.
+        /// This is how you can clone an iterator or simply store it on the heap.
+        pub fn alloc(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
+            return .{
+                .interface = try iter.clone(allocator),
+                .allocator = allocator,
+            };
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
