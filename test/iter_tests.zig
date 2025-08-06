@@ -461,13 +461,16 @@ test "any" {
         }
     };
 
-    try testing.expectEqual(1, iter.reset().count(StrLength{ .len = 1 }));
-    try testing.expectEqual(2, iter.reset().count(StrLength{ .len = 2 }));
-    try testing.expectEqual(6, iter.reset().count({}));
+    const clone: Iter([]const u8).Allocated = try iter.reset().alloc(testing.allocator);
+    defer clone.deinit();
 
-    try testing.expect(iter.reset().all(HasNoChar{ .char = ',' }));
-    try testing.expect(!iter.reset().all(StrLength{ .len = 1 }));
-    try testing.expect(!iter.reset().all(StrLength{ .len = 2 }));
+    try testing.expectEqual(1, clone.reset().count(StrLength{ .len = 1 }));
+    try testing.expectEqual(2, clone.reset().count(StrLength{ .len = 2 }));
+    try testing.expectEqual(6, clone.reset().count({}));
+
+    try testing.expect(clone.reset().all(HasNoChar{ .char = ',' }));
+    try testing.expect(!clone.reset().all(StrLength{ .len = 1 }));
+    try testing.expect(!clone.reset().all(StrLength{ .len = 2 }));
 
     var reversed = try iter.reset().reverse(testing.allocator);
     defer reversed.deinit();
