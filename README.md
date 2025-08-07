@@ -1,12 +1,20 @@
 # iter_z
-Generic Iterator for Zig
+Iterator tools for Zig
 
 Inspired by C#'s `IEnumerable<T>` and the various transformations and filters provided by System.Linq.
-Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful queries.
+Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful queries from a variety of sources such as slices, multi-array-lists, linked lists, and any type that defines a `next()` method.
 
-The main type is `Iter(T)`, which comes with several methods and queries.
+The interface is `Iter(T)`, which comes with several methods, queries, and out-of-the-box implementations.
 
 The latest release is `v0.3.0`, which leverages Zig 0.14.1.
+
+WARNING: `v0.3.0` is an older API than what's in the main branch.
+[Issue #10](https://github.com/MiahDrao97/iter_z/issues/10) resulted in a complete overhaul of the API's, removing the ability for the iterator's length to be known and to move backwards.
+These limitations allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to a `@fieldParentPtr()` strategy.
+This resulted in more flexibility, less code, and better performance in most cases.
+
+Once Zig 0.15.0 is released, then `v0.4.0` will be tagged.
+Hoping that's the last major API change and that we can focus on new queries in the future.
 
 - [Use This Package](#use-this-package)
 - [Other Releases](#other-releases)
