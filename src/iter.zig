@@ -10,19 +10,19 @@ pub fn VTable(comptime T: type) type {
     return struct {
         /// Get the next element or null if iteration is over.
         next_fn: *const fn (*Iter(T)) ?T,
-        /// Reset the iterator the beginning.
+        /// Reset the iterator the beginning. Should return the interface.
         reset_fn: *const fn (*Iter(T)) *Iter(T),
         /// Clone the iterator.
-        /// The resulting clone will be given to `Iter(T).Allocated`.
+        /// This is called by `Iter(T).alloc()` and the result will be given to the resulting `Iter(T).Allocated` instance.
         clone_fn: *const fn (*Iter(T), Allocator) Allocator.Error!*Iter(T),
         /// This implementation is for de-initializing a clone created with `clone_fn`.
-        /// Will be called by `Iter(T).Allocated`.
+        /// Will be called by `Iter(T).Allocated.deinit()`.
         deinit_clone_fn: *const fn (*Iter(T), Allocator) void,
 
         /// This is provided for a convenient default implementation:
         /// Simply assumes that the `*Iter(T)` is a property named "interface" contained on the concrete type.
         /// Creates `*TConcrete` and copies its value from the original.
-        pub fn defaultCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) Allocator.Error!*Iter(T) {
+        pub inline fn defaultCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) Allocator.Error!*Iter(T) {
             return struct {
                 pub fn clone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
                     const concrete: *TConcrete = @fieldParentPtr("interface", iter);
@@ -36,7 +36,7 @@ pub fn VTable(comptime T: type) type {
         /// This is provided for a convenient default implementation:
         /// Simply assumes that the `*Iter(T)` is a property named "interface" contained on the concrete type.
         /// Destroys the pointer to the concrete type.
-        pub fn defaultDeinitCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) void {
+        pub inline fn defaultDeinitCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) void {
             return struct {
                 pub fn deinit(iter: *Iter(T), allocator: Allocator) void {
                     const concrete: *TConcrete = @fieldParentPtr("interface", iter);
@@ -116,7 +116,6 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *SliceIterable) ?T {
-                log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(SliceIterable), self, self.* });
                 if (self.interface._missed) |m| {
                     self.interface._missed = null;
                     return m;
@@ -162,7 +161,6 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *OwnedSliceIterable) ?T {
-                log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(OwnedSliceIterable), self, self.* });
                 if (self.interface._missed) |m| {
                     self.interface._missed = null;
                     return m;
@@ -256,7 +254,6 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(MultiArrayListIterable), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -318,7 +315,6 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -381,7 +377,6 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -436,7 +431,6 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
-                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -505,7 +499,6 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?TOther {
-                    log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(Self), self, self.* });
                     if (self.interface._missed) |m| {
                         self.interface._missed = null;
                         return m;
@@ -575,8 +568,6 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *ConcatIterable) ?T {
-                log.debug("Calling next() on {s}->{*}: {any}", .{ @typeName(ConcatIterable), self, self.* });
-                log.debug("Concat iterable index: {d} of {d} sources\n", .{ self.idx, self.sources.len });
                 if (self.interface._missed) |m| {
                     self.interface._missed = null;
                     return m;
@@ -664,7 +655,7 @@ pub fn Iter(comptime T: type) type {
         };
 
         /// Allocate the implementation of the iterator with `allocator`.
-        /// This is how you can clone an iterator or simply store it on the heap.
+        /// This is how you can clone an iterator or simply store one on the heap.
         /// Calls `VTable(T).clone_fn`.
         pub fn alloc(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
             return .{
@@ -1196,7 +1187,6 @@ pub fn compareContext(
     return .{ .context = context };
 }
 
-const log = std.log.scoped(.iter);
 const std = @import("std");
 pub const util = @import("util.zig");
 pub const iter_deprecated = @import("iter_old.zig");

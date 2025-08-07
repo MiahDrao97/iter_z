@@ -579,6 +579,21 @@ test "enumerate to buffer" {
         const result: []u8 = try iter.enumerateToBuffer(&buf);
         try testing.expectEqual(0, result.len);
     }
+    {
+        // enumerate to buffer with a clone
+        var iter = Iter(u8).slice(&util.range(u8, 1, 10));
+        var clone = try iter.interface.alloc(testing.allocator);
+        defer clone.deinit();
+
+        var buf: [10]u8 = undefined;
+        const enumerated: []const u8 = try clone.interface.enumerateToBuffer(&buf);
+        for (enumerated, 1..) |actual, expected| try testing.expectEqual(expected, actual);
+
+        var failing_buf: [4]u8 = undefined;
+        try testing.expectError(error.NoSpaceLeft, clone.reset().enumerateToBuffer(&failing_buf));
+        for (failing_buf, 1..) |actual, expected| try testing.expectEqual(expected, actual);
+        try testing.expectEqual(5, clone.next()); // should pick up the missed value
+    }
 }
 test "filterNext()" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
