@@ -225,7 +225,11 @@ pub fn Iter(comptime T: type) type {
 
         /// Initialize a `SliceIterable` that owns the slice.
         /// Must call `deinit()` on the iterator.
-        pub fn ownedSlice(allocator: Allocator, s: []const T, on_deinit: ?*const fn (Allocator, []T) void) OwnedSliceIterable {
+        pub fn ownedSlice(
+            allocator: Allocator,
+            s: []const T,
+            on_deinit: ?*const fn (Allocator, []T) void,
+        ) OwnedSliceIterable {
             return .{
                 .slice = s,
                 .allocator = allocator,

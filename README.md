@@ -24,7 +24,7 @@ The latest release is `v0.3.0`, which leverages Zig 0.14.1.
     - [any()](#any)
     - [concat()](#concat)
     - [empty](#empty)
-- [Interface Methods](#interfacemethods)
+- [Interface Methods](#interface-methods)
     - [select()](#select)
     - [where()](#where)
     - [alloc()](#alloc)
@@ -175,9 +175,10 @@ while (iter.next()) |x| {
 ### `ownedSlice()`
 This iterator will own the slice passed in, so be sure to call `deinit()` to free that slice.
 The iterator's concrete type is `Iter(T).OwnedSliceIterable`.
+Can optionally pass in a callback when `deinit()` is called, presumably to free memory held by items in the slice.
 ```zig
 const slice: []u8 = try allocator.dupe(u8, "asdf");
-var iter = Iter(u8).ownedSlice(slice);
+var iter = Iter(u8).ownedSlice(allocator, slice, null);
 defer iter.deinit();
 
 while (iter.next()) |x| {
@@ -276,8 +277,8 @@ try dictionary.put(testing.allocator, "blarf", 1);
 try dictionary.put(testing.allocator, "asdf", 2);
 try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
-var dict_iter: HashMap.Iterator = dictionary.iterator();
-var iter = Iter(HashMap.Entry).any(&dict_iter); // alternatively, you can simply pass it by value
+const dict_iter: HashMap.Iterator = dictionary.iterator();
+var iter = Iter(HashMap.Entry).any(dict_iter); // can also pass by pointer
 
 while (iter.next()) |x| {
     // key: "blarf", value: 1
@@ -319,7 +320,7 @@ Besides the virtualized `next()` and `reset()` methods, these are the queries cu
 Transform an iterator of type `T` to type `TOther`.
 Returns a concrete iterable source `Iter(T).Select(comptime TOther: type, comptime TContext: type, comptime transform: fn (TContext, T) TOther)`.
 The `select()` method assumes that the context defines the method `transform()`.
-If that's not the case, you can use [transformContext()](#transformcontext) to create a wrapper struct.
+If that's not the case, you can use [transformContext()](#context-helper-functions) to create a wrapper struct.
 ```zig
 const as_digit = struct {
     var buffer: [4]u8 = undefined;
@@ -340,7 +341,7 @@ while (outer.next()) |x| {
 Return a pared-down iterator that matches the criteria specified in `filter()`.
 Returns a concrete iterable source of type `Iter(T).Where(comptime TContext: type, comptime filter: fn (TContext, T) bool)`.
 The `where()` method assumes the context defines the method `filter()`.
-If that's not the case, you can use [filterContext()](#filtercontext) to create a wrapper struct.
+If that's not the case, you can use [filterContext()](#context-helper-functions) to create a wrapper struct.
 ```zig
 const ZeroRemainder = struct {
     divisor: u32,
@@ -430,6 +431,7 @@ Calls `next()` until an element fulfills the given filter condition or returns n
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
+
 NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
 const testing = @import("std").testing;
@@ -603,27 +605,15 @@ _ = iter.interface.reduce(sum{}); // 6
 ```
 
 ### `reverse()`
-Reverses the direction of iteration. However, you will likely want to also `reset()` the iterator if you reverse before calling `next()`.
-It's as if the end of a slice where its beginning, and its beginning is the end.
-
-WARN : The reversed iterator points to the original, so they move together.
-If that is undesired behavior, create a clone and reverse that instead.
+Enumerates all the items into a slice and reverses the slice.
+Resulting iterator is another instance of [OwnedSliceIterable](#ownedslice), so be sure to call `deinit()`.
 ```zig
-test "reverse" {
-    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-    var reversed: Iter(u8) = iter.reverse();
-    // note that the beginning of the original is the end of the reversed one, thus returning null on `next()` right away.
-    try testing.expectEqual(null, reversed.next());
-    // reset the reversed iterator to set the original to the end of its sequence
-    _ = reversed.reset();
+var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
+var reversed = iter.interface.reverse();
+defer reversed.deinit();
 
-    // length should be equal
-    try testing.expectEqual(3, reversed.len());
-
-    try testing.expectEqual(3, reversed.next().?);
-    try testing.expectEqual(2, reversed.next().?);
-    try testing.expectEqual(1, reversed.next().?);
-    try testing.expectEqual(null, reversed.next());
+while (reversed.next()) |x| {
+    // 3, 2, 1
 }
 ```
 
@@ -632,7 +622,7 @@ Skip `amt` elements. Essentially calls `next()` that many times under the hood.
 Returns `*Iter(T)` to chain the next query.
 ```zig
 var iter = Iter(u8).slice("asdf");
-_ = iter.skip(3).next(); // 'f'
+_ = iter.interface.skip(3).next(); // 'f'
 ```
 
 ### `take()`
@@ -684,7 +674,7 @@ while (page_iter.next()) |x| {
 Context types generated for numerical types for convenience.
 Example usage:
 ```zig
-var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
+var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 _ = iter.reduce(iter_z.autoSum(u8)); // 6
 ```
 
@@ -737,35 +727,26 @@ The functions `filterContext()`, `transformContext()`, `accumulateContext()`, an
 context object that matches the corresponding function signature for filtering, transforming, accumulating, or comparing.
 
 This is helper when the original context is a pointer or the function name differs from `filter`, `transform`, `accumulate`, or `compare`.
-Keep in mind the size of the original context will be the size of the wrapped context (may be relevant when choosing between `select()` and `selectAlloc()`, for example).
 ```zig
-test "context helper fn" {
-    const Multiplier = struct {
-        factor: u8,
-        last: u32 = undefined,
+const Multiplier = struct {
+    factor: u8,
+    last: u32 = undefined,
 
-        pub fn mul(this: *@This(), val: u8) u32 {
-            this.last = val * this.factor;
-            return this.last;
-        }
-    };
-
-    var iter: Iter(u8) = .from(&[_]u8{ 1, 2, 3 });
-
-    var doubler_ctx: Multiplier = .{ .factor = 2 };
-    var doubler: Iter(u32) = try iter.selectAlloc(
-        u32,
-        allocator,
-        transformContext(u8, u32, &doubler_ctx, Multiplier.mul), // context is a ptr type and function name differs from `transform`
-    );
-    defer doubler.deinit();
-
-    var i: usize = 1;
-    while (doubler.next()) |x| : (i += 1) {
-        try testing.expectEqual(i * 2, @as(usize, x));
+    pub fn mul(this: *@This(), val: u8) u32 {
+        this.last = val * this.factor;
+        return this.last;
     }
+};
 
-    try testing.expectEqual(6, doubler_ctx.last);
+var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
+var doubler_ctx: Multiplier = .{ .factor = 2 };
+var doubler = Iter(u32) = iter.select(
+    u32,
+    transformContext(u8, u32, &doubler_ctx, Multiplier.mul), // context is a ptr type and function name differs from `transform`
+);
+
+while (doubler.next()) |x| {
+    // 2, 4, 6
 }
 ```
 
@@ -774,7 +755,7 @@ If you have a transformed iterator, it holds a pointer to the original.
 The original and the transformed iterator move forward together.
 If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source, which may necessitate allocating an iterator.
 
-Methods such as `enumerateToBuffer()`, `enumerateToOwnedSlice()`, `orderBy()`, etc. start at the current offset.
+Methods such as `enumerateToBuffer()`, `toOwnedSlice()`, `orderBy()`, etc. start at the current offset.
 If you wish to start from the beginning, make sure to call `reset()` beforehand.
 
 You may notice the `_missed` field on `Iter(T)`.
