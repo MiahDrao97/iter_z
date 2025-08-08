@@ -488,7 +488,7 @@ while (iter.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
 
 ### `count()`
 Count the number of elements in your iterator with or without a filter.
-This differs from `len()` because it will count the exact number of remaining elements with all transformations applied. Scrolls back in place.
+This differs from `len()` because it will count the exact number of remaining elements with all transformations applied.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
@@ -506,7 +506,7 @@ _ = iter.reset().count(is_even{}); // 2
 ```
 
 ### `all()`
-Determine if all remaining elements fulfill a condition. Scrolls back in place.
+Determine if all remaining elements fulfill a condition.
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 ```zig
 const is_even = struct {
@@ -520,7 +520,7 @@ _ = iter.interface.all(is_even{}); // true
 ```
 
 ### `single()`
-Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration. Scrolls back in place.
+Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 This filter is optional, so you may pass in void literal `{}` or `null` to use no filter.
@@ -536,7 +536,7 @@ _ = iter3.interface.single({}); // null
 ```
 
 ### `contains()`
-Pass in a comparer context. Returns true if any element returns `.eq`. Scrolls back in place.
+Pass in a comparer context. Returns true if any element returns `.eq`.
 `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
@@ -661,7 +661,7 @@ If there are less elements than the size passed in, the slice will be pared down
 const page_size: usize = 20;
 var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
 var page_no: usize = 0;
-var page_iter = try full_iter.interface.scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+var page_iter = try full_iter.interface.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
 defer page_iter.deinit();
 
 var expected: usize = 1;
@@ -672,7 +672,7 @@ while (page_iter.next()) |x| {
 page_no += 2;
 expected += page_size;
 page_iter.deinit();
-page_iter = try full_iter.reset().scroll(page_no * page_size).takeAlloc(testing.allocator, page_size);
+page_iter = try full_iter.reset().skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
 while (page_iter.next()) |x| {
     // third page: expecting values 41-60
 }

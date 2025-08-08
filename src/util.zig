@@ -10,7 +10,7 @@ pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
     if (@as(isize, start) +% len <= start or std.math.maxInt(T) < len) {
         var err_buf: [128]u8 = undefined;
         // if we wrap around, we know that the length goes longer than `T` can possibly hold
-        @panic(std.fmt.bufPrint(&err_buf, @typeName(T) ++ " cannot hold {d} elements starting at {d} without overflow.", .{ len, start }) catch unreachable);
+        @panic(std.fmt.bufPrint(&err_buf, @typeName(T) ++ " cannot count {d} values starting at {d} without overflow.", .{ len, start }) catch unreachable);
     }
 
     var arr: [len]T = undefined;
