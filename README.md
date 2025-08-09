@@ -481,7 +481,6 @@ while (iter.interface.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
 
 ### `count()`
 Count the number of elements in your iterator with or without a filter.
-This differs from `len()` because it will count the exact number of remaining elements with all transformations applied.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
@@ -627,8 +626,7 @@ _ = iter.interface.skip(3).next(); // 'f'
 ```
 
 ### `take()`
-Take `buf.len` elements and return new iterator from that buffer.
-If there are less elements than the buffer size, that will be reflected in `len()`, as only a fraction of the buffer will be referenced.
+Take up to `buf.len` elements and return new iterator from that buffer.
 ```zig
 var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
 var page: [20]u8 = undefined;
