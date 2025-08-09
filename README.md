@@ -77,8 +77,15 @@ In your build.zig.zon, add the following dependency:
 ```
 
 Get your hash from the following:
+
+If you're using Zig 0.14.1, use the latest tagged version. Keep in mind these API's are outdated with the main branch.
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz
+```
+
+Otherwise, I strongly recommend the main branch:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
