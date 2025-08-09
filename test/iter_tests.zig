@@ -597,15 +597,8 @@ test "enumerate to buffer" {
 }
 test "filterNext()" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-    var moved: usize = undefined;
-    try testing.expectEqual(2, iter.interface.filterNext(is_even{}, &moved));
-    try testing.expectEqual(2, moved); // moved 2 elements
-
-    try testing.expectEqual(null, iter.interface.filterNext(is_even{}, &moved));
-    try testing.expectEqual(1, moved); // moved 1 element and then encountered end
-
-    try testing.expectEqual(null, iter.interface.filterNext(is_even{}, &moved));
-    try testing.expectEqual(0, moved); // did not move again
+    try testing.expectEqual(2, iter.interface.filterNext(is_even{}));
+    try testing.expectEqual(null, iter.interface.filterNext(is_even{}));
 }
 test "iter with optionals" {
     var iter = Iter(?u8).slice(&[_]?u8{ 1, 2, null, 3 });

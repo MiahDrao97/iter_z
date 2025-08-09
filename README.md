@@ -381,7 +381,7 @@ var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 const iter_cpy: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
 defer iter_cpy.deinit();
 
-while (iter_cpy) |n| {
+while (iter_cpy.next()) |n| {
     // 1, 2, 3
 }
 ```
@@ -396,7 +396,7 @@ const iter_cpy: Iter(u8).Allocated = try iter.interface.allocReset(testing.alloc
 defer iter_cpy.deinit();
 
 // allocated iterator has been reset (starting at 1 again)
-while (iter_cpy) |n| {
+while (iter_cpy.next()) |n| {
     // 1, 2, 3
 }
 
@@ -439,10 +439,7 @@ Calls `next()` until an element fulfills the given filter condition or returns n
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
-
-NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
-const testing = @import("std").testing;
 const ZeroRemainder = struct {
     divisor: u32,
 
@@ -451,27 +448,15 @@ const ZeroRemainder = struct {
     }
 };
 
-test "filterNext()" {
-    var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-
-    const filter: ZeroRemainder = .{ .divisor = 2 };
-    var moved: usize = undefined;
-    try testing.expectEqual(2, iter.interface.filterNext(filter, &moved));
-    try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
-
-    try testing.expectEqual(null, iter.interface.filterNext(filter, &moved));
-    try testing.expectEqual(1, moved); // moved 1 element and then encountered end
-
-    try testing.expectEqual(null, iter.interface.filterNext(filter, &moved));
-    try testing.expectEqual(0, moved); // did not move again
-}
+var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
+const filter: ZeroRemainder = .{ .divisor = 2 };
+_ = iter.interface.filterNext(filter)); // 2
+_ = iter.interface.filterNext(filter)); // null
 ```
 
 ### `transformNext()`
 Transform the next element from type `T` to type `TOther` (or return null if iteration is over).
 `transform_context` must be a type that defines the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
-
-NOTE : This is preferred over `select()` when simply iterating with a transformation.
 ```zig
 const Multiplier = struct {
     factor: u8,
@@ -481,7 +466,7 @@ const Multiplier = struct {
     }
 };
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-while (iter.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
+while (iter.interface.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
     // 2, 4, 6
 }
 ```
@@ -640,7 +625,7 @@ If there are less elements than the buffer size, that will be reflected in `len(
 var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
 var page: [20]u8 = undefined;
 var page_no: usize = 0;
-var page_iter: Iter(u8) = full_iter.interface.skip(page_no * page.len).take(&page);
+var page_iter = full_iter.interface.skip(page_no * page.len).take(&page);
 
 while (page_iter.next()) |x| {
     // first page: values 1-20
@@ -748,7 +733,7 @@ const Multiplier = struct {
 
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 var doubler_ctx: Multiplier = .{ .factor = 2 };
-var doubler = Iter(u32) = iter.select(
+var doubler = iter.interface.select(
     u32,
     transformContext(u8, u32, &doubler_ctx, Multiplier.mul), // context is a ptr type and function name differs from `transform`
 );

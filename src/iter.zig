@@ -824,19 +824,13 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Find the next element that fulfills a given filter.
-        /// This *does* move the iterator forward, which is reported in the out parameter `moved_forward`.
-        /// NOTE : This method is preferred over `where()` when simply iterating with a filter.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn filterNext(
             self: *Iter(T),
             filter_context: anytype,
-            moved_forward: *usize,
         ) ?T {
-            var moved: usize = 0;
-            defer moved_forward.* = moved;
             while (self.next()) |n| {
-                moved += 1;
                 if (filter_context.filter(n)) {
                     return n;
                 }
@@ -846,7 +840,6 @@ pub fn Iter(comptime T: type) type {
 
         /// Transform the next element from type `T` to type `TOther` (or return null if iteration is over)
         /// `transform_context` must define the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
-        /// NOTE : This method is preferred over `select()` when simply iterating with a transformation.
         pub fn transformNext(self: *Iter(T), comptime TOther: type, transform_context: anytype) ?TOther {
             return if (self.next()) |x|
                 transform_context.transform(x)
@@ -897,8 +890,7 @@ pub fn Iter(comptime T: type) type {
                     };
                 }
             };
-            var moved: usize = undefined;
-            return self.filterNext(Ctx{ .ctx_item = item, .inner = compare_context }, &moved) != null;
+            return self.filterNext(Ctx{ .ctx_item = item, .inner = compare_context }) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining.
