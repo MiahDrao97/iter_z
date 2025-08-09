@@ -738,50 +738,42 @@ pub fn Iter(comptime T: type) type {
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
-        /// If `error.NoSpaceLeft` is returned, then the buffer is full AND sorting still took place with the full buffer.
+        /// If `error.NoSpaceLeft` is returned, the buffer is full.
+        /// User can still sort the returned buffer, but not all of the elements could fit onto it, so it remains unsorted.
         pub fn toBufferSorted(
             self: *Iter(T),
             buf: []T,
             compare_context: anytype,
             ordering: Ordering,
         ) error{NoSpaceLeft}![]T {
-            var exceeded_space: bool = false;
-            const s: []T = self.toBuffer(buf) catch blk: {
-                exceeded_space = true;
-                break :blk buf;
-            };
+            const s: []T = try self.toBuffer(buf);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
-                .slice = s,
                 .ctx = compare_context,
                 .ordering = ordering,
             };
             std.mem.sortUnstable(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return if (exceeded_space) error.NoSpaceLeft else s;
+            return s;
         }
 
         /// Enumerates into sorted buffer, using a stable sorting algorithm.
         /// Note this does not reset `self` but rather starts at the current offset, so you may want to call `reset()` beforehand.
         /// `compare_context` must define the method `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         ///
-        /// If `error.NoSpaceLeft` is returned, then the buffer is full AND sorting still took place with the full buffer.
+        /// If `error.NoSpaceLeft` is returned, the buffer is full.
+        /// User can still sort the returned buffer, but not all of the elements could fit onto it, so it remains unsorted.
         pub fn toBufferSortedStable(
             self: *Iter(T),
             buf: []T,
             compare_context: anytype,
             ordering: Ordering,
         ) error{NoSpaceLeft}![]T {
-            var exceeded_space: bool = false;
-            const s: []T = self.toBuffer(buf) catch blk: {
-                exceeded_space = true;
-                break :blk buf;
-            };
+            const s: []T = try self.toBuffer(buf);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
-                .slice = s,
                 .ctx = compare_context,
                 .ordering = ordering,
             };
             std.mem.sort(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return if (exceeded_space) error.NoSpaceLeft else s;
+            return s;
         }
 
         /// Enumerates into a new slice.
@@ -815,7 +807,6 @@ pub fn Iter(comptime T: type) type {
         ) Allocator.Error![]T {
             const s: []T = try self.toOwnedSlice(allocator);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
-                .slice = s,
                 .ctx = compare_context,
                 .ordering = ordering,
             };
@@ -837,7 +828,6 @@ pub fn Iter(comptime T: type) type {
         ) Allocator.Error![]T {
             const s: []T = try self.toOwnedSlice(allocator);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
-                .slice = s,
                 .ctx = compare_context,
                 .ordering = ordering,
             };
@@ -877,7 +867,8 @@ pub fn Iter(comptime T: type) type {
         /// Enumerates the iterator to the buffer, sorts the buffer with an unstable sorting algorithm, and then returns a new `SliceIterable` over the sorted buffer.
         /// If stable sorting is required, use `orderByBufStable()`.
         ///
-        /// If `error.NoSpaceLeft` is returned, the buffer is full AND sorted.
+        /// If `error.NoSpaceLeft` is returned, the buffer is full.
+        /// User can still sort the returned buffer, but not all of the elements could fit onto it, so it remains unsorted.
         pub fn orderByBuf(
             self: *Iter(T),
             buf: []T,
@@ -890,7 +881,8 @@ pub fn Iter(comptime T: type) type {
 
         /// Enumerates the iterator to the buffer, sorts the buffer with a stable sorting algorithm, and then returns a new `SliceIterable` over the sorted buffer.
         ///
-        /// If `error.NoSpaceLeft` is returned, the buffer is full AND sorted.
+        /// If `error.NoSpaceLeft` is returned, the buffer is full.
+        /// User can still sort the returned buffer, but not all of the elements could fit onto it, so it remains unsorted.
         pub fn orderByBufStable(
             self: *Iter(T),
             buf: []T,
@@ -1046,7 +1038,6 @@ pub const Linkage = enum { single, double };
 fn SortContext(comptime T: type, comptime TContext: type) type {
     return struct {
         ctx: TContext,
-        slice: []T,
         ordering: Ordering,
 
         pub fn lessThan(this: @This(), a: T, b: T) bool {
