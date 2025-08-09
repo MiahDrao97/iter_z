@@ -416,6 +416,8 @@ _ = iter.next(); // 2
 Pass in a comparer function to order your iterator in ascending or descending order (unstable sorting).
 Returns the concrete type [OwnedSliceIterable](#ownedslice) as this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
 Stable sorting is available via `orderByStable()`.
+
+Additionally, there are buffer-based ordering methods as well: `orderByBuf()` and `orderByBufStable()`, which return the [SliceIterable](#slice) concrete type.
 ```zig
 /// equivalent to `iter_z.autoCompare(u8)` -> written out as example
 /// see Auto Contexts section; default comparer function is available to numeric types
@@ -539,6 +541,8 @@ _ = iter.interface.contains(1, iter_z.autoCompare(u8)); // true
 Enumerate all elements to a buffer passed in from the current.
 If you wish to start at the beginning, be sure to call `reset()` beforehand.
 Returns a slice of the buffer or returns `error.NoSpaceLeft` if we've run out of space.
+
+Additionally can return a sorted slice with `toBufferSorted()` and `toBufferSortedStable()`.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 var buf: [5]u8 = undefined;
