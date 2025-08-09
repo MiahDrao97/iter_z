@@ -1191,9 +1191,29 @@ pub fn compareContext(
     return .{ .context = context };
 }
 
+/// Generate an array from `start` to `start + len`
+pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
+    switch (@typeInfo(T)) {
+        .int => {},
+        else => @compileError("Integer type required."),
+    }
+    if (len == 0) {
+        return .{};
+    }
+    if (@as(isize, start) +% len <= start or std.math.maxInt(T) < len) {
+        var err_buf: [128]u8 = undefined;
+        // if we wrap around, we know that the length goes longer than `T` can possibly hold
+        @panic(std.fmt.bufPrint(&err_buf, @typeName(T) ++ " cannot count {d} values starting at {d} without overflow.", .{ len, start }) catch unreachable);
+    }
+
+    var arr: [len]T = undefined;
+    for (&arr, 0..) |*x, i| x.* = start + @as(T, @intCast(i));
+
+    return arr;
+}
+
 const std = @import("std");
-pub const util = @import("util.zig");
-pub const iter_deprecated = @import("iter_old.zig");
+pub const iter_deprecated = @import("iter_deprecated.zig");
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 const DoublyLinkedList = std.DoublyLinkedList;

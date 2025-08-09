@@ -175,9 +175,9 @@ pub fn SelectAlloc(
 }
 
 const std = @import("std");
-const iter = @import("iter_old.zig");
+const iter = @import("iter_deprecated.zig");
 const Iter = iter.Iter;
-const ClonedIter = @import("util.zig").ClonedIter;
+const ClonedIter = iter.ClonedIter;
 const AnonymousIterable = iter.AnonymousIterable;
 const VTable = iter.VTable;
 const Allocator = std.mem.Allocator;

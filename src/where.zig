@@ -174,10 +174,9 @@ pub fn WhereAlloc(comptime T: type, comptime TContext: type) type {
 }
 
 const std = @import("std");
-const iter = @import("iter_old.zig");
-const util = @import("util.zig");
+const iter = @import("iter_deprecated.zig");
 const Allocator = std.mem.Allocator;
 const Iter = iter.Iter;
 const AnonymousIterable = iter.AnonymousIterable;
 const VTable = iter.VTable;
-const ClonedIter = util.ClonedIter;
+const ClonedIter = iter.ClonedIter;

@@ -49,7 +49,7 @@ fn strCompare(_: void, a: []const u8, b: []const u8) std.math.Order {
         .eq;
 }
 test "negative start range" {
-    const arr: [3]i8 = util.range(i8, -1, 3);
+    const arr: [3]i8 = iter_z.range(i8, -1, 3);
     try std.testing.expectEqual(-1, arr[0]);
     try std.testing.expectEqual(0, arr[1]);
     try std.testing.expectEqual(1, arr[2]);
@@ -119,7 +119,7 @@ test "does the context seg-fault?" {
 }
 test "toOwnedSlice" {
     {
-        var inner = Iter(u8).slice(&util.range(u8, 1, 3));
+        var inner = Iter(u8).slice(&iter_z.range(u8, 1, 3));
         var iter = inner.interface.where(is_even{});
 
         var i: usize = 0;
@@ -282,7 +282,7 @@ test "clone with select" {
         }
     };
 
-    var iter = Iter(u8).slice(&util.range(u8, 1, 6));
+    var iter = Iter(u8).slice(&iter_z.range(u8, 1, 6));
     var outer = iter.interface.select([]const u8, as_digit{});
 
     as_digit.representation = .decimal;
@@ -333,7 +333,7 @@ test "Overlapping select edge cases" {
         }
     }.getMultiplier;
 
-    var iter = Iter(u8).slice(&util.range(u8, 1, 3));
+    var iter = Iter(u8).slice(&iter_z.range(u8, 1, 3));
     const clone: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
     defer clone.deinit();
 
@@ -556,7 +556,7 @@ test "from other - skip first" {
 }
 test "enumerate to buffer" {
     {
-        var iter = Iter(u8).slice(&util.range(u8, 1, 8));
+        var iter = Iter(u8).slice(&iter_z.range(u8, 1, 8));
         var buf1: [8]u8 = undefined;
 
         const result: []u8 = try iter.interface.enumerateToBuffer(&buf1);
@@ -581,7 +581,7 @@ test "enumerate to buffer" {
     }
     {
         // enumerate to buffer with a clone
-        var iter = Iter(u8).slice(&util.range(u8, 1, 10));
+        var iter = Iter(u8).slice(&iter_z.range(u8, 1, 10));
         var clone = try iter.interface.alloc(testing.allocator);
         defer clone.deinit();
 
@@ -669,7 +669,7 @@ test "multi array list" {
 }
 test "pagination with skip + take" {
     {
-        var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
+        var full_iter = Iter(u8).slice(&iter_z.range(u8, 1, 200));
         var page: [20]u8 = undefined;
         var page_no: usize = 0;
         var page_iter: Iter(u8).SliceIterable = full_iter.interface.skip(page_no * page.len).take(&page);
@@ -697,7 +697,7 @@ test "pagination with skip + take" {
     // take alloc
     {
         const page_size: usize = 20;
-        var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
+        var full_iter = Iter(u8).slice(&iter_z.range(u8, 1, 200));
         var page_no: usize = 0;
         var page_iter: Iter(u8).OwnedSliceIterable = try full_iter.interface.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
         defer page_iter.deinit();
@@ -796,7 +796,6 @@ test "empty linked lists" {
 
 const std = @import("std");
 const iter_z = @import("iter_z");
-const util = iter_z.util;
 const testing = std.testing;
 const Iter = iter_z.Iter;
 const Allocator = std.mem.Allocator;

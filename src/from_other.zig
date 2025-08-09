@@ -61,7 +61,7 @@ pub fn OtherIterable(
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const iter = @import("iter_old.zig");
+const iter = @import("iter_deprecated.zig");
 const Iter = iter.Iter;
 const AnonymousIterable = iter.AnonymousIterable;
 const VTable = iter.VTable;
