@@ -554,18 +554,18 @@ test "from other - skip first" {
         try testing.expectEqual(null, iter.next());
     }
 }
-test "enumerate to buffer" {
+test "to buffer" {
     {
         var iter = Iter(u8).slice(&iter_z.range(u8, 1, 8));
         var buf1: [8]u8 = undefined;
 
-        const result: []u8 = try iter.interface.enumerateToBuffer(&buf1);
+        const result: []u8 = try iter.interface.toBuffer(&buf1);
         for (result, 1..) |x, i| {
             try testing.expectEqual(i, x);
         }
 
         var buf2: [4]u8 = undefined;
-        try testing.expectError(error.NoSpaceLeft, iter.reset().enumerateToBuffer(&buf2));
+        try testing.expectError(error.NoSpaceLeft, iter.reset().toBuffer(&buf2));
         for (buf2, 1..) |x, i| {
             try testing.expectEqual(i, x);
         }
@@ -576,7 +576,7 @@ test "enumerate to buffer" {
         var iter: Iter(u8) = .empty;
         var buf: [10]u8 = undefined;
 
-        const result: []u8 = try iter.enumerateToBuffer(&buf);
+        const result: []u8 = try iter.toBuffer(&buf);
         try testing.expectEqual(0, result.len);
     }
     {
@@ -586,11 +586,11 @@ test "enumerate to buffer" {
         defer clone.deinit();
 
         var buf: [10]u8 = undefined;
-        const enumerated: []const u8 = try clone.interface.enumerateToBuffer(&buf);
+        const enumerated: []const u8 = try clone.interface.toBuffer(&buf);
         for (enumerated, 1..) |actual, expected| try testing.expectEqual(expected, actual);
 
         var failing_buf: [4]u8 = undefined;
-        try testing.expectError(error.NoSpaceLeft, clone.reset().enumerateToBuffer(&failing_buf));
+        try testing.expectError(error.NoSpaceLeft, clone.reset().toBuffer(&failing_buf));
         for (failing_buf, 1..) |actual, expected| try testing.expectEqual(expected, actual);
         try testing.expectEqual(5, clone.next()); // should pick up the missed value
     }

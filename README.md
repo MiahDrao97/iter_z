@@ -44,7 +44,7 @@ Hoping that's the last major API change and that we can focus on new queries in 
     - [all()](#all)
     - [single()](#single)
     - [contains()](#contains)
-    - [enumerateToBuffer()](#enumeratetobuffer)
+    - [toBuffer()](#enumeratetobuffer)
     - [toOwnedSlice()](#toownedslice)
     - [fold()](#fold)
     - [reduce()](#reduce)
@@ -242,9 +242,9 @@ The iterator's concrete type is `Iter(T).LinkedListIterable(comptime linkage: Li
     var c: MyStruct = .{ .val = 3 };
 
     var list: DoublyLinkedList = .{};
-    list.prepend(&a.node);
-    a.node.insertAfter(&b.node);
-    b.node.insertAfter(&c.node);
+    list.append(&a.node);
+    list.append(&b.node);
+    list.append(&c.node);
 
     var iter = Iter(MyStruct).linkedList(.double, "node", list);
     while (iter.next()) |x| {
@@ -282,7 +282,8 @@ while (iter.next()) |s| {
 Use any type that defines a `next()` method as an iterable source.
 The concrete type is `Iter(T).AnyIterable(comptime TContext: type)`, where `TContext` is the other iterator's type.
 Generally, the only reason to use this is to take advantage of the queries provided through `Iter(T)`, with this other iterator as a source.
-The following example is trivial, but in practice there's no reason to wrap another iterator simply to iterate through it.
+The following example is trivial and shouldn't be done in practice unless you want to do actual filtering/transformations/etc.
+Simply iterating isn't enough justification.
 ```zig
 const HashMap = std.StringArrayHashMapUnmanaged(u32);
 var dictionary: HashMap = .empty;
@@ -322,7 +323,7 @@ while (iter.next()) |x| {
 ```
 
 ### `empty`
-This is the empty iterable source. It has no concrete type as it's simply a vtable that returns `null` on `next()` and no-ops on `reset()`.
+This is the empty iterable source. It has no concrete type as it's simply a vtable that returns `null` on `next()` and returns itself on `reset()`.
 ```zig
 var iter: Iter(T) = .empty;
 _ = iter.next(); // null
@@ -376,7 +377,7 @@ while (evens.next()) |x| {
 ### `alloc()`
 Allocate the iterator for storage purposes or to create a clone.
 Returns the concrete type `Iter(T).Allocated`, but unlike the iterable sources, this is not a true implemention of `Iter(T)`.
-It's merely a holder of the allocator that created the clone and the resulting `*Iter()`.
+It's merely a holder of the allocator that created the clone and the resulting `*Iter(T)`.
 Be sure to call `deinit()` to free the memory.
 
 There are two functions in `VTable(T)` that this method leverages: One to create the clone and another to deinitialize the clone.
@@ -535,17 +536,17 @@ var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 _ = iter.interface.contains(1, iter_z.autoCompare(u8)); // true
 ```
 
-### `enumerateToBuffer()`
+### `toBuffer()`
 Enumerate all elements to a buffer passed in from the current.
 If you wish to start at the beginning, be sure to call `reset()` beforehand.
 Returns a slice of the buffer or returns `error.NoSpaceLeft` if we've run out of space.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 var buf: [5]u8 = undefined;
-_ = try iter.interface.enumerateToBuffer(&buf); // success! [ 1, 2, 3 ]
+_ = try iter.interface.toBuffer(&buf); // success! [ 1, 2, 3 ]
 
 var buf2: [2]u8 = undefined;
-const result: []u8 = iter.reset().enumerateToBuffer(&buf2) catch &buf2; // fails, but buffer contains [ 1, 2 ]
+const result: []u8 = iter.reset().toBuffer(&buf2) catch &buf2; // fails, but buffer contains [ 1, 2 ]
 _ = iter.next(); // 3 is the next element after our error
 ```
 
@@ -755,12 +756,12 @@ If you have a transformed iterator, it holds a pointer to the original.
 The original and the transformed iterator move forward together.
 If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source, which may necessitate allocating an iterator.
 
-Methods such as `enumerateToBuffer()`, `toOwnedSlice()`, `orderBy()`, etc. start at the current offset.
+Methods such as `toBuffer()`, `toOwnedSlice()`, `orderBy()`, etc. start at the current offset.
 If you wish to start from the beginning, make sure to call `reset()` beforehand.
 
 You may notice the `_missed` field on `Iter(T)`.
 This is not intended to be directly accessed by users.
-However, when an error causes the iterator to drop the current result, it's saved here instead (example: `enumerateToBuffer()`).
+However, when an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
 It's the responsibility of the implementations to use this missed value and/or clear it.
 
 ## Extensibility

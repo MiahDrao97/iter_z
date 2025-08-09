@@ -53,7 +53,7 @@ pub fn Iter(comptime T: type) type {
         /// Virtual table
         vtable: *const VTable(T),
         /// Not intended to be directly accessed by users.
-        /// When an error causes the iterator to drop the current result, it's saved here instead (example: `enumerateToBuffer()`).
+        /// When an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
         /// It's the responsibility of the implementations to use this missed value and/or clear it.
         _missed: ?T = null,
 
@@ -687,7 +687,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Take `buf.len` and return new iterator from that buffer.
         pub fn take(self: *Iter(T), buf: []T) SliceIterable {
-            const result: []T = self.enumerateToBuffer(buf) catch buf;
+            const result: []T = self.toBuffer(buf) catch buf;
             return slice(result);
         }
 
@@ -696,7 +696,7 @@ pub fn Iter(comptime T: type) type {
             const buf: []T = try allocator.alloc(T, amt);
             errdefer allocator.free(buf);
 
-            const result: []T = self.enumerateToBuffer(buf) catch buf;
+            const result: []T = self.toBuffer(buf) catch buf;
             if (result.len == 0) {
                 // segmentation fault otherwise
                 allocator.free(buf);
@@ -721,7 +721,7 @@ pub fn Iter(comptime T: type) type {
         /// Returns a slice of `buf`, containing the enumerated elements.
         /// If space on `buf` runs out, returns `error.NoSpaceLeft`.
         /// However, the buffer will still hold the elements encountered before running out of space.
-        pub fn enumerateToBuffer(self: *Iter(T), buf: []T) error{NoSpaceLeft}![]T {
+        pub fn toBuffer(self: *Iter(T), buf: []T) error{NoSpaceLeft}![]T {
             var i: usize = 0;
             while (self.next()) |x| : (i += 1) {
                 errdefer self._missed = x;
