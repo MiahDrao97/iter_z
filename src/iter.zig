@@ -78,27 +78,29 @@ pub fn Iter(comptime T: type) type {
             self.vtable.deinit_clone_fn(self, allocator);
         }
 
+        const empty_iterable = struct {
+            fn next(_: *Iter(T)) ?T {
+                return null;
+            }
+
+            fn reset(iter: *Iter(T)) *Iter(T) {
+                return iter;
+            }
+
+            fn clone(iter: *Iter(T), _: Allocator) Allocator.Error!*Iter(T) {
+                return iter;
+            }
+
+            fn deinitClone(_: *Iter(T), _: Allocator) void {}
+        };
+
         /// Empty iterator
         pub const empty: Iter(T) = .{
             .vtable = &VTable(T){
-                .next_fn = &struct {
-                    pub fn next(_: *Iter(T)) ?T {
-                        return null;
-                    }
-                }.next,
-                .reset_fn = &struct {
-                    pub fn reset(iter: *Iter(T)) *Iter(T) {
-                        return iter;
-                    }
-                }.reset,
-                .clone_fn = &struct {
-                    pub fn clone(iter: *Iter(T), _: Allocator) Allocator.Error!*Iter(T) {
-                        return iter;
-                    }
-                }.clone,
-                .deinit_clone_fn = &struct {
-                    pub fn deinitClone(_: *Iter(T), _: Allocator) void {}
-                }.deinitClone,
+                .next_fn = &empty_iterable.next,
+                .reset_fn = &empty_iterable.reset,
+                .clone_fn = &empty_iterable.clone,
+                .deinit_clone_fn = &empty_iterable.deinitClone,
             },
         };
 
