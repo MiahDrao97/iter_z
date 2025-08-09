@@ -10,7 +10,7 @@ The latest release is `v0.3.0`, which leverages Zig 0.14.1.
 
 WARNING: `v0.3.0` is an older API than what's in the main branch.
 [Issue #10](https://github.com/MiahDrao97/iter_z/issues/10) resulted in a complete overhaul of the API's, removing the ability for the iterator's length to be known and to move backwards.
-These limitations allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to a `@fieldParentPtr()` strategy.
+Limiting the v-table allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to a `@fieldParentPtr()` strategy.
 This resulted in more flexibility, less code, and better performance in most cases.
 
 Once Zig 0.15.0 is released, then `v0.4.0` will be tagged.
@@ -330,7 +330,7 @@ Returns a concrete iterable source `Iter(T).Select(comptime TOther: type, compti
 The `select()` method assumes that the context defines the method `transform()`.
 If that's not the case, you can use [transformContext()](#context-helper-functions) to create a wrapper struct.
 ```zig
-const as_digit = struct {
+const digit_to_str = struct {
     var buffer: [4]u8 = undefined;
 
     pub fn transform(_: @This(), byte: u8) []const u8 {
@@ -339,7 +339,7 @@ const as_digit = struct {
 };
 
 var iter = Iter(u8).slice(&util.range(u8, 1, 6));
-var outer = iter.interface.select([]const u8, as_digit{});
+var outer = iter.interface.select([]const u8, digit_to_str{});
 while (outer.next()) |x| {
     // "1", "2", "3", "4", "5", "6"
 }
@@ -668,7 +668,7 @@ Context types generated for numerical types for convenience.
 Example usage:
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-_ = iter.reduce(iter_z.autoSum(u8)); // 6
+_ = iter.interface.reduce(iter_z.autoSum(u8)); // 6
 ```
 
 Here are the underlying contexts generated:
