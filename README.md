@@ -10,7 +10,7 @@ The latest release is `v0.3.0`, which leverages Zig 0.14.1.
 
 WARNING: `v0.3.0` is an older API than what's in the main branch.
 [Issue #10](https://github.com/MiahDrao97/iter_z/issues/10) resulted in a complete overhaul of the API's, removing the ability for the iterator's length to be known and to move backwards.
-These limitations allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to a `@fieldParentPtr()` strategy.
+Limiting the v-table allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to a `@fieldParentPtr()` strategy.
 This resulted in more flexibility, less code, and better performance in most cases.
 
 Once Zig 0.15.0 is released, then `v0.4.0` will be tagged.
@@ -44,7 +44,7 @@ Hoping that's the last major API change and that we can focus on new queries in 
     - [all()](#all)
     - [single()](#single)
     - [contains()](#contains)
-    - [enumerateToBuffer()](#enumeratetobuffer)
+    - [toBuffer()](#enumeratetobuffer)
     - [toOwnedSlice()](#toownedslice)
     - [fold()](#fold)
     - [reduce()](#reduce)
@@ -77,8 +77,15 @@ In your build.zig.zon, add the following dependency:
 ```
 
 Get your hash from the following:
+
+If you're using Zig 0.14.1, use the latest tagged version. Keep in mind these API's are outdated with the main branch.
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz
+```
+
+Otherwise, I strongly recommend the main branch:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
@@ -235,9 +242,9 @@ The iterator's concrete type is `Iter(T).LinkedListIterable(comptime linkage: Li
     var c: MyStruct = .{ .val = 3 };
 
     var list: DoublyLinkedList = .{};
-    list.prepend(&a.node);
-    a.node.insertAfter(&b.node);
-    b.node.insertAfter(&c.node);
+    list.append(&a.node);
+    list.append(&b.node);
+    list.append(&c.node);
 
     var iter = Iter(MyStruct).linkedList(.double, "node", list);
     while (iter.next()) |x| {
@@ -275,7 +282,8 @@ while (iter.next()) |s| {
 Use any type that defines a `next()` method as an iterable source.
 The concrete type is `Iter(T).AnyIterable(comptime TContext: type)`, where `TContext` is the other iterator's type.
 Generally, the only reason to use this is to take advantage of the queries provided through `Iter(T)`, with this other iterator as a source.
-The following example is trivial, but in practice there's no reason to wrap another iterator simply to iterate through it.
+The following example is trivial and shouldn't be done in practice unless you want to do actual filtering/transformations/etc.
+Simply iterating isn't enough justification.
 ```zig
 const HashMap = std.StringArrayHashMapUnmanaged(u32);
 var dictionary: HashMap = .empty;
@@ -315,7 +323,7 @@ while (iter.next()) |x| {
 ```
 
 ### `empty`
-This is the empty iterable source. It has no concrete type as it's simply a vtable that returns `null` on `next()` and no-ops on `reset()`.
+This is the empty iterable source. It has no concrete type as it's simply a vtable that returns `null` on `next()` and returns itself on `reset()`.
 ```zig
 var iter: Iter(T) = .empty;
 _ = iter.next(); // null
@@ -330,7 +338,7 @@ Returns a concrete iterable source `Iter(T).Select(comptime TOther: type, compti
 The `select()` method assumes that the context defines the method `transform()`.
 If that's not the case, you can use [transformContext()](#context-helper-functions) to create a wrapper struct.
 ```zig
-const as_digit = struct {
+const digit_to_str = struct {
     var buffer: [4]u8 = undefined;
 
     pub fn transform(_: @This(), byte: u8) []const u8 {
@@ -339,7 +347,7 @@ const as_digit = struct {
 };
 
 var iter = Iter(u8).slice(&util.range(u8, 1, 6));
-var outer = iter.interface.select([]const u8, as_digit{});
+var outer = iter.interface.select([]const u8, digit_to_str{});
 while (outer.next()) |x| {
     // "1", "2", "3", "4", "5", "6"
 }
@@ -369,7 +377,7 @@ while (evens.next()) |x| {
 ### `alloc()`
 Allocate the iterator for storage purposes or to create a clone.
 Returns the concrete type `Iter(T).Allocated`, but unlike the iterable sources, this is not a true implemention of `Iter(T)`.
-It's merely a holder of the allocator that created the clone and the resulting `*Iter()`.
+It's merely a holder of the allocator that created the clone and the resulting `*Iter(T)`.
 Be sure to call `deinit()` to free the memory.
 
 There are two functions in `VTable(T)` that this method leverages: One to create the clone and another to deinitialize the clone.
@@ -381,7 +389,7 @@ var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 const iter_cpy: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
 defer iter_cpy.deinit();
 
-while (iter_cpy) |n| {
+while (iter_cpy.next()) |n| {
     // 1, 2, 3
 }
 ```
@@ -396,7 +404,7 @@ const iter_cpy: Iter(u8).Allocated = try iter.interface.allocReset(testing.alloc
 defer iter_cpy.deinit();
 
 // allocated iterator has been reset (starting at 1 again)
-while (iter_cpy) |n| {
+while (iter_cpy.next()) |n| {
     // 1, 2, 3
 }
 
@@ -408,6 +416,8 @@ _ = iter.next(); // 2
 Pass in a comparer function to order your iterator in ascending or descending order (unstable sorting).
 Returns the concrete type [OwnedSliceIterable](#ownedslice) as this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
 Stable sorting is available via `orderByStable()`.
+
+Additionally, there are buffer-based ordering methods as well: `orderByBuf()` and `orderByBufStable()`, which return the [SliceIterable](#slice) concrete type.
 ```zig
 /// equivalent to `iter_z.autoCompare(u8)` -> written out as example
 /// see Auto Contexts section; default comparer function is available to numeric types
@@ -439,10 +449,7 @@ Calls `next()` until an element fulfills the given filter condition or returns n
 Writes the number of elements moved forward to the out parameter `moved_forward`.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
-
-NOTE : This is preferred over `where()` when simply iterating with a filter.
 ```zig
-const testing = @import("std").testing;
 const ZeroRemainder = struct {
     divisor: u32,
 
@@ -451,27 +458,15 @@ const ZeroRemainder = struct {
     }
 };
 
-test "filterNext()" {
-    var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-
-    const filter: ZeroRemainder = .{ .divisor = 2 };
-    var moved: usize = undefined;
-    try testing.expectEqual(2, iter.interface.filterNext(filter, &moved));
-    try testing.expectEqual(2, moved); // moved 2 elements (1, then 2)
-
-    try testing.expectEqual(null, iter.interface.filterNext(filter, &moved));
-    try testing.expectEqual(1, moved); // moved 1 element and then encountered end
-
-    try testing.expectEqual(null, iter.interface.filterNext(filter, &moved));
-    try testing.expectEqual(0, moved); // did not move again
-}
+var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
+const filter: ZeroRemainder = .{ .divisor = 2 };
+_ = iter.interface.filterNext(filter)); // 2
+_ = iter.interface.filterNext(filter)); // null
 ```
 
 ### `transformNext()`
 Transform the next element from type `T` to type `TOther` (or return null if iteration is over).
 `transform_context` must be a type that defines the method: `fn transform(@TypeOf(transform_context), T) TOther` (similar to `select()`).
-
-NOTE : This is preferred over `select()` when simply iterating with a transformation.
 ```zig
 const Multiplier = struct {
     factor: u8,
@@ -481,14 +476,13 @@ const Multiplier = struct {
     }
 };
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-while (iter.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
+while (iter.interface.transformNext(u32, Multiplier{ .factor = 2 })) |x| {
     // 2, 4, 6
 }
 ```
 
 ### `count()`
 Count the number of elements in your iterator with or without a filter.
-This differs from `len()` because it will count the exact number of remaining elements with all transformations applied.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
@@ -543,17 +537,19 @@ var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 _ = iter.interface.contains(1, iter_z.autoCompare(u8)); // true
 ```
 
-### `enumerateToBuffer()`
+### `toBuffer()`
 Enumerate all elements to a buffer passed in from the current.
 If you wish to start at the beginning, be sure to call `reset()` beforehand.
 Returns a slice of the buffer or returns `error.NoSpaceLeft` if we've run out of space.
+
+Additionally can return a sorted slice with `toBufferSorted()` and `toBufferSortedStable()`.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 var buf: [5]u8 = undefined;
-_ = try iter.interface.enumerateToBuffer(&buf); // success! [ 1, 2, 3 ]
+_ = try iter.interface.toBuffer(&buf); // success! [ 1, 2, 3 ]
 
 var buf2: [2]u8 = undefined;
-const result: []u8 = iter.reset().enumerateToBuffer(&buf2) catch &buf2; // fails, but buffer contains [ 1, 2 ]
+const result: []u8 = iter.reset().toBuffer(&buf2) catch &buf2; // fails, but buffer contains [ 1, 2 ]
 _ = iter.next(); // 3 is the next element after our error
 ```
 
@@ -634,13 +630,12 @@ _ = iter.interface.skip(3).next(); // 'f'
 ```
 
 ### `take()`
-Take `buf.len` elements and return new iterator from that buffer.
-If there are less elements than the buffer size, that will be reflected in `len()`, as only a fraction of the buffer will be referenced.
+Take up to `buf.len` elements and return new iterator from that buffer.
 ```zig
 var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
 var page: [20]u8 = undefined;
 var page_no: usize = 0;
-var page_iter: Iter(u8) = full_iter.interface.skip(page_no * page.len).take(&page);
+var page_iter = full_iter.interface.skip(page_no * page.len).take(&page);
 
 while (page_iter.next()) |x| {
     // first page: values 1-20
@@ -683,7 +678,7 @@ Context types generated for numerical types for convenience.
 Example usage:
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-_ = iter.reduce(iter_z.autoSum(u8)); // 6
+_ = iter.interface.reduce(iter_z.autoSum(u8)); // 6
 ```
 
 Here are the underlying contexts generated:
@@ -748,7 +743,7 @@ const Multiplier = struct {
 
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 var doubler_ctx: Multiplier = .{ .factor = 2 };
-var doubler = Iter(u32) = iter.select(
+var doubler = iter.interface.select(
     u32,
     transformContext(u8, u32, &doubler_ctx, Multiplier.mul), // context is a ptr type and function name differs from `transform`
 );
@@ -763,12 +758,12 @@ If you have a transformed iterator, it holds a pointer to the original.
 The original and the transformed iterator move forward together.
 If you encounter unexpected behavior with multiple iterators, this may be due to all of them pointing to the same source, which may necessitate allocating an iterator.
 
-Methods such as `enumerateToBuffer()`, `toOwnedSlice()`, `orderBy()`, etc. start at the current offset.
+Methods such as `toBuffer()`, `toOwnedSlice()`, `orderBy()`, etc. start at the current offset.
 If you wish to start from the beginning, make sure to call `reset()` beforehand.
 
 You may notice the `_missed` field on `Iter(T)`.
 This is not intended to be directly accessed by users.
-However, when an error causes the iterator to drop the current result, it's saved here instead (example: `enumerateToBuffer()`).
+However, when an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
 It's the responsibility of the implementations to use this missed value and/or clear it.
 
 ## Extensibility

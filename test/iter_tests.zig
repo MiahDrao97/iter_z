@@ -237,6 +237,46 @@ test "orderBy" {
     }
     try testing.expect(i == 0);
 }
+test "order by buffer" {
+    // vanilla
+    {
+        const nums: []const u16 = &iter_z.range(u16, 1, 10);
+        var iter = Iter(u16).slice(nums);
+        var buf: [10]u16 = undefined;
+        var shuffled = try iter.interface.orderByBuf(&buf, struct {
+            pub fn compare(_: @This(), x: u16, _: u16) std.math.Order {
+                const time: i128 = std.time.nanoTimestamp();
+                const trunc: u16 = @bitCast(@as(i16, @truncate(time)));
+                const seed: u16 = @intCast(@rem(trunc, 17));
+                return if (x < seed)
+                    .lt
+                else if (x > seed)
+                    .gt
+                else
+                    .eq;
+            }
+        }{}, .asc);
+        var buf2: [10]u16 = undefined;
+        var sorted = try shuffled.interface.orderByBuf(&buf2, autoCompare(u16), .asc);
+        var expected: u16 = 1;
+        while (sorted.next()) |actual| : (expected += 1) {
+            try testing.expectEqual(expected, actual);
+        }
+
+        var sortedDesc = try shuffled.reset().orderByBuf(&buf2, autoCompare(u16), .desc);
+        expected -= 1;
+        while (sortedDesc.next()) |actual| : (expected -= 1) {
+            try testing.expectEqual(expected, actual);
+        }
+    }
+    // spicy
+    {
+        const too_many: []const u16 = &iter_z.range(u16, 1, 100);
+        var iter = Iter(u16).slice(too_many);
+        var buf: [10]u16 = undefined;
+        try testing.expectError(error.NoSpaceLeft, iter.interface.orderByBuf(&buf, autoCompare(u16), .asc));
+    }
+}
 test "single" {
     var iter = Iter(u8).slice("racecar");
 
@@ -554,18 +594,18 @@ test "from other - skip first" {
         try testing.expectEqual(null, iter.next());
     }
 }
-test "enumerate to buffer" {
+test "to buffer" {
     {
         var iter = Iter(u8).slice(&iter_z.range(u8, 1, 8));
         var buf1: [8]u8 = undefined;
 
-        const result: []u8 = try iter.interface.enumerateToBuffer(&buf1);
+        const result: []u8 = try iter.interface.toBuffer(&buf1);
         for (result, 1..) |x, i| {
             try testing.expectEqual(i, x);
         }
 
         var buf2: [4]u8 = undefined;
-        try testing.expectError(error.NoSpaceLeft, iter.reset().enumerateToBuffer(&buf2));
+        try testing.expectError(error.NoSpaceLeft, iter.reset().toBuffer(&buf2));
         for (buf2, 1..) |x, i| {
             try testing.expectEqual(i, x);
         }
@@ -576,7 +616,7 @@ test "enumerate to buffer" {
         var iter: Iter(u8) = .empty;
         var buf: [10]u8 = undefined;
 
-        const result: []u8 = try iter.enumerateToBuffer(&buf);
+        const result: []u8 = try iter.toBuffer(&buf);
         try testing.expectEqual(0, result.len);
     }
     {
@@ -586,26 +626,19 @@ test "enumerate to buffer" {
         defer clone.deinit();
 
         var buf: [10]u8 = undefined;
-        const enumerated: []const u8 = try clone.interface.enumerateToBuffer(&buf);
+        const enumerated: []const u8 = try clone.interface.toBuffer(&buf);
         for (enumerated, 1..) |actual, expected| try testing.expectEqual(expected, actual);
 
         var failing_buf: [4]u8 = undefined;
-        try testing.expectError(error.NoSpaceLeft, clone.reset().enumerateToBuffer(&failing_buf));
+        try testing.expectError(error.NoSpaceLeft, clone.reset().toBuffer(&failing_buf));
         for (failing_buf, 1..) |actual, expected| try testing.expectEqual(expected, actual);
         try testing.expectEqual(5, clone.next()); // should pick up the missed value
     }
 }
 test "filterNext()" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-    var moved: usize = undefined;
-    try testing.expectEqual(2, iter.interface.filterNext(is_even{}, &moved));
-    try testing.expectEqual(2, moved); // moved 2 elements
-
-    try testing.expectEqual(null, iter.interface.filterNext(is_even{}, &moved));
-    try testing.expectEqual(1, moved); // moved 1 element and then encountered end
-
-    try testing.expectEqual(null, iter.interface.filterNext(is_even{}, &moved));
-    try testing.expectEqual(0, moved); // did not move again
+    try testing.expectEqual(2, iter.interface.filterNext(is_even{}));
+    try testing.expectEqual(null, iter.interface.filterNext(is_even{}));
 }
 test "iter with optionals" {
     var iter = Iter(?u8).slice(&[_]?u8{ 1, 2, null, 3 });
