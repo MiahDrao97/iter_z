@@ -510,7 +510,7 @@ Count the number of elements in your iterator with or without a filter.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
 It does not need to be a pointer since it's not being stored as a member of a structure.
-Also, since this filter is optional, you may pass in void literal `{}` or `null` to use no filter.
+Also, since this filter is optional, you may pass in void literal `{}` to use no filter.
 ```zig
 const is_even = struct {
     pub fn filter(_: @This(), item: u32) bool {
@@ -541,7 +541,7 @@ _ = iter.interface.all(is_even{}); // true
 Determine if exactly 1 or 0 elements fulfill a condition or are left in the iteration.
 
 The filter context is like the one in `where()`: It must define the method `fn filter(@TypeOf(filter_context), T) bool`.
-This filter is optional, so you may pass in void literal `{}` or `null` to use no filter.
+This filter is optional, so you may pass in void literal `{}` to use no filter.
 ```zig
 var iter1 = Iter(u8).slice("a");
 _ = iter1.interface.single({}); // 'a'
