@@ -38,6 +38,7 @@ Hoping that's the last major API change and that we can focus on new queries in 
     - [alloc()](#alloc)
     - [allocReset()](#allocreset)
     - [orderBy()](#orderby)
+    - [peek()](#peek)
     - [filterNext()](#filternext)
     - [transformNext()](#transformnext)
     - [count()](#count)
