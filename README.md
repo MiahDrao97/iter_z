@@ -444,6 +444,29 @@ while (ordered.next()) |x| {
 }
 ```
 
+### `peek()`
+Peeks at the next element with or without a filter (pass in void literal `{}` for no filter), but does not advance the iterator's position.
+`next()` will return the peeked element and then advance the iterator.
+```zig
+const is_numeric = struct {
+    pub fn filter(_: @This(), char: u8) bool {
+        return if (std.fmt.parseUnsigned(u8, &.{char}, 10)) |_|
+            true
+        else |_|
+            false;
+    }
+};
+
+var iter = Iter(u8).slice("abc123");
+
+_ = iter.interface.peek({}); // 'a'
+_ = iter.next(); // returns 'a' again
+_ = iter.interface.peek({}); // 'b'
+
+_ = iter.interface.peek(is_numeric{})); // '1'
+_ = iter.next(); // returns '1' again
+```
+
 ### `filterNext()`
 Calls `next()` until an element fulfills the given filter condition or returns null if none are found/iteration is over.
 Writes the number of elements moved forward to the out parameter `moved_forward`.
