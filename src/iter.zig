@@ -893,6 +893,25 @@ pub fn Iter(comptime T: type) type {
             return slice(s);
         }
 
+        /// Peek at the next element with or without a filter (pass in void literal `{}` for no filter).
+        /// If an element is found, it will be returned on `next()`.
+        pub fn peek(self: *Iter(T), filter_context: anytype) ?T {
+            const has_filter: bool = switch (@typeInfo(@TypeOf(filter_context))) {
+                .void => false,
+                else => true,
+            };
+            if (has_filter) {
+                if (self.filterNext(filter_context)) |x| {
+                    self._missed = x;
+                    return x;
+                }
+            } else if (self.next()) |x| {
+                self._missed = x;
+                return x;
+            }
+            return null;
+        }
+
         /// Find the next element that fulfills a given filter.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
@@ -918,7 +937,7 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Ensure there is exactly 1 or 0 elements that matches the passed-in filter.
-        /// The filter is optional, and you may pass in void literal `{}` or `null` if you do not wish to apply a filter.
+        /// The filter is optional, and you may pass in void literal `{}` if you do not wish to apply a filter.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn single(
@@ -926,7 +945,7 @@ pub fn Iter(comptime T: type) type {
             filter_context: anytype,
         ) error{MultipleElementsFound}!?T {
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
-                .void, .null => false,
+                .void => false,
                 else => blk: {
                     break :blk true;
                 },
@@ -964,12 +983,12 @@ pub fn Iter(comptime T: type) type {
         }
 
         /// Count the number of filtered items or simply count the items remaining.
-        /// If you do not wish to apply a filter, pass in void literal `{}` or `null` to `context`.
+        /// If you do not wish to apply a filter, pass in void literal `{}` to `context`.
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn count(self: *Iter(T), filter_context: anytype) usize {
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
-                .void, .null => false,
+                .void => false,
                 else => true,
             };
 

@@ -1258,7 +1258,7 @@ inline fn validateOtherIterator(comptime T: type, other: anytype) enum { ptr, va
     return if (is_ptr) .ptr else .value;
 }
 
-fn ClonedIter(comptime T: type) type {
+pub fn ClonedIter(comptime T: type) type {
     return struct {
         /// Inner iterator
         iter: Iter(T),
