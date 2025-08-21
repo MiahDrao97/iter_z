@@ -38,6 +38,7 @@ Hoping that's the last major API change and that we can focus on new queries in 
     - [alloc()](#alloc)
     - [allocReset()](#allocreset)
     - [orderBy()](#orderby)
+    - [peek()](#peek)
     - [filterNext()](#filternext)
     - [transformNext()](#transformnext)
     - [count()](#count)
@@ -442,6 +443,29 @@ defer ordered.deinit();
 while (ordered.next()) |x| {
     // 1, 2, 3, 4, 5, 6, 7, 8
 }
+```
+
+### `peek()`
+Peeks at the next element with or without a filter (pass in void literal `{}` for no filter), but does not advance the iterator's position.
+`next()` will return the peeked element and then advance the iterator.
+```zig
+const is_numeric = struct {
+    pub fn filter(_: @This(), char: u8) bool {
+        return if (std.fmt.parseUnsigned(u8, &.{char}, 10)) |_|
+            true
+        else |_|
+            false;
+    }
+};
+
+var iter = Iter(u8).slice("abc123");
+
+_ = iter.interface.peek({}); // 'a'
+_ = iter.next(); // returns 'a' again
+_ = iter.interface.peek({}); // 'b'
+
+_ = iter.interface.peek(is_numeric{})); // '1'
+_ = iter.next(); // returns '1' again
 ```
 
 ### `filterNext()`

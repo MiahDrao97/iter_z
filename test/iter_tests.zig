@@ -277,6 +277,38 @@ test "order by buffer" {
         try testing.expectError(error.NoSpaceLeft, iter.interface.orderByBuf(&buf, autoCompare(u16), .asc));
     }
 }
+test "peek" {
+    {
+        const is_numeric = struct {
+            pub fn filter(_: @This(), char: u8) bool {
+                return if (std.fmt.parseUnsigned(u8, &.{char}, 10)) |_|
+                    true
+                else |_|
+                    false;
+            }
+        };
+
+        var iter = Iter(u8).slice("asdf123");
+
+        try testing.expectEqual('a', iter.interface.peek({}));
+        try testing.expectEqual('a', iter.next());
+        try testing.expectEqual('s', iter.interface.peek({}));
+        try testing.expectEqual('s', iter.next());
+
+        try testing.expectEqual('1', iter.interface.peek(is_numeric{}));
+        try testing.expectEqual('1', iter.next());
+    }
+    // edge case...
+    {
+        var iter = Iter(u8).slice("asdf123");
+        var buf: [5]u8 = undefined;
+
+        // this should put something in _missed
+        try testing.expectError(error.NoSpaceLeft, iter.interface.toBuffer(&buf));
+        try testing.expectEqual('2', iter.interface.peek({}));
+        try testing.expectEqual('2', iter.next());
+    }
+}
 test "single" {
     var iter = Iter(u8).slice("racecar");
 
