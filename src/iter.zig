@@ -55,7 +55,7 @@ pub fn Iter(comptime T: type) type {
         /// Not intended to be directly accessed by users.
         /// When an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
         /// It's the responsibility of the implementations to use this missed value and/or clear it.
-        _missed: ?T = null,
+        missed: ?T = null,
 
         /// Returns the next element or `null` if the iteration is over.
         pub inline fn next(self: *Iter(T)) ?T {
@@ -68,13 +68,13 @@ pub fn Iter(comptime T: type) type {
             return self.vtable.reset_fn(self);
         }
 
-        /// Clone the interface.
-        inline fn clone(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+        /// Clone the interface. Use `alloc()` method to save the allocator in a structure along with the clone.
+        pub inline fn rawClone(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
             return try self.vtable.clone_fn(self, allocator);
         }
 
-        /// Deinitialize any memory owned by the iterator (if any).
-        inline fn deinitClone(self: *Iter(T), allocator: Allocator) void {
+        /// Deinitialize a cloned interface (assumes that `self` is a clone).
+        pub inline fn deinitClone(self: *Iter(T), allocator: Allocator) void {
             self.vtable.deinit_clone_fn(self, allocator);
         }
 
@@ -118,8 +118,8 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *SliceIterable) ?T {
-                if (self.interface._missed) |m| {
-                    self.interface._missed = null;
+                if (self.interface.missed) |m| {
+                    self.interface.missed = null;
                     return m;
                 }
                 if (self.idx >= self.slice.len) {
@@ -131,7 +131,7 @@ pub fn Iter(comptime T: type) type {
 
             pub fn reset(self: *SliceIterable) *Iter(T) {
                 self.idx = 0;
-                self.interface._missed = null;
+                self.interface.missed = null;
                 return &self.interface;
             }
 
@@ -163,8 +163,8 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *OwnedSliceIterable) ?T {
-                if (self.interface._missed) |m| {
-                    self.interface._missed = null;
+                if (self.interface.missed) |m| {
+                    self.interface.missed = null;
                     return m;
                 }
                 if (self.idx >= self.slice.len) {
@@ -176,7 +176,7 @@ pub fn Iter(comptime T: type) type {
 
             pub fn reset(self: *OwnedSliceIterable) *Iter(T) {
                 self.idx = 0;
-                self.interface._missed = null;
+                self.interface.missed = null;
                 return &self.interface;
             }
 
@@ -260,8 +260,8 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
-                    if (self.interface._missed) |m| {
-                        self.interface._missed = null;
+                    if (self.interface.missed) |m| {
+                        self.interface.missed = null;
                         return m;
                     }
                     if (self.idx >= self.list.len) {
@@ -273,7 +273,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     self.idx = 0;
-                    self.interface._missed = null;
+                    self.interface.missed = null;
                     return &self.interface;
                 }
 
@@ -321,8 +321,8 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
-                    if (self.interface._missed) |m| {
-                        self.interface._missed = null;
+                    if (self.interface.missed) |m| {
+                        self.interface.missed = null;
                         return m;
                     }
                     if (self.current_node) |node| {
@@ -334,7 +334,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     self.current_node = self.list.first;
-                    self.interface._missed = null;
+                    self.interface.missed = null;
                     return &self.interface;
                 }
 
@@ -383,8 +383,8 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 pub fn next(self: *Self) ?T {
-                    if (self.interface._missed) |m| {
-                        self.interface._missed = null;
+                    if (self.interface.missed) |m| {
+                        self.interface.missed = null;
                         return m;
                     }
                     return self.other.next();
@@ -392,7 +392,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     self.other = self._reset;
-                    self.interface._missed = null;
+                    self.interface.missed = null;
                     return &self.interface;
                 }
 
@@ -437,8 +437,8 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?T {
-                    if (self.interface._missed) |m| {
-                        self.interface._missed = null;
+                    if (self.interface.missed) |m| {
+                        self.interface.missed = null;
                         return m;
                     }
                     while (self.og.next()) |x| {
@@ -449,7 +449,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(T) {
                     _ = self.og.reset();
-                    self.interface._missed = null;
+                    self.interface.missed = null;
                     return &self.interface;
                 }
 
@@ -469,7 +469,7 @@ pub fn Iter(comptime T: type) type {
                     errdefer allocator.destroy(c);
 
                     c.* = .{
-                        .og = try self.og.clone(allocator),
+                        .og = try self.og.rawClone(allocator),
                         .context = self.context,
                     };
                     return &c.interface;
@@ -505,8 +505,8 @@ pub fn Iter(comptime T: type) type {
                 const Self = @This();
 
                 pub fn next(self: *Self) ?TOther {
-                    if (self.interface._missed) |m| {
-                        self.interface._missed = null;
+                    if (self.interface.missed) |m| {
+                        self.interface.missed = null;
                         return m;
                     }
                     return if (self.og.next()) |x|
@@ -517,7 +517,7 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn reset(self: *Self) *Iter(TOther) {
                     _ = self.og.reset();
-                    self.interface._missed = null;
+                    self.interface.missed = null;
                     return &self.interface;
                 }
 
@@ -537,7 +537,7 @@ pub fn Iter(comptime T: type) type {
                     errdefer allocator.destroy(c);
 
                     c.* = .{
-                        .og = try self.og.clone(allocator),
+                        .og = try self.og.rawClone(allocator),
                         .context = self.context,
                     };
                     return &c.interface;
@@ -574,8 +574,8 @@ pub fn Iter(comptime T: type) type {
             },
 
             pub fn next(self: *ConcatIterable) ?T {
-                if (self.interface._missed) |m| {
-                    self.interface._missed = null;
+                if (self.interface.missed) |m| {
+                    self.interface.missed = null;
                     return m;
                 }
                 while (self.idx < self.sources.len) : (self.idx += 1) {
@@ -590,7 +590,7 @@ pub fn Iter(comptime T: type) type {
             pub fn reset(self: *ConcatIterable) *Iter(T) {
                 for (self.sources) |source| _ = source.reset();
                 self.idx = 0;
-                self.interface._missed = null;
+                self.interface.missed = null;
                 return &self.interface;
             }
 
@@ -617,7 +617,7 @@ pub fn Iter(comptime T: type) type {
                 }
 
                 for (c_sources, self.sources) |*c_iter, source| {
-                    c_iter.* = try source.clone(allocator);
+                    c_iter.* = try source.rawClone(allocator);
                     succeses += 1;
                 }
 
@@ -665,7 +665,7 @@ pub fn Iter(comptime T: type) type {
         /// Calls `VTable(T).clone_fn`.
         pub fn alloc(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
             return .{
-                .interface = try iter.clone(allocator),
+                .interface = try iter.rawClone(allocator),
                 .allocator = allocator,
             };
         }
@@ -674,9 +674,10 @@ pub fn Iter(comptime T: type) type {
         /// NOTE : This is different than `reset().alloc()`, which resets the original iterator beforehand.
         /// This method ONLY resets the allocated instance (the original remains in the same position).
         pub fn allocReset(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
-            const allocated: Allocated = try iter.alloc(allocator);
-            _ = allocated.reset();
-            return allocated;
+            return .{
+                .interface = (try iter.rawClone(allocator)).reset(),
+                .allocator = allocator,
+            };
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
@@ -724,7 +725,7 @@ pub fn Iter(comptime T: type) type {
         pub fn toBuffer(self: *Iter(T), buf: []T) error{NoSpaceLeft}![]T {
             var i: usize = 0;
             while (self.next()) |x| : (i += 1) {
-                errdefer self._missed = x;
+                errdefer self.missed = x;
                 if (i >= buf.len) {
                     return error.NoSpaceLeft;
                 }
@@ -786,7 +787,7 @@ pub fn Iter(comptime T: type) type {
             errdefer list.deinit(allocator);
 
             while (self.next()) |x| {
-                errdefer self._missed = x;
+                errdefer self.missed = x;
                 try list.append(allocator, x);
             }
             return try list.toOwnedSlice(allocator);
@@ -902,11 +903,11 @@ pub fn Iter(comptime T: type) type {
             };
             if (has_filter) {
                 if (self.filterNext(filter_context)) |x| {
-                    self._missed = x;
+                    self.missed = x;
                     return x;
                 }
             } else if (self.next()) |x| {
-                self._missed = x;
+                self.missed = x;
                 return x;
             }
             return null;

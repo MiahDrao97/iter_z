@@ -78,6 +78,20 @@ test "make a copy" {
 
     try testing.expectEqual(2, iter.next());
 }
+test "raw clone" {
+    var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
+    try testing.expect(iter.next() == 1);
+
+    const iter_cpy: *Iter(u8) = (try iter.interface.rawClone(testing.allocator)).reset();
+    defer iter_cpy.deinitClone(testing.allocator);
+
+    var i: usize = 1;
+    while (iter_cpy.next()) |x| : (i += 1) {
+        try testing.expect(x == i);
+    }
+
+    try testing.expectEqual(2, iter.next());
+}
 test "where" {
     const ctx = struct {
         pub fn isEven(_: @This(), byte: u8) bool {
@@ -303,7 +317,7 @@ test "peek" {
         var iter = Iter(u8).slice("asdf123");
         var buf: [5]u8 = undefined;
 
-        // this should put something in _missed
+        // this should put something in `missed`
         try testing.expectError(error.NoSpaceLeft, iter.interface.toBuffer(&buf));
         try testing.expectEqual('2', iter.interface.peek({}));
         try testing.expectEqual('2', iter.next());

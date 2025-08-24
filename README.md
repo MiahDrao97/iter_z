@@ -6,19 +6,12 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 
 The interface is `Iter(T)`, which comes with several methods, queries, and out-of-the-box implementations.
 
-The latest release is `v0.3.0`, which leverages Zig 0.14.1.
-
-WARNING: `v0.3.0` is an older API than what's in the main branch.
-[Issue #10](https://github.com/MiahDrao97/iter_z/issues/10) resulted in a complete overhaul of the API's, removing the ability for the iterator's length to be known and to move backwards.
-Limiting the v-table allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to a `@fieldParentPtr()` strategy.
-This resulted in more flexibility, less code, and better performance in most cases.
-
-Once Zig 0.15.0 is released, then `v0.4.0` will be tagged.
-Hoping that's the last major API change and that we can focus on new queries in the future.
+The latest release is `v0.4.0`, which leverages Zig 0.15.1.
 
 - [Use This Package](#use-this-package)
 - [Other Releases](#other-releases)
     - [Main Branch](#main)
+    - [v0.3.0](#v030)
     - [v0.2.1](#v021)
     - [v0.1.1](#v011)
 - [Groundwork](#groundwork)
@@ -37,6 +30,7 @@ Hoping that's the last major API change and that we can focus on new queries in 
     - [where()](#where)
     - [alloc()](#alloc)
     - [allocReset()](#allocreset)
+    - [rawClone()](#rawclone)
     - [orderBy()](#orderby)
     - [peek()](#peek)
     - [filterNext()](#filternext)
@@ -70,7 +64,7 @@ In your build.zig.zon, add the following dependency:
     .name = .my_awesome_app,
     .dependencies = .{
         .iter_z = .{
-            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.4.0.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -78,15 +72,8 @@ In your build.zig.zon, add the following dependency:
 ```
 
 Get your hash from the following:
-
-If you're using Zig 0.14.1, use the latest tagged version. Keep in mind these API's are outdated with the main branch.
 ```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz
-```
-
-Otherwise, I strongly recommend the main branch:
-```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.4.0.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
@@ -130,6 +117,34 @@ The main branch is generally unstable, intended to change as the Zig language ev
 Breaking API changes may be merged into the main branch before a new release is tagged.
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
+```
+
+### v0.3.0
+This version represents the tagged version for Zig 0.14.1.
+
+#### Difference between v0.3.0 and v0.4.0
+[Issue #10](https://github.com/MiahDrao97/iter_z/issues/10) resulted in a complete overhaul of the API's, removing the ability for the iterator's length to be known and to move backwards.
+Limiting the v-table allowed a lazy iterator implemenation to exist, and similar to the writergate re-write, the `Iter(T)` interface shifted from a `*anyopaque` + tagged union strategy to an intrusive interface strategy.
+This resulted in more flexibility, less code, and better performance in most cases.
+
+Removed methods:
+- `len()`: Iterators are lazy. Use `.count({})` to achieve this.
+- `prev()`: Again, because iterators are lazy, we only go forward.
+- `scroll()`: We can't very well scroll without a `prev()` method. Use `skip()` to move forward, or `.reset().skip(amt)` to calculate a backwards movement. In practice, I've never had to move backwards; only reset.
+- `clone()`: This still exists in the form of `rawClone()`. Similar to managed vs unmanaged structures, `rawClone()` gives you an unmanaged clone, while `alloc()` gives you a structure with the clone and the allocator.
+- `cloneReset()`: See `allocReset()`.
+- `deinit()`: This was removed from the interface and only declared on concrete implemenations that own memory. In a similar vein, `deinitClone()` is meant to free a cloned iterator.
+- `any()`: Replaced with `peek()`. `any()` now is the function to instantiate an iterator from any type that defines a `next()` method.
+- `reverseReset()`: Since backwards movement is no longer available, the iterator has to enumerate to an owned slice. Already comes "reset" when you call `reverse()`.
+- `reverseCloneReset()`: See above.
+- `whereAlloc()`: This is now able to done on the stack without any allocation necessary.
+- `selectAlloc()`: This is now able to done on the stack without any allocation necessary.
+- `fromOther()`: This is now `any()`, and it can be done on the stack without any allocation necessary.
+- `fromOtherBuf()`: See above.
+
+Version 0.3.0 can be fetched with the following command:
+```
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.3.0.tar.gz
 ```
 
 ### v0.2.1
@@ -411,6 +426,19 @@ while (iter_cpy.next()) |n| {
 
 // original is still in its same position
 _ = iter.next(); // 2
+```
+
+### `rawClone()`
+If you simply want an allocated `*Iter(T)` without the `Iter(T).Allocated` managed structure, you are free to use `rawClone()`.
+Be sure to call `deinitClone()` after use.
+```zig
+var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
+const iter_cpy: *Iter(u8) = try iter.interface.rawClone(testing.allocator);
+defer iter_cpy.deinitClone(testing.allocator);
+
+while (iter_cpy.next()) |n| {
+    // 1, 2, 3
+}
 ```
 
 ### `orderBy()`
@@ -785,7 +813,7 @@ If you encounter unexpected behavior with multiple iterators, this may be due to
 Methods such as `toBuffer()`, `toOwnedSlice()`, `orderBy()`, etc. start at the current offset.
 If you wish to start from the beginning, make sure to call `reset()` beforehand.
 
-You may notice the `_missed` field on `Iter(T)`.
+You may notice the `missed` field on `Iter(T)`.
 This is not intended to be directly accessed by users.
 However, when an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
 It's the responsibility of the implementations to use this missed value and/or clear it.
