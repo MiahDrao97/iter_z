@@ -362,8 +362,8 @@ pub fn Iter(comptime T: type) type {
         /// Implementation with any context that defines the following method: `fn next(*TContext) ?T` or `fn next(TContext) ?T`
         pub fn AnyIterable(comptime TContext: type) type {
             return struct {
-                other: TContext,
-                _reset: TContext,
+                inner: TContext,
+                resetInstance: TContext,
                 interface: Iter(T) = .{
                     .vtable = &VTable(T){
                         .next_fn = &implNext,
@@ -377,8 +377,8 @@ pub fn Iter(comptime T: type) type {
 
                 pub fn init(o: TContext) Self {
                     return .{
-                        .other = o,
-                        ._reset = o,
+                        .inner = o,
+                        .resetInstance = o,
                     };
                 }
 
@@ -387,11 +387,11 @@ pub fn Iter(comptime T: type) type {
                         self.interface.missed = null;
                         return m;
                     }
-                    return self.other.next();
+                    return self.inner.next();
                 }
 
                 pub fn reset(self: *Self) *Iter(T) {
-                    self.other = self._reset;
+                    self.inner = self.resetInstance;
                     self.interface.missed = null;
                     return &self.interface;
                 }
