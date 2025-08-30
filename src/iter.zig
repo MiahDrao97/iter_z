@@ -68,13 +68,15 @@ pub fn Iter(comptime T: type) type {
             return self.vtable.reset_fn(self);
         }
 
-        /// Clone the interface. Use `alloc()` method to save the allocator in a structure along with the clone.
-        pub inline fn rawClone(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+        /// Allocate the interface (calls `clone_fn` from the v-table).
+        /// Call `deinit()` to free.
+        pub inline fn alloc(self: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
             return try self.vtable.clone_fn(self, allocator);
         }
 
-        /// Deinitialize a cloned interface (assumes that `self` is a clone).
-        pub inline fn deinitClone(self: *Iter(T), allocator: Allocator) void {
+        /// Deinitialize an allocated interface (calls `deinit_clone_fn` from the v-table).
+        /// If you did not call `alloc()` on this iterator, this will invoke illegal behavior.
+        pub inline fn deinit(self: *Iter(T), allocator: Allocator) void {
             self.vtable.deinit_clone_fn(self, allocator);
         }
 
@@ -151,7 +153,6 @@ pub fn Iter(comptime T: type) type {
         pub const OwnedSliceIterable = struct {
             slice: []const T,
             idx: usize = 0,
-            allocator: Allocator,
             on_deinit: ?*const fn (Allocator, []T) void = null,
             interface: Iter(T) = .{
                 .vtable = &VTable(T){
@@ -180,12 +181,12 @@ pub fn Iter(comptime T: type) type {
                 return &self.interface;
             }
 
-            pub fn deinit(self: *OwnedSliceIterable) void {
+            pub fn deinit(self: *OwnedSliceIterable, allocator: Allocator) void {
                 if (self.on_deinit) |exec| {
-                    exec(self.allocator, @constCast(self.slice));
+                    exec(allocator, @constCast(self.slice));
                 }
                 if (self.slice.len > 0) {
-                    self.allocator.free(self.slice);
+                    allocator.free(self.slice);
                 }
             }
 
@@ -207,7 +208,6 @@ pub fn Iter(comptime T: type) type {
                 c.* = .{
                     .slice = try allocator.dupe(T, self.slice),
                     .idx = self.idx,
-                    .allocator = allocator,
                     .on_deinit = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
                 };
                 return &c.interface;
@@ -215,7 +215,7 @@ pub fn Iter(comptime T: type) type {
 
             fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
                 const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
-                self.deinit(); // free slice
+                self.deinit(allocator); // free slice
                 allocator.destroy(self);
             }
         };
@@ -228,13 +228,11 @@ pub fn Iter(comptime T: type) type {
         /// Initialize a `SliceIterable` that owns the slice.
         /// Must call `deinit()` on the iterator.
         pub fn ownedSlice(
-            allocator: Allocator,
             s: []const T,
             on_deinit: ?*const fn (Allocator, []T) void,
         ) OwnedSliceIterable {
             return .{
                 .slice = s,
-                .allocator = allocator,
                 .on_deinit = on_deinit,
             };
         }
@@ -469,7 +467,7 @@ pub fn Iter(comptime T: type) type {
                     errdefer allocator.destroy(c);
 
                     c.* = .{
-                        .og = try self.og.rawClone(allocator),
+                        .og = try self.og.alloc(allocator),
                         .context = self.context,
                     };
                     return &c.interface;
@@ -477,7 +475,7 @@ pub fn Iter(comptime T: type) type {
 
                 fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
                     const self: *Self = @fieldParentPtr("interface", iter);
-                    self.og.deinitClone(allocator);
+                    self.og.deinit(allocator);
                     allocator.destroy(self);
                 }
             };
@@ -537,7 +535,7 @@ pub fn Iter(comptime T: type) type {
                     errdefer allocator.destroy(c);
 
                     c.* = .{
-                        .og = try self.og.rawClone(allocator),
+                        .og = try self.og.alloc(allocator),
                         .context = self.context,
                     };
                     return &c.interface;
@@ -545,7 +543,7 @@ pub fn Iter(comptime T: type) type {
 
                 fn implDeinitClone(iter: *Iter(TOther), allocator: Allocator) void {
                     const self: *Self = @fieldParentPtr("interface", iter);
-                    self.og.deinitClone(allocator);
+                    self.og.deinit(allocator);
                     allocator.destroy(self);
                 }
             };
@@ -612,12 +610,12 @@ pub fn Iter(comptime T: type) type {
                 var succeses: usize = 0;
                 const c_sources: []*Iter(T) = try allocator.alloc(*Iter(T), self.sources.len);
                 errdefer {
-                    for (0..succeses) |i| c_sources[i].deinitClone(allocator);
+                    for (0..succeses) |i| c_sources[i].deinit(allocator);
                     allocator.free(c_sources);
                 }
 
                 for (c_sources, self.sources) |*c_iter, source| {
-                    c_iter.* = try source.rawClone(allocator);
+                    c_iter.* = try source.alloc(allocator);
                     succeses += 1;
                 }
 
@@ -630,7 +628,7 @@ pub fn Iter(comptime T: type) type {
 
             fn implDeinitClone(iter: *Iter(T), allocator: Allocator) void {
                 const self: *ConcatIterable = @fieldParentPtr("interface", iter);
-                for (self.sources) |source| source.deinitClone(allocator);
+                for (self.sources) |source| source.deinit(allocator);
                 allocator.free(self.sources);
                 allocator.destroy(self);
             }
@@ -639,45 +637,6 @@ pub fn Iter(comptime T: type) type {
         /// Concat several iterators into one
         pub fn concat(sources: []const *Iter(T)) ConcatIterable {
             return .{ .sources = sources };
-        }
-
-        /// Represents an allocated iterator, created with `VTable(T).clone_fn`.
-        /// Must be freed with `deinit()`.
-        pub const Allocated = struct {
-            interface: *Iter(T),
-            allocator: Allocator,
-
-            pub fn next(self: Allocated) ?T {
-                return self.interface.next();
-            }
-
-            pub fn reset(self: Allocated) *Iter(T) {
-                return self.interface.reset();
-            }
-
-            pub fn deinit(self: Allocated) void {
-                self.interface.deinitClone(self.allocator);
-            }
-        };
-
-        /// Allocate the implementation of the iterator with `allocator`.
-        /// This is how you can clone an iterator or simply store one on the heap.
-        /// Calls `VTable(T).clone_fn`.
-        pub fn alloc(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
-            return .{
-                .interface = try iter.rawClone(allocator),
-                .allocator = allocator,
-            };
-        }
-
-        /// Allocate the iterator and reset it.
-        /// NOTE : This is different than `reset().alloc()`, which resets the original iterator beforehand.
-        /// This method ONLY resets the allocated instance (the original remains in the same position).
-        pub fn allocReset(iter: *Iter(T), allocator: Allocator) Allocator.Error!Allocated {
-            return .{
-                .interface = (try iter.rawClone(allocator)).reset(),
-                .allocator = allocator,
-            };
         }
 
         /// Skip `amt` number of iterations or until iteration is over. Returns `self`.
@@ -701,17 +660,17 @@ pub fn Iter(comptime T: type) type {
             if (result.len == 0) {
                 // segmentation fault otherwise
                 allocator.free(buf);
-                return ownedSlice(allocator, "", null);
+                return ownedSlice("", null);
             }
 
             if (result.len < buf.len) {
                 if (allocator.resize(buf, result.len)) {
-                    return ownedSlice(allocator, buf, null);
+                    return ownedSlice(buf, null);
                 }
                 defer allocator.free(buf);
-                return ownedSlice(allocator, try allocator.dupe(T, result), null);
+                return ownedSlice(try allocator.dupe(T, result), null);
             }
-            return ownedSlice(allocator, result, null);
+            return ownedSlice(result, null);
         }
 
         /// Enumerates into `buf`, starting at `self`'s current `next()` call.
@@ -848,7 +807,7 @@ pub fn Iter(comptime T: type) type {
             ordering: Ordering,
         ) Allocator.Error!OwnedSliceIterable {
             const s: []T = try self.toOwnedSliceSorted(allocator, compare_context, ordering);
-            return ownedSlice(allocator, s, null);
+            return ownedSlice(s, null);
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
@@ -862,7 +821,7 @@ pub fn Iter(comptime T: type) type {
             ordering: Ordering,
         ) Allocator.Error!OwnedSliceIterable {
             const s: []T = try self.toOwnedSliceSortedStable(allocator, compare_context, ordering);
-            return ownedSlice(allocator, s, null);
+            return ownedSlice(s, null);
         }
 
         /// Enumerates the iterator to the buffer, sorts the buffer with an unstable sorting algorithm, and then returns a new `SliceIterable` over the sorted buffer.
@@ -1044,7 +1003,7 @@ pub fn Iter(comptime T: type) type {
         pub fn reverse(self: *Iter(T), allocator: Allocator) Allocator.Error!OwnedSliceIterable {
             const items: []T = try self.toOwnedSlice(allocator);
             std.mem.reverse(T, items);
-            return ownedSlice(allocator, items, null);
+            return ownedSlice(items, null);
         }
     };
 }

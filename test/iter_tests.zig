@@ -15,7 +15,7 @@ const ZeroRemainder = struct {
 fn getEvensIter(
     allocator: Allocator,
     iter: *Iter(u8),
-) Allocator.Error!Iter(u8).Allocated {
+) Allocator.Error!*Iter(u8) {
     var divisor: u8 = 2;
     _ = &divisor;
     const ctx: ZeroRemainder = .{ .divisor = divisor };
@@ -68,22 +68,8 @@ test "make a copy" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
     try testing.expect(iter.next() == 1);
 
-    const iter_cpy: Iter(u8).Allocated = try iter.interface.allocReset(testing.allocator);
-    defer iter_cpy.deinit();
-
-    var i: usize = 1;
-    while (iter_cpy.next()) |x| : (i += 1) {
-        try testing.expect(x == i);
-    }
-
-    try testing.expectEqual(2, iter.next());
-}
-test "raw clone" {
-    var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-    try testing.expect(iter.next() == 1);
-
-    const iter_cpy: *Iter(u8) = (try iter.interface.rawClone(testing.allocator)).reset();
-    defer iter_cpy.deinitClone(testing.allocator);
+    const iter_cpy: *Iter(u8) = (try iter.interface.alloc(testing.allocator)).reset();
+    defer iter_cpy.deinit(testing.allocator);
 
     var i: usize = 1;
     while (iter_cpy.next()) |x| : (i += 1) {
@@ -102,8 +88,8 @@ test "where" {
     var filtered = iter.interface.where(
         filterContext(u8, ctx{}, ctx.isEven),
     );
-    const clone: Iter(u8).Allocated = try filtered.interface.alloc(testing.allocator);
-    defer clone.deinit();
+    const clone: *Iter(u8) = try filtered.interface.alloc(testing.allocator);
+    defer clone.deinit(testing.allocator);
 
     try testing.expectEqual(2, filtered.next());
     try testing.expectEqual(2, clone.next());
@@ -116,11 +102,11 @@ test "where" {
 }
 test "does the context seg-fault?" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3, 4, 5, 6 });
-    const filtered: Iter(u8).Allocated = try getEvensIter(testing.allocator, &iter.interface);
-    defer filtered.deinit();
+    const filtered: *Iter(u8) = try getEvensIter(testing.allocator, &iter.interface);
+    defer filtered.deinit(testing.allocator);
 
-    const clone: Iter(u8).Allocated = try filtered.interface.alloc(testing.allocator);
-    defer clone.deinit();
+    const clone: *Iter(u8) = try filtered.alloc(testing.allocator);
+    defer clone.deinit(testing.allocator);
 
     try testing.expectEqual(2, filtered.next());
     try testing.expectEqual(2, clone.next());
@@ -233,7 +219,7 @@ test "orderBy" {
 
     var inner = Iter(u8).slice(&nums);
     var iter = try inner.interface.orderBy(testing.allocator, autoCompare(u8), .asc);
-    defer iter.deinit();
+    defer iter.deinit(testing.allocator);
 
     var i: usize = 0;
     while (iter.next()) |x| {
@@ -244,7 +230,7 @@ test "orderBy" {
 
     var inner2 = Iter(u8).slice(&nums);
     var iter2 = try inner2.interface.orderBy(testing.allocator, autoCompare(u8), .desc);
-    defer iter2.deinit();
+    defer iter2.deinit(testing.allocator);
 
     while (iter2.next()) |x| : (i -= 1) {
         try testing.expectEqual(i, x);
@@ -374,8 +360,8 @@ test "clone with select" {
     as_digit.representation = .decimal;
     try testing.expectEqualStrings("1", outer.next().?);
 
-    const clone: Iter([]const u8).Allocated = try outer.interface.allocReset(testing.allocator);
-    defer clone.deinit();
+    const clone: *Iter([]const u8) = (try outer.interface.alloc(testing.allocator)).reset();
+    defer clone.deinit(testing.allocator);
 
     try testing.expectEqualStrings("2", outer.next().?);
     try testing.expectEqualStrings("3", outer.next().?);
@@ -410,7 +396,7 @@ test "Overlapping select edge cases" {
             allocator: Allocator,
             iterator: *Iter(u8),
             multiplier: *Multiplier,
-        ) Allocator.Error!Iter(u32).Allocated {
+        ) Allocator.Error!*Iter(u32) {
             var transformed = iterator.select(
                 u32,
                 transformContext(u8, u32, multiplier, Multiplier.mul),
@@ -420,16 +406,16 @@ test "Overlapping select edge cases" {
     }.getMultiplier;
 
     var iter = Iter(u8).slice(&iter_z.range(u8, 1, 3));
-    const clone: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
-    defer clone.deinit();
+    const clone: *Iter(u8) = try iter.interface.alloc(testing.allocator);
+    defer clone.deinit(testing.allocator);
 
     var doubler_ctx: Multiplier = .{ .factor = 2 };
-    const doubler: Iter(u32).Allocated = try getMultiplier(testing.allocator, &iter.interface, &doubler_ctx);
-    defer doubler.deinit();
+    const doubler: *Iter(u32) = try getMultiplier(testing.allocator, &iter.interface, &doubler_ctx);
+    defer doubler.deinit(testing.allocator);
 
     var tripler_ctx: Multiplier = .{ .factor = 3 };
-    const tripler: Iter(u32).Allocated = try getMultiplier(testing.allocator, clone.interface, &tripler_ctx);
-    defer tripler.deinit();
+    const tripler: *Iter(u32) = try getMultiplier(testing.allocator, clone, &tripler_ctx);
+    defer tripler.deinit(testing.allocator);
 
     var result: ?u32 = doubler.next();
     try testing.expectEqual(2, result);
@@ -453,8 +439,8 @@ test "owned slice iterator" {
     const slice: []u8 = try testing.allocator.alloc(u8, 6);
     for (slice, 0..) |*x, i| x.* = @as(u8, @truncate(i + 1));
 
-    var iter = Iter(u8).ownedSlice(testing.allocator, slice, null);
-    defer iter.deinit();
+    var iter = Iter(u8).ownedSlice(slice, null);
+    defer iter.deinit(testing.allocator);
 
     var expected: u8 = 1;
     while (iter.next()) |x| {
@@ -478,7 +464,6 @@ test "owned slice iterator w/ args" {
     combined[1] = slice2;
 
     var iter = Iter([]const u8).ownedSlice(
-        allocator,
         combined,
         &struct {
             pub fn onDeinit(gpa: Allocator, slice: [][]const u8) void {
@@ -486,14 +471,14 @@ test "owned slice iterator w/ args" {
             }
         }.onDeinit,
     );
-    defer iter.deinit();
+    defer iter.deinit(testing.allocator);
 
     try testing.expectEqualStrings("blarf", iter.next().?);
     try testing.expectEqualStrings("asdf", iter.next().?);
     try testing.expectEqual(null, iter.next());
 
-    const clone: Iter([]const u8).Allocated = try iter.interface.allocReset(testing.allocator);
-    defer clone.deinit();
+    const clone: *Iter([]const u8) = (try iter.interface.alloc(testing.allocator)).reset();
+    defer clone.deinit(testing.allocator);
 
     try testing.expectEqualStrings("blarf", clone.next().?);
     try testing.expectEqualStrings("asdf", clone.next().?);
@@ -547,8 +532,8 @@ test "any" {
         }
     };
 
-    const clone: Iter([]const u8).Allocated = try iter.reset().alloc(testing.allocator);
-    defer clone.deinit();
+    const clone: *Iter([]const u8) = try iter.reset().alloc(testing.allocator);
+    defer clone.deinit(testing.allocator);
 
     try testing.expectEqual(1, clone.reset().count(StrLength{ .len = 1 }));
     try testing.expectEqual(2, clone.reset().count(StrLength{ .len = 2 }));
@@ -559,7 +544,7 @@ test "any" {
     try testing.expect(!clone.reset().all(StrLength{ .len = 2 }));
 
     var reversed = try iter.interface.reverse(testing.allocator);
-    defer reversed.deinit();
+    defer reversed.deinit(testing.allocator);
 
     try testing.expectEqualStrings("split", reversed.next().?);
     try testing.expectEqualStrings("to", reversed.next().?);
@@ -668,11 +653,11 @@ test "to buffer" {
     {
         // enumerate to buffer with a clone
         var iter = Iter(u8).slice(&iter_z.range(u8, 1, 10));
-        var clone = try iter.interface.alloc(testing.allocator);
-        defer clone.deinit();
+        const clone: *Iter(u8) = try iter.interface.alloc(testing.allocator);
+        defer clone.deinit(testing.allocator);
 
         var buf: [10]u8 = undefined;
-        const enumerated: []const u8 = try clone.interface.toBuffer(&buf);
+        const enumerated: []const u8 = try clone.toBuffer(&buf);
         for (enumerated, 1..) |actual, expected| try testing.expectEqual(expected, actual);
 
         var failing_buf: [4]u8 = undefined;
@@ -720,11 +705,11 @@ test "reduce auto max" {
 test "reverse" {
     var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
     var reversed = try iter.interface.reverse(testing.allocator);
-    defer reversed.deinit();
+    defer reversed.deinit(testing.allocator);
     try testing.expectEqual(3, reversed.next());
 
     var double_reversed = try reversed.interface.reverse(testing.allocator);
-    defer double_reversed.deinit();
+    defer double_reversed.deinit(testing.allocator);
     try testing.expectEqual(1, double_reversed.next());
 }
 test "multi array list" {
@@ -778,8 +763,10 @@ test "pagination with skip + take" {
         const page_size: usize = 20;
         var full_iter = Iter(u8).slice(&iter_z.range(u8, 1, 200));
         var page_no: usize = 0;
-        var page_iter: Iter(u8).OwnedSliceIterable = try full_iter.interface.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
-        defer page_iter.deinit();
+        var page_iter: Iter(u8).OwnedSliceIterable = try full_iter.interface
+            .skip(page_no * page_size)
+            .takeAlloc(testing.allocator, page_size);
+        defer page_iter.deinit(testing.allocator);
 
         // first page: expecting values 1-20
         var expected: usize = 1;
@@ -790,7 +777,7 @@ test "pagination with skip + take" {
         // third page: expecting values 41-60
         page_no += 2;
         expected += page_size;
-        page_iter.deinit();
+        page_iter.deinit(testing.allocator);
         page_iter = try full_iter.reset().skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
         while (page_iter.next()) |actual| : (expected += 1) {
             try testing.expectEqual(expected, actual);
@@ -799,7 +786,7 @@ test "pagination with skip + take" {
     {
         var empty: Iter(u8) = .empty;
         var page_iter = try empty.takeAlloc(testing.allocator, 20);
-        defer page_iter.deinit();
+        defer page_iter.deinit(testing.allocator);
 
         try testing.expectEqual(null, page_iter.next());
     }
