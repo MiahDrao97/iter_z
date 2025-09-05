@@ -439,10 +439,9 @@ pub fn Iter(comptime T: type) type {
                         self.interface.missed = null;
                         return m;
                     }
-                    while (self.og.next()) |x| {
-                        if (filter(self.context, x)) return x;
-                    }
-                    return null;
+                    return blk: while (self.og.next()) |x| {
+                        if (filter(self.context, x)) break :blk x;
+                    } else null;
                 }
 
                 pub fn reset(self: *Self) *Iter(T) {
@@ -576,13 +575,12 @@ pub fn Iter(comptime T: type) type {
                     self.interface.missed = null;
                     return m;
                 }
-                while (self.idx < self.sources.len) : (self.idx += 1) {
+                return blk: while (self.idx < self.sources.len) : (self.idx += 1) {
                     const current: *Iter(T) = self.sources[self.idx];
                     if (current.next()) |x| {
-                        return x;
+                        break :blk x;
                     }
-                }
-                return null;
+                } else null;
             }
 
             pub fn reset(self: *ConcatIterable) *Iter(T) {
@@ -879,12 +877,9 @@ pub fn Iter(comptime T: type) type {
             self: *Iter(T),
             filter_context: anytype,
         ) ?T {
-            while (self.next()) |n| {
-                if (filter_context.filter(n)) {
-                    return n;
-                }
-            }
-            return null;
+            return blk: while (self.next()) |n| {
+                if (filter_context.filter(n)) break :blk n;
+            } else null;
         }
 
         /// Transform the next element from type `T` to type `TOther` (or return null if iteration is over)
@@ -964,12 +959,9 @@ pub fn Iter(comptime T: type) type {
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn all(self: *Iter(T), filter_context: anytype) bool {
-            while (self.next()) |x| {
-                if (!filter_context.filter(x)) {
-                    return false;
-                }
-            }
-            return true;
+            return blk: while (self.next()) |x| {
+                if (!filter_context.filter(x)) break :blk false;
+            } else true;
         }
 
         /// Fold the iterator into a single value.
@@ -984,8 +976,7 @@ pub fn Iter(comptime T: type) type {
             accumulate_context: anytype,
         ) TOther {
             var result: TOther = init;
-            while (self.next()) |x|
-                result = accumulate_context.accumulate(result, x);
+            while (self.next()) |x| result = accumulate_context.accumulate(result, x);
             return result;
         }
 
