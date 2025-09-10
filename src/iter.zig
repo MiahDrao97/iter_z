@@ -98,7 +98,7 @@ pub fn Iter(comptime T: type) type {
 
         /// Empty iterator
         pub const empty: Iter(T) = .{
-            .vtable = &VTable(T){
+            .vtable = &.{
                 .next_fn = &empty_iterable.next,
                 .reset_fn = &empty_iterable.reset,
                 .clone_fn = &empty_iterable.clone,
@@ -111,7 +111,7 @@ pub fn Iter(comptime T: type) type {
             slice: []const T,
             idx: usize = 0,
             interface: Iter(T) = .{
-                .vtable = &VTable(T){
+                .vtable = &.{
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
                     .clone_fn = &VTable(T).defaultCloneFn(SliceIterable),
@@ -155,7 +155,7 @@ pub fn Iter(comptime T: type) type {
             idx: usize = 0,
             on_deinit: ?*const fn (Allocator, []T) void = null,
             interface: Iter(T) = .{
-                .vtable = &VTable(T){
+                .vtable = &.{
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
                     .clone_fn = &implClone,
@@ -247,7 +247,7 @@ pub fn Iter(comptime T: type) type {
                 list: std.MultiArrayList(T),
                 idx: usize = 0,
                 interface: Iter(T) = .{
-                    .vtable = &VTable(T){
+                    .vtable = &.{
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
                         .clone_fn = &VTable(T).defaultCloneFn(MultiArrayListIterable),
@@ -299,7 +299,7 @@ pub fn Iter(comptime T: type) type {
                 list: List,
                 current_node: ?*List.Node,
                 interface: Iter(T) = .{
-                    .vtable = &VTable(T){
+                    .vtable = &.{
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
                         .clone_fn = &VTable(T).defaultCloneFn(Self),
@@ -363,7 +363,7 @@ pub fn Iter(comptime T: type) type {
                 inner: TContext,
                 resetInstance: TContext,
                 interface: Iter(T) = .{
-                    .vtable = &VTable(T){
+                    .vtable = &.{
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
                         .clone_fn = &VTable(T).defaultCloneFn(Self),
@@ -424,7 +424,7 @@ pub fn Iter(comptime T: type) type {
                 context: TContext,
                 og: *Iter(T),
                 interface: Iter(T) = .{
-                    .vtable = &VTable(T){
+                    .vtable = &.{
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
                         .clone_fn = &implClone,
@@ -491,7 +491,7 @@ pub fn Iter(comptime T: type) type {
                 context: TContext,
                 og: *Iter(T),
                 interface: Iter(TOther) = .{
-                    .vtable = &VTable(TOther){
+                    .vtable = &.{
                         .next_fn = &implNext,
                         .reset_fn = &implReset,
                         .clone_fn = &implClone,
@@ -562,7 +562,7 @@ pub fn Iter(comptime T: type) type {
             sources: []const *Iter(T),
             idx: usize = 0,
             interface: Iter(T) = .{
-                .vtable = &VTable(T){
+                .vtable = &.{
                     .next_fn = &implNext,
                     .reset_fn = &implReset,
                     .clone_fn = &implClone,
