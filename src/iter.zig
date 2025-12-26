@@ -931,7 +931,7 @@ pub fn Iter(comptime T: type) type {
         /// Determine if this iterator contains a specific `item`.
         /// `compare_context` must define the method: `fn compare(@TypeOf(compare_context), T, T) std.math.Order`.
         pub fn contains(self: *Iter(T), item: T, compare_context: anytype) bool {
-            const Ctx = struct {
+            const ctx: struct {
                 ctx_item: T,
                 inner: @TypeOf(compare_context),
 
@@ -941,8 +941,8 @@ pub fn Iter(comptime T: type) type {
                         else => false,
                     };
                 }
-            };
-            return self.filterNext(Ctx{ .ctx_item = item, .inner = compare_context }) != null;
+            } = .{ .ctx_item = item, .inner = compare_context };
+            return self.filterNext(ctx) != null;
         }
 
         /// Count the number of filtered items or simply count the items remaining.
