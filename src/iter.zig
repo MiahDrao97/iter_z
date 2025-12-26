@@ -440,8 +440,8 @@ pub fn Iter(comptime T: type) type {
                         self.interface.missed = null;
                         return m;
                     }
-                    return blk: while (self.og.next()) |x| {
-                        if (filter(self.context, x)) break :blk x;
+                    return while (self.og.next()) |x| {
+                        if (filter(self.context, x)) break x;
                     } else null;
                 }
 
@@ -576,10 +576,10 @@ pub fn Iter(comptime T: type) type {
                     self.interface.missed = null;
                     return m;
                 }
-                return blk: while (self.idx < self.sources.len) : (self.idx += 1) {
+                return while (self.idx < self.sources.len) : (self.idx += 1) {
                     const current: *Iter(T) = self.sources[self.idx];
                     if (current.next()) |x| {
-                        break :blk x;
+                        break x;
                     }
                 } else null;
             }
@@ -885,8 +885,8 @@ pub fn Iter(comptime T: type) type {
             self: *Iter(T),
             filter_context: anytype,
         ) ?T {
-            return blk: while (self.next()) |n| {
-                if (filter_context.filter(n)) break :blk n;
+            return while (self.next()) |n| {
+                if (filter_context.filter(n)) break n;
             } else null;
         }
 
@@ -909,9 +909,7 @@ pub fn Iter(comptime T: type) type {
         ) error{MultipleElementsFound}!?T {
             const filterProvided: bool = switch (@typeInfo(@TypeOf(filter_context))) {
                 .void => false,
-                else => blk: {
-                    break :blk true;
-                },
+                else => true,
             };
 
             var found: ?T = null;
@@ -967,8 +965,8 @@ pub fn Iter(comptime T: type) type {
         ///
         /// `filter_context` must define the method: `fn filter(@TypeOf(filter_context), T) bool`.
         pub fn all(self: *Iter(T), filter_context: anytype) bool {
-            return blk: while (self.next()) |x| {
-                if (!filter_context.filter(x)) break :blk false;
+            return while (self.next()) |x| {
+                if (!filter_context.filter(x)) break false;
             } else true;
         }
 
