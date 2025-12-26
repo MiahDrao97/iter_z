@@ -29,8 +29,6 @@ The latest release is `v0.4.0`, which leverages Zig 0.15.1.
     - [select()](#select)
     - [where()](#where)
     - [alloc()](#alloc)
-    - [allocReset()](#allocreset)
-    - [rawClone()](#rawclone)
     - [orderBy()](#orderby)
     - [peek()](#peek)
     - [last()](#last)
@@ -132,8 +130,8 @@ Removed methods:
 - `len()`: Iterators are lazy. Use `.count({})` to achieve this.
 - `prev()`: Again, because iterators are lazy, we only go forward.
 - `scroll()`: We can't very well scroll without a `prev()` method. Use `skip()` to move forward, or `.reset().skip(amt)` to calculate a backwards movement. In practice, I've never had to move backwards; only reset.
-- `clone()`: This still exists in the form of `rawClone()`. Similar to managed vs unmanaged structures, `rawClone()` gives you an unmanaged clone, while `alloc()` gives you a structure with the clone and the allocator.
-- `cloneReset()`: See `allocReset()`.
+- `clone()`: This still exists in the form of `alloc()`.
+- `cloneReset()`: Just removed. Use `alloc()` and then call `reset()` on the copy before any other iterator method.
 - `deinit()`: This was removed from the interface and only declared on concrete implemenations that own memory. In a similar vein, `deinitClone()` is meant to free a cloned iterator.
 - `any()`: Replaced with `peek()`. `any()` now is the function to instantiate an iterator from any type that defines a `next()` method.
 - `reverseReset()`: Since backwards movement is no longer available, the iterator has to enumerate to an owned slice. Already comes "reset" when you call `reverse()`.
@@ -399,30 +397,12 @@ Be sure to call `free()` to free the memory.
 This function is the next incarnation of `clone()` from this library's previous versions.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-const iter_cpy: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
+const iter_cpy: *Iter(u8) = try iter.interface.alloc(testing.allocator);
 defer iter_cpy.free();
 
 while (iter_cpy.next()) |n| {
     // 1, 2, 3
 }
-```
-
-### `allocReset()`
-Calls `alloc()` and then `reset()` on the newly allocated iterator.
-```zig
-var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-_ = iter.next(); // 1
-
-const iter_cpy: Iter(u8).Allocated = try iter.interface.allocReset(testing.allocator);
-defer iter_cpy.free();
-
-// allocated iterator has been reset (starting at 1 again)
-while (iter_cpy.next()) |n| {
-    // 1, 2, 3
-}
-
-// original is still in its same position
-_ = iter.next(); // 2
 ```
 
 ### `orderBy()`
