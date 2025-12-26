@@ -29,10 +29,9 @@ The latest release is `v0.4.0`, which leverages Zig 0.15.1.
     - [select()](#select)
     - [where()](#where)
     - [alloc()](#alloc)
-    - [allocReset()](#allocreset)
-    - [rawClone()](#rawclone)
     - [orderBy()](#orderby)
     - [peek()](#peek)
+    - [last()](#last)
     - [filterNext()](#filternext)
     - [transformNext()](#transformnext)
     - [count()](#count)
@@ -131,8 +130,8 @@ Removed methods:
 - `len()`: Iterators are lazy. Use `.count({})` to achieve this.
 - `prev()`: Again, because iterators are lazy, we only go forward.
 - `scroll()`: We can't very well scroll without a `prev()` method. Use `skip()` to move forward, or `.reset().skip(amt)` to calculate a backwards movement. In practice, I've never had to move backwards; only reset.
-- `clone()`: This still exists in the form of `rawClone()`. Similar to managed vs unmanaged structures, `rawClone()` gives you an unmanaged clone, while `alloc()` gives you a structure with the clone and the allocator.
-- `cloneReset()`: See `allocReset()`.
+- `clone()`: This still exists in the form of `alloc()`.
+- `cloneReset()`: Just removed. Use `alloc()` and then call `reset()` on the copy before any other iterator method.
 - `deinit()`: This was removed from the interface and only declared on concrete implemenations that own memory. In a similar vein, `deinitClone()` is meant to free a cloned iterator.
 - `any()`: Replaced with `peek()`. `any()` now is the function to instantiate an iterator from any type that defines a `next()` method.
 - `reverseReset()`: Since backwards movement is no longer available, the iterator has to enumerate to an owned slice. Already comes "reset" when you call `reverse()`.
@@ -204,13 +203,13 @@ while (iter.next()) |x| {
 ```
 
 ### `ownedSlice()`
-This iterator will own the slice passed in, so be sure to call `deinit()` to free that slice.
+This iterator will own the slice passed in, so be sure to call `free()` to free that slice.
 The iterator's concrete type is `Iter(T).OwnedSliceIterable`.
-Can optionally pass in a callback when `deinit()` is called, presumably to free memory held by items in the slice.
+Can optionally pass in a callback when `free()` is called, presumably to free memory held by items in the slice.
 ```zig
 const slice: []u8 = try allocator.dupe(u8, "asdf");
 var iter = Iter(u8).ownedSlice(allocator, slice, null);
-defer iter.deinit();
+defer iter.free();
 
 while (iter.next()) |x| {
     // 'a', 's', 'd', 'f'
@@ -392,49 +391,14 @@ while (evens.next()) |x| {
 
 ### `alloc()`
 Allocate the iterator for storage purposes or to create a clone.
-Returns the concrete type `Iter(T).Allocated`, but unlike the iterable sources, this is not a true implemention of `Iter(T)`.
-It's merely a holder of the allocator that created the clone and the resulting `*Iter(T)`.
-Be sure to call `deinit()` to free the memory.
-
-There are two functions in `VTable(T)` that this method leverages: One to create the clone and another to deinitialize the clone.
-See more info in the [extensibility](#extensibility) section.
+Depending on the implementation, the contents may be copied as well.
+Be sure to call `free()` to free the memory.
 
 This function is the next incarnation of `clone()` from this library's previous versions.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-const iter_cpy: Iter(u8).Allocated = try iter.interface.alloc(testing.allocator);
-defer iter_cpy.deinit();
-
-while (iter_cpy.next()) |n| {
-    // 1, 2, 3
-}
-```
-
-### `allocReset()`
-Calls `alloc()` and then `reset()` on the newly allocated iterator.
-```zig
-var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-_ = iter.next(); // 1
-
-const iter_cpy: Iter(u8).Allocated = try iter.interface.allocReset(testing.allocator);
-defer iter_cpy.deinit();
-
-// allocated iterator has been reset (starting at 1 again)
-while (iter_cpy.next()) |n| {
-    // 1, 2, 3
-}
-
-// original is still in its same position
-_ = iter.next(); // 2
-```
-
-### `rawClone()`
-If you simply want an allocated `*Iter(T)` without the `Iter(T).Allocated` managed structure, you are free to use `rawClone()`.
-Be sure to call `deinitClone()` after use.
-```zig
-var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-const iter_cpy: *Iter(u8) = try iter.interface.rawClone(testing.allocator);
-defer iter_cpy.deinitClone(testing.allocator);
+const iter_cpy: *Iter(u8) = try iter.interface.alloc(testing.allocator);
+defer iter_cpy.free();
 
 while (iter_cpy.next()) |n| {
     // 1, 2, 3
@@ -443,7 +407,7 @@ while (iter_cpy.next()) |n| {
 
 ### `orderBy()`
 Pass in a comparer function to order your iterator in ascending or descending order (unstable sorting).
-Returns the concrete type [OwnedSliceIterable](#ownedslice) as this allocates a slice owned by the resulting iterator, so be sure to call `deinit()`.
+Returns the concrete type [OwnedSliceIterable](#ownedslice) as this allocates a slice owned by the resulting iterator, so be sure to call `free()`.
 Stable sorting is available via `orderByStable()`.
 
 Additionally, there are buffer-based ordering methods as well: `orderByBuf()` and `orderByBufStable()`, which return the [SliceIterable](#slice) concrete type.
@@ -466,7 +430,7 @@ const nums = [_]u8{ 8, 1, 4, 2, 6, 3, 7, 5 };
 var iter = Iter(u8).slice(&nums);
 
 var ordered = try iter.interface.orderBy(allocator, comparer{}, .asc); // or .desc
-defer ordered.deinit();
+defer ordered.free();
 
 while (ordered.next()) |x| {
     // 1, 2, 3, 4, 5, 6, 7, 8
@@ -494,6 +458,14 @@ _ = iter.interface.peek({}); // 'b'
 
 _ = iter.interface.peek(is_numeric{})); // '1'
 _ = iter.next(); // returns '1' again
+```
+
+### `last()`
+Iterates until the last element and returns that last element.
+Can return `null` if the iterator is empty or its iteration is already complete.
+```zig
+var iter = Iter(u8).slice("abc");
+_ = iter.interface.last(); // 'c'
 ```
 
 ### `filterNext()`
@@ -607,7 +579,7 @@ _ = iter.next(); // 3 is the next element after our error
 
 ### `toOwnedSlice()`
 Allocate a slice and enumerate all elements to it from the current offset.
-This will not free the iterator if it owns any memory, so you'll still have to call `deinit()` on it if it does.
+This will not free the iterator if it owns any memory, so you'll still have to call `free()` on it if it does.
 Caller owns the slice. If you wish to start enumerating at the beginning, be sure to call `reset()` beforehand.
 
 Additionally can return a sorted slice with `toOwnedSliceSorted()` and `toOwnedSliceSortedStable()`.
@@ -662,11 +634,11 @@ _ = iter.interface.reduce(sum{}); // 6
 
 ### `reverse()`
 Enumerates all the items into a slice and reverses the slice.
-Resulting iterator is another instance of [OwnedSliceIterable](#ownedslice), so be sure to call `deinit()`.
+Resulting iterator is another instance of [OwnedSliceIterable](#ownedslice), so be sure to call `free()`.
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 var reversed = iter.interface.reverse();
-defer reversed.deinit();
+defer reversed.free();
 
 while (reversed.next()) |x| {
     // 3, 2, 1
@@ -702,14 +674,14 @@ while (page_iter.next()) |x| {
 
 ### `takeAlloc()`
 Similar to `take()`, except allocating memory rather than using a buffer.
-Returns concrete type [OwnedSliceIterable](#ownedslice), so don't forget to call `deinit()`.
+Returns concrete type [OwnedSliceIterable](#ownedslice), so don't forget to call `free()`.
 If there are less elements than the size passed in, the slice will be pared down to the exact number of elements returned.
 ```zig
 const page_size: usize = 20;
 var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
 var page_no: usize = 0;
 var page_iter = try full_iter.interface.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
-defer page_iter.deinit();
+defer page_iter.free();
 
 var expected: usize = 1;
 while (page_iter.next()) |x| {
@@ -718,7 +690,7 @@ while (page_iter.next()) |x| {
 
 page_no += 2;
 expected += page_size;
-page_iter.deinit();
+page_iter.free();
 page_iter = try full_iter.reset().skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
 while (page_iter.next()) |x| {
     // third page: expecting values 41-60
@@ -826,40 +798,40 @@ You only need to implement `VTable(T)`, and you're set.
 pub fn VTable(comptime T: type) type {
     return struct {
         /// Get the next element or null if iteration is over.
-        next_fn: *const fn (*Iter(T)) ?T,
+        nextFn: *const fn (*Iter(T)) ?T,
         /// Reset the iterator the beginning. Should return the interface.
-        reset_fn: *const fn (*Iter(T)) *Iter(T),
-        /// Clone the iterator.
-        /// This is called by `Iter(T).alloc()` and the result will be given to the resulting `Iter(T).Allocated` instance.
-        clone_fn: *const fn (*Iter(T), Allocator) Allocator.Error!*Iter(T),
-        /// This implementation is for de-initializing a clone created with `clone_fn`.
-        /// Will be called by `Iter(T).Allocated.deinit()`.
-        deinit_clone_fn: *const fn (*Iter(T), Allocator) void,
+        resetFn: *const fn (*Iter(T)) *Iter(T),
+        /// Clone the iterator and potentially its contents, depending on the implementation.
+        allocFn: *const fn (*Iter(T), Allocator) Allocator.Error!*Iter(T),
+        /// This implementation is for freeing all memory created with `allocFn`
+        freeFn: *const fn (*Iter(T), Allocator) void,
 
         /// This is provided for a convenient default implementation:
         /// Simply assumes that the `*Iter(T)` is a property named "interface" contained on the concrete type.
         /// Creates `*TConcrete` and copies its value from the original.
-        pub inline fn defaultCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) Allocator.Error!*Iter(T) {
+        /// Elements are not copied, as we're assuming they're not owned.
+        pub inline fn defaultAllocFn(comptime TConcrete: type) fn (*Iter(T), Allocator) Allocator.Error!*Iter(T) {
             return struct {
-                pub fn clone(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
+                fn alloc(iter: *Iter(T), allocator: Allocator) Allocator.Error!*Iter(T) {
                     const concrete: *TConcrete = @fieldParentPtr("interface", iter);
                     const c: *TConcrete = try allocator.create(TConcrete);
                     c.* = concrete.*;
                     return @as(*Iter(T), &c.interface);
                 }
-            }.clone;
+            }.alloc;
         }
 
         /// This is provided for a convenient default implementation:
         /// Simply assumes that the `*Iter(T)` is a property named "interface" contained on the concrete type.
         /// Destroys the pointer to the concrete type.
-        pub inline fn defaultDeinitCloneFn(comptime TConcrete: type) fn (*Iter(T), Allocator) void {
+        /// Elements are not freed, as we're assuming they're not owned.
+        pub inline fn defaultFreeFn(comptime TConcrete: type) fn (*Iter(T), Allocator) void {
             return struct {
-                pub fn deinit(iter: *Iter(T), allocator: Allocator) void {
+                fn free(iter: *Iter(T), allocator: Allocator) void {
                     const concrete: *TConcrete = @fieldParentPtr("interface", iter);
                     allocator.destroy(concrete);
                 }
-            }.deinit;
+            }.free;
         }
     };
 }
