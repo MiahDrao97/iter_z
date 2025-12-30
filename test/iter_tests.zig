@@ -883,6 +883,32 @@ test "empty linked lists" {
         try testing.expectEqual(null, iter.next());
     }
 }
+test "join" {
+    const join: struct {
+        fn extractArgs(_: @This(), x: u8) struct { u8, u8 } {
+            return .{ x, x };
+        }
+    } = .{};
+
+    var stream: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stream.deinit();
+
+    var iter = Iter(u8).slice("abc");
+    try iter.interface.joinCustom(
+        &stream.writer,
+        "{c} ({d})",
+        ", ",
+        join,
+        struct { u8, u8 },
+        @TypeOf(join).extractArgs,
+    );
+    try testing.expectEqualStrings("a (97), b (98), c (99)", stream.written());
+
+    stream.clearRetainingCapacity();
+
+    try iter.interface.reset().join(&stream.writer, "{c}", ", ");
+    try testing.expectEqualStrings("a, b, c", stream.written());
+}
 
 const std = @import("std");
 const iter_z = @import("iter_z");

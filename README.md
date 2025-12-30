@@ -46,6 +46,7 @@ The latest release is `v0.4.0`, which leverages Zig 0.15.1.
     - [skip()](#skip)
     - [take()](#take)
     - [takeAlloc()](#takeAlloc)
+    - [join()](#join)
 - [Auto Contexts](#auto-contexts)
     - [Auto Comparer](#auto-comparer)
     - [Auto Sum](#auto-sum)
@@ -695,6 +696,45 @@ page_iter = try full_iter.reset().skip(page_no * page_size).takeAlloc(testing.al
 while (page_iter.next()) |x| {
     // third page: expecting values 41-60
 }
+```
+
+### `join()`
+Writes all elements to a writer, separated by the specified `separator`.
+```zig
+const std = @import("std");
+
+var stream: std.Io.Writer.Allocating = .init(std.testing.allocator);
+defer stream.deinit();
+
+var iter = Iter(u8).slice("abc");
+
+try iter.interface.join(
+    &stream.writer, // writer
+    "{c}", // format
+    ", ", // separator
+);
+try std.testing.expectEqualStrings("a, b, c", stream.written());
+
+// If you want a custom format that's not as simple as the example above, you can leverage `joinCustom()`:
+
+const join_ctx: struct {
+    fn extractArgs(_: @This(), x: u8) struct { u8, u8 } {
+        return .{ x, x };
+    }
+} = .{};
+
+stream.clearRetainingCapacity();
+
+try iter.interface.reset().joinCustom(
+    &stream.writer, // writer
+    "{c} ({d})", // custom format for each element
+    ", ", // separator
+    join_ctx, // context
+    struct { u8, u8 }, // args type
+    @TypeOf(join_ctx).extractArgs, // function that extracts the args from the element
+);
+
+try testing.expectEqualStrings("a (97), b (98), c (99)", stream.written());
 ```
 
 ## Auto Contexts
