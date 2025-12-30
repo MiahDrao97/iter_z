@@ -1030,7 +1030,7 @@ pub fn Iter(comptime T: type) type {
             separator: []const u8,
             ctx: anytype,
             comptime TArgs: type,
-            extractArg: fn (@TypeOf(ctx), T) TArgs,
+            extractArgs: fn (@TypeOf(ctx), T) TArgs,
         ) Io.Writer.Error!void {
             var first: bool = true;
             while (self.next()) |x| {
@@ -1038,7 +1038,7 @@ pub fn Iter(comptime T: type) type {
                     try writer.writeAll(separator)
                 else
                     first = false;
-                try writer.print(element_fmt, extractArg(ctx, x));
+                try writer.print(element_fmt, extractArgs(ctx, x));
             }
         }
     };
