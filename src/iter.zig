@@ -1002,6 +1002,45 @@ pub fn Iter(comptime T: type) type {
             std.mem.reverse(T, items);
             return ownedSlice(items, null);
         }
+
+        /// Writes all elements to a `writer`, separated by `separator`.
+        /// Each element is written, formated as specified by `element_fmt`.
+        pub fn join(
+            self: *Iter(T),
+            writer: *Io.Writer,
+            comptime element_fmt: []const u8,
+            separator: []const u8,
+        ) Io.Writer.Error!void {
+            var first: bool = true;
+            while (self.next()) |x| {
+                if (!first)
+                    try writer.writeAll(separator)
+                else
+                    first = false;
+                try writer.print(element_fmt, .{x});
+            }
+        }
+
+        /// If `T` is a complex type that does not define a `format()` method, you're still in luck.
+        /// You may pass in a context, args type, and function to extract the args from each element.
+        pub fn joinCustom(
+            self: *Iter(T),
+            writer: *Io.Writer,
+            comptime element_fmt: []const u8,
+            separator: []const u8,
+            ctx: anytype,
+            comptime TArgs: type,
+            extractArgs: fn (@TypeOf(ctx), T) TArgs,
+        ) Io.Writer.Error!void {
+            var first: bool = true;
+            while (self.next()) |x| {
+                if (!first)
+                    try writer.writeAll(separator)
+                else
+                    first = false;
+                try writer.print(element_fmt, extractArgs(ctx, x));
+            }
+        }
     };
 }
 
@@ -1253,6 +1292,7 @@ pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
 
 const std = @import("std");
 pub const iter_deprecated = @import("iter_deprecated.zig");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 const DoublyLinkedList = std.DoublyLinkedList;
