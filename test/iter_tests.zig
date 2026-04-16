@@ -247,18 +247,20 @@ test "order by buffer" {
         var iter = Iter(u16).slice(nums);
         var buf: [10]u16 = undefined;
         const ctx: struct {
-            pub fn compare(_: @This(), x: u16, _: u16) std.math.Order {
-                const time: i128 = std.time.nanoTimestamp();
-                const trunc: u16 = @bitCast(@as(i16, @truncate(time)));
-                const seed: u16 = @intCast(@rem(trunc, 17));
-                return if (x < seed)
+            io: std.Io,
+
+            pub fn compare(this: @This(), x: u16, _: u16) std.math.Order {
+                var rand_buf: [2]u8 align(2) = undefined;
+                this.io.random(&rand_buf);
+                const seed: *const u16 = @ptrCast(&rand_buf);
+                return if (x < seed.*)
                     .lt
-                else if (x > seed)
+                else if (x > seed.*)
                     .gt
                 else
                     .eq;
             }
-        } = .{};
+        } = .{ .io = testing.io };
         var shuffled = try iter.interface.orderByBuf(&buf, ctx, .asc);
         var buf2: [10]u16 = undefined;
         var sorted = try shuffled.interface.orderByBuf(&buf2, autoCompare(u16), .asc);
