@@ -220,7 +220,7 @@ while (iter.next()) |x| {
 ### `linkedList()`
 Iterate over the nodes of a linked list, doubly or singly linked.
 The iterator's concrete type is `Iter(T).LinkedListIterable(comptime linkage: Linkage, comptime node_field_name: []const u8)`.
-`Linkage` can be either `.single` or `.double`.
+`Linkage` can be either `.single`, `.double`, or `.double_backward` (which simply starts with the last element and gets the previous node).
 `node_field_name` is used to get `*const T` from `@fieldParentPtr()` since linked lists in the std lib are intrusive.
 ```zig
 // singly linked list
@@ -267,6 +267,13 @@ The iterator's concrete type is `Iter(T).LinkedListIterable(comptime linkage: Li
         // .{ .val = 1, .node = .{ ... } }
         // .{ .val = 2, .node = .{ ... } }
         // .{ .val = 3, .node = .{ ... } }
+    }
+
+    iter = Iter(MyStruct).linkedList(.double_backward, "node", list);
+    while (iter.next()) |x| {
+        // .{ .val = 3, .node = .{ ... } }
+        // .{ .val = 2, .node = .{ ... } }
+        // .{ .val = 1, .node = .{ ... } }
     }
 }
 

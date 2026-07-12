@@ -862,6 +862,28 @@ test "from linked list" {
         try testing.expectEqual(3, iter.next().?.val);
         try testing.expectEqual(null, iter.next());
     }
+    // double backward
+    {
+        const S = struct {
+            val: u16,
+            node: DoublyLinkedList.Node = .{},
+        };
+
+        var a: S = .{ .val = 1 };
+        var b: S = .{ .val = 2 };
+        var c: S = .{ .val = 3 };
+
+        var list: DoublyLinkedList = .{};
+        list.append(&a.node);
+        list.append(&b.node);
+        list.append(&c.node);
+
+        var iter = Iter(S).linkedList(.double_backward, "node", list);
+        try testing.expectEqual(3, iter.next().?.val);
+        try testing.expectEqual(2, iter.next().?.val);
+        try testing.expectEqual(1, iter.next().?.val);
+        try testing.expectEqual(null, iter.next());
+    }
 }
 test "empty linked lists" {
     // single

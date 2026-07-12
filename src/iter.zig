@@ -315,7 +315,10 @@ pub fn Iter(comptime T: type) type {
                 pub fn init(list: List) Self {
                     return .{
                         .list = list,
-                        .current_node = list.first,
+                        .current_node = switch (linkage) {
+                            .single, .double => list.first,
+                            .double_backward => list.last,
+                        },
                     };
                 }
 
@@ -325,14 +328,20 @@ pub fn Iter(comptime T: type) type {
                         return m;
                     }
                     if (self.current_node) |node| {
-                        defer self.current_node = node.next;
+                        defer self.current_node = switch (linkage) {
+                            .single, .double => node.next,
+                            .double_backward => node.prev,
+                        };
                         return @as(*const T, @fieldParentPtr(node_field_name, node)).*;
                     }
                     return null;
                 }
 
                 pub fn reset(self: *Self) *Iter(T) {
-                    self.current_node = self.list.first;
+                    self.current_node = switch (linkage) {
+                        .single, .double => self.list.first,
+                        .double_backward => self.list.last,
+                    };
                     self.interface.missed = null;
                     return &self.interface;
                 }
@@ -1048,7 +1057,7 @@ pub fn Iter(comptime T: type) type {
 pub const Ordering = enum { asc, desc };
 
 /// Linked list linkage
-pub const Linkage = enum { single, double };
+pub const Linkage = enum { single, double, double_backward };
 
 fn SortContext(comptime T: type, comptime TContext: type) type {
     return struct {
