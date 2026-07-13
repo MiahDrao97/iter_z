@@ -1300,7 +1300,6 @@ pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
 }
 
 const std = @import("std");
-pub const iter_deprecated = @import("iter_deprecated.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
