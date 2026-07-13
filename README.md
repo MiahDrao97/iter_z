@@ -210,7 +210,7 @@ Can optionally pass in a callback when `free()` is called, presumably to free me
 ```zig
 const slice: []u8 = try allocator.dupe(u8, "asdf");
 var iter = Iter(u8).ownedSlice(allocator, slice, null);
-defer iter.free();
+defer iter.free(allocator);
 
 while (iter.next()) |x| {
     // 'a', 's', 'd', 'f'
@@ -406,7 +406,7 @@ This function is the next incarnation of `clone()` from this library's previous 
 ```zig
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
 const iter_cpy: *Iter(u8) = try iter.interface.alloc(testing.allocator);
-defer iter_cpy.free();
+defer iter_cpy.free(testing.allocator);
 
 while (iter_cpy.next()) |n| {
     // 1, 2, 3
@@ -438,7 +438,7 @@ const nums = [_]u8{ 8, 1, 4, 2, 6, 3, 7, 5 };
 var iter = Iter(u8).slice(&nums);
 
 var ordered = try iter.interface.orderBy(allocator, comparer{}, .asc); // or .desc
-defer ordered.free();
+defer ordered.free(allocator);
 
 while (ordered.next()) |x| {
     // 1, 2, 3, 4, 5, 6, 7, 8
@@ -644,9 +644,12 @@ _ = iter.interface.reduce(sum{}); // 6
 Enumerates all the items into a slice and reverses the slice.
 Resulting iterator is another instance of [OwnedSliceIterable](#ownedslice), so be sure to call `free()`.
 ```zig
+const std = @import("std");
+const gpa = std.testing.allocator;
+
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-var reversed = iter.interface.reverse();
-defer reversed.free();
+var reversed = iter.interface.reverse(gpa);
+defer reversed.free(gpa);
 
 while (reversed.next()) |x| {
     // 3, 2, 1
@@ -689,7 +692,7 @@ const page_size: usize = 20;
 var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
 var page_no: usize = 0;
 var page_iter = try full_iter.interface.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
-defer page_iter.free();
+defer page_iter.free(testing.allocator);
 
 var expected: usize = 1;
 while (page_iter.next()) |x| {
@@ -698,7 +701,7 @@ while (page_iter.next()) |x| {
 
 page_no += 2;
 expected += page_size;
-page_iter.free();
+page_iter.free(testing.allocator);
 page_iter = try full_iter.reset().skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
 while (page_iter.next()) |x| {
     // third page: expecting values 41-60

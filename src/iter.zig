@@ -25,9 +25,9 @@ pub fn VTable(comptime T: type) type {
             return struct {
                 fn alloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                     const concrete: *TConcrete = @fieldParentPtr("interface", iter);
-                    const c: *TConcrete = try gpa.create(TConcrete);
-                    c.* = concrete.*;
-                    return @as(*Iter(T), &c.interface);
+                    const clone: *TConcrete = try gpa.create(TConcrete);
+                    clone.* = concrete.*;
+                    return @as(*Iter(T), &clone.interface);
                 }
             }.alloc;
         }
@@ -203,15 +203,15 @@ pub fn Iter(comptime T: type) type {
 
             fn implAlloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                 const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
-                const c: *OwnedSliceIterable = try gpa.create(OwnedSliceIterable);
-                errdefer gpa.destroy(c);
+                const clone: *OwnedSliceIterable = try gpa.create(OwnedSliceIterable);
+                errdefer gpa.destroy(clone);
 
-                c.* = .{
+                clone.* = .{
                     .slice = try gpa.dupe(T, self.slice),
                     .idx = self.idx,
                     .on_free = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
                 };
-                return &c.interface;
+                return &clone.interface;
             }
 
             fn implFree(iter: *Iter(T), gpa: Allocator) void {
@@ -472,14 +472,14 @@ pub fn Iter(comptime T: type) type {
 
                 fn implAlloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                     const self: *Self = @fieldParentPtr("interface", iter);
-                    const c: *Self = try gpa.create(Self);
-                    errdefer gpa.destroy(c);
+                    const clone: *Self = try gpa.create(Self);
+                    errdefer gpa.destroy(clone);
 
-                    c.* = .{
+                    clone.* = .{
                         .og = try self.og.alloc(gpa),
                         .context = self.context,
                     };
-                    return &c.interface;
+                    return &clone.interface;
                 }
 
                 fn implFree(iter: *Iter(T), gpa: Allocator) void {
@@ -540,14 +540,14 @@ pub fn Iter(comptime T: type) type {
 
                 fn implAlloc(iter: *Iter(TOther), gpa: Allocator) Allocator.Error!*Iter(TOther) {
                     const self: *Self = @fieldParentPtr("interface", iter);
-                    const c: *Self = try gpa.create(Self);
-                    errdefer gpa.destroy(c);
+                    const clone: *Self = try gpa.create(Self);
+                    errdefer gpa.destroy(clone);
 
-                    c.* = .{
+                    clone.* = .{
                         .og = try self.og.alloc(gpa),
                         .context = self.context,
                     };
-                    return &c.interface;
+                    return &clone.interface;
                 }
 
                 fn implFree(iter: *Iter(TOther), gpa: Allocator) void {
@@ -612,8 +612,8 @@ pub fn Iter(comptime T: type) type {
 
             fn implAlloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                 const self: *ConcatIterable = @fieldParentPtr("interface", iter);
-                const c: *ConcatIterable = try gpa.create(ConcatIterable);
-                errdefer gpa.destroy(c);
+                const clone: *ConcatIterable = try gpa.create(ConcatIterable);
+                errdefer gpa.destroy(clone);
 
                 var succeses: usize = 0;
                 const c_sources: []*Iter(T) = try gpa.alloc(*Iter(T), self.sources.len);
@@ -627,11 +627,11 @@ pub fn Iter(comptime T: type) type {
                     succeses += 1;
                 }
 
-                c.* = .{
+                clone.* = .{
                     .sources = c_sources,
                     .idx = self.idx,
                 };
-                return &c.interface;
+                return &clone.interface;
             }
 
             fn implFree(iter: *Iter(T), gpa: Allocator) void {
