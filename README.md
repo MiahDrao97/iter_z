@@ -316,8 +316,7 @@ try dictionary.put(testing.allocator, "blarf", 1);
 try dictionary.put(testing.allocator, "asdf", 2);
 try dictionary.put(testing.allocator, "ohmylawdy", 3);
 
-const dict_iter: HashMap.Iterator = dictionary.iterator();
-var iter = Iter(HashMap.Entry).any(dict_iter); // can also pass by pointer
+var iter = Iter(HashMap.Entry).any(dictionary.iterator()); // can also pass by pointer
 
 while (iter.next()) |x| {
     // key: "blarf", value: 1
@@ -361,16 +360,16 @@ Returns a concrete iterable source `Iter(T).Select(comptime TOther: type, compti
 The `select()` method assumes that the context defines the method `transform()`.
 If that's not the case, you can use [transformContext()](#context-helper-functions) to create a wrapper struct.
 ```zig
-const digit_to_str = struct {
-    var buffer: [4]u8 = undefined;
+const digit_to_str: struct {
+    threadlocal var buffer: [4]u8 = undefined;
 
     pub fn transform(_: @This(), byte: u8) []const u8 {
         return std.fmt.bufPrint(&buffer, "{d}", .{byte}) catch unreachable,
     }
-};
+} = .{};
 
-var iter = Iter(u8).slice(&util.range(u8, 1, 6));
-var outer = iter.interface.select([]const u8, digit_to_str{});
+var iter = Iter(u8).slice(&iter_z.range(u8, 1, 6));
+var outer = iter.interface.select([]const u8, digit_to_str);
 while (outer.next()) |x| {
     // "1", "2", "3", "4", "5", "6"
 }
@@ -391,7 +390,8 @@ const ZeroRemainder = struct {
 };
 
 var iter = Iter(u32).slice(&[_]u32{ 1, 2, 3, 4, 5 });
-var evens = iter.interface.where(ZeroRemainder{ .divisor = 2 });
+var ctx: ZeroRemainder = .{ .divisor = 2 };
+var evens = iter.interface.where(ctx);
 while (evens.next()) |x| {
     // 2, 4
 }
@@ -449,14 +449,14 @@ while (ordered.next()) |x| {
 Peeks at the next element with or without a filter (pass in void literal `{}` for no filter), but does not advance the iterator's position.
 `next()` will return the peeked element and then advance the iterator.
 ```zig
-const is_numeric = struct {
+const is_numeric: struct {
     pub fn filter(_: @This(), char: u8) bool {
         return if (std.fmt.parseUnsigned(u8, &.{char}, 10)) |_|
             true
         else |_|
             false;
     }
-};
+} = .{};
 
 var iter = Iter(u8).slice("abc123");
 
@@ -464,7 +464,7 @@ _ = iter.interface.peek({}); // 'a'
 _ = iter.next(); // returns 'a' again
 _ = iter.interface.peek({}); // 'b'
 
-_ = iter.interface.peek(is_numeric{})); // '1'
+_ = iter.interface.peek(is_numeric)); // '1'
 _ = iter.next(); // returns '1' again
 ```
 
@@ -520,15 +520,15 @@ The filter context is like the one in `where()`: It must define the method `fn f
 It does not need to be a pointer since it's not being stored as a member of a structure.
 Also, since this filter is optional, you may pass in void literal `{}` to use no filter.
 ```zig
-const is_even = struct {
+const is_even: struct {
     pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
-};
+} = .{};
 
 var iter = Iter(u32).slice(&[_]u32{ 1, 2, 3, 4, 5 });
 _ = iter.interface.count({}); // 5
-_ = iter.reset().count(is_even{}); // 2
+_ = iter.reset().count(is_even); // 2
 ```
 
 ### `all()`
@@ -539,10 +539,10 @@ const is_even = struct {
     pub fn filter(_: @This(), item: u32) bool {
         return @mod(item, 2) == 0;
     }
-};
+} = .{};
 
 var iter = Iter(u8).slice(&[_]u8{ 2, 4, 6 });
-_ = iter.interface.all(is_even{}); // true
+_ = iter.interface.all(is_even); // true
 ```
 
 ### `single()`
@@ -611,15 +611,15 @@ Parameters:
 - `accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), TOther, T) TOther`
 A classic example of fold would be summing all the values in the iteration.
 ```zig
-const sum = struct {
+const sum: struct {
     // note returning u16
     pub fn accumulate(_: @This(), a: u16, b: u8) u16 {
         return a + b;
     }
-};
+} = .{};
 
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-_ = iter.interface.fold(u16, 0, sum{}); // 6
+_ = iter.interface.fold(u16, 0, sum); // 6
 ```
 
 ### `reduce()`
@@ -630,14 +630,14 @@ If there are no elements or iteration is over, will return null.
 `accumulate_context` must define the method `fn accumulate(@TypeOf(accumulate_context), T, T) T`
 ```zig
 // written out as example; see Auto Contexts section
-const sum = struct {
+const sum: struct {
     pub fn accumulate(_: @This(), a: u8, b: u8) u8 {
         return a +| b;
     }
-};
+} = .{};
 
 var iter = Iter(u8).slice(&[_]u8{ 1, 2, 3 });
-_ = iter.interface.reduce(sum{}); // 6
+_ = iter.interface.reduce(sum); // 6
 ```
 
 ### `reverse()`
@@ -667,7 +667,10 @@ _ = iter.interface.skip(3).next(); // 'f'
 ### `take()`
 Take up to `buf.len` elements and return new iterator from that buffer.
 ```zig
-var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
+const iter_z = @import("iter_z");
+const Iter = iter_z.Iter;
+
+var full_iter = Iter(u8).slice(&iter_z.range(u8, 1, 200));
 var page: [20]u8 = undefined;
 var page_no: usize = 0;
 var page_iter = full_iter.interface.skip(page_no * page.len).take(&page);
@@ -688,8 +691,13 @@ Similar to `take()`, except allocating memory rather than using a buffer.
 Returns concrete type [OwnedSliceIterable](#ownedslice), so don't forget to call `free()`.
 If there are less elements than the size passed in, the slice will be pared down to the exact number of elements returned.
 ```zig
+const std = @import("std");
+const iter_z = @import("iter_z");
+const Iter = iter_z.Iter;
+const testing = std.testing;
+
 const page_size: usize = 20;
-var full_iter = Iter(u8).slice(&util.range(u8, 1, 200));
+var full_iter = Iter(u8).slice(&iter_z.range(u8, 1, 200));
 var page_no: usize = 0;
 var page_iter = try full_iter.interface.skip(page_no * page_size).takeAlloc(testing.allocator, page_size);
 defer page_iter.free(testing.allocator);
