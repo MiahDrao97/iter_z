@@ -54,7 +54,7 @@ pub fn Iter(comptime T: type) type {
         vtable: *const VTable(T),
         /// Not intended to be directly accessed by users.
         /// When an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
-        /// It's the responsibility of the implementations to use this missed value and/or clear it.
+        /// It's the responsibility of the implementations to return this missed value on `next()` and clear it on `reset()`.
         missed: ?T = null,
 
         /// Returns the next element or `null` if the iteration is over.
@@ -153,7 +153,7 @@ pub fn Iter(comptime T: type) type {
         pub const OwnedSliceIterable = struct {
             slice: []const T,
             idx: usize = 0,
-            on_free: ?*const fn (Allocator, []T) void = null,
+            onFreeFn: ?*const fn (Allocator, []T) void = null,
             interface: Iter(T) = .{
                 .vtable = &.{
                     .nextFn = &implNext,
@@ -183,7 +183,7 @@ pub fn Iter(comptime T: type) type {
 
             /// Frees the underlying slice
             pub fn free(self: *OwnedSliceIterable, gpa: Allocator) void {
-                if (self.on_free) |exec| {
+                if (self.onFreeFn) |exec| {
                     exec(gpa, @constCast(self.slice));
                 }
                 if (self.slice.len > 0) {
@@ -209,7 +209,7 @@ pub fn Iter(comptime T: type) type {
                 clone.* = .{
                     .slice = try gpa.dupe(T, self.slice),
                     .idx = self.idx,
-                    .on_free = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
+                    .onFreeFn = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
                 };
                 return &clone.interface;
             }
@@ -230,11 +230,11 @@ pub fn Iter(comptime T: type) type {
         /// Must call `free()` on the iterator.
         pub fn ownedSlice(
             s: []const T,
-            on_free: ?*const fn (Allocator, []T) void,
+            onFreeFn: ?*const fn (Allocator, []T) void,
         ) OwnedSliceIterable {
             return .{
                 .slice = s,
-                .on_free = on_free,
+                .onFreeFn = onFreeFn,
             };
         }
 

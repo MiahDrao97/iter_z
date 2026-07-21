@@ -846,7 +846,7 @@ If you wish to start from the beginning, make sure to call `reset()` beforehand.
 You may notice the `missed` field on `Iter(T)`.
 This is not intended to be directly accessed by users.
 However, when an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
-It's the responsibility of the implementations to use this missed value and/or clear it.
+It's the responsibility of the implementations to return this missed value on `next()` and clear it on `reset()`.
 
 ## Extensibility
 You are free to create your own iterator!
