@@ -736,7 +736,7 @@ try std.testing.expectEqualStrings("a, b, c", stream.written());
 // If you want a custom format that's not as simple as the example above, you can leverage `joinCustom()`:
 
 const join_ctx: struct {
-    fn extractArgs(_: @This(), x: u8) struct { u8, u8 } {
+    fn extractArgs(_: @This(), x: u8) @Tuple(&.{ u8, u8 }) {
         return .{ x, x };
     }
 } = .{};
@@ -748,7 +748,7 @@ try iter.interface.reset().joinCustom(
     "{c} ({d})", // custom format for each element
     ", ", // separator
     join_ctx, // context
-    struct { u8, u8 }, // args type
+    @Tuple(&.{ u8, u8 }), // args type
     @TypeOf(join_ctx).extractArgs, // function that extracts the args from the element
 );
 

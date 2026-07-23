@@ -909,7 +909,7 @@ test "empty linked lists" {
 }
 test "join" {
     const join: struct {
-        fn extractArgs(_: @This(), x: u8) struct { u8, u8 } {
+        fn extractArgs(_: @This(), x: u8) @Tuple(&.{ u8, u8 }) {
             return .{ x, x };
         }
     } = .{};
@@ -923,7 +923,7 @@ test "join" {
         "{c} ({d})",
         ", ",
         join,
-        struct { u8, u8 },
+        @Tuple(&.{ u8, u8 }),
         @TypeOf(join).extractArgs,
     );
     try testing.expectEqualStrings("a (97), b (98), c (99)", stream.written());
