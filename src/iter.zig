@@ -25,9 +25,9 @@ pub fn VTable(comptime T: type) type {
             return struct {
                 fn alloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                     const concrete: *TConcrete = @fieldParentPtr("interface", iter);
-                    const c: *TConcrete = try gpa.create(TConcrete);
-                    c.* = concrete.*;
-                    return @as(*Iter(T), &c.interface);
+                    const clone: *TConcrete = try gpa.create(TConcrete);
+                    clone.* = concrete.*;
+                    return @as(*Iter(T), &clone.interface);
                 }
             }.alloc;
         }
@@ -54,7 +54,7 @@ pub fn Iter(comptime T: type) type {
         vtable: *const VTable(T),
         /// Not intended to be directly accessed by users.
         /// When an error causes the iterator to drop the current result, it's saved here instead (example: `toBuffer()`).
-        /// It's the responsibility of the implementations to use this missed value and/or clear it.
+        /// It's the responsibility of the implementations to return this missed value on `next()` and clear it on `reset()`.
         missed: ?T = null,
 
         /// Returns the next element or `null` if the iteration is over.
@@ -153,7 +153,7 @@ pub fn Iter(comptime T: type) type {
         pub const OwnedSliceIterable = struct {
             slice: []const T,
             idx: usize = 0,
-            on_free: ?*const fn (Allocator, []T) void = null,
+            onFreeFn: ?*const fn (Allocator, []T) void = null,
             interface: Iter(T) = .{
                 .vtable = &.{
                     .nextFn = &implNext,
@@ -183,7 +183,7 @@ pub fn Iter(comptime T: type) type {
 
             /// Frees the underlying slice
             pub fn free(self: *OwnedSliceIterable, gpa: Allocator) void {
-                if (self.on_free) |exec| {
+                if (self.onFreeFn) |exec| {
                     exec(gpa, @constCast(self.slice));
                 }
                 if (self.slice.len > 0) {
@@ -203,15 +203,15 @@ pub fn Iter(comptime T: type) type {
 
             fn implAlloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                 const self: *OwnedSliceIterable = @fieldParentPtr("interface", iter);
-                const c: *OwnedSliceIterable = try gpa.create(OwnedSliceIterable);
-                errdefer gpa.destroy(c);
+                const clone: *OwnedSliceIterable = try gpa.create(OwnedSliceIterable);
+                errdefer gpa.destroy(clone);
 
-                c.* = .{
+                clone.* = .{
                     .slice = try gpa.dupe(T, self.slice),
                     .idx = self.idx,
-                    .on_free = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
+                    .onFreeFn = null, // NEVER copy this for clones; it's intended to be called once since it can result in double-frees if it's propagated everywhere
                 };
-                return &c.interface;
+                return &clone.interface;
             }
 
             fn implFree(iter: *Iter(T), gpa: Allocator) void {
@@ -230,11 +230,11 @@ pub fn Iter(comptime T: type) type {
         /// Must call `free()` on the iterator.
         pub fn ownedSlice(
             s: []const T,
-            on_free: ?*const fn (Allocator, []T) void,
+            onFreeFn: ?*const fn (Allocator, []T) void,
         ) OwnedSliceIterable {
             return .{
                 .slice = s,
-                .on_free = on_free,
+                .onFreeFn = onFreeFn,
             };
         }
 
@@ -472,14 +472,14 @@ pub fn Iter(comptime T: type) type {
 
                 fn implAlloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                     const self: *Self = @fieldParentPtr("interface", iter);
-                    const c: *Self = try gpa.create(Self);
-                    errdefer gpa.destroy(c);
+                    const clone: *Self = try gpa.create(Self);
+                    errdefer gpa.destroy(clone);
 
-                    c.* = .{
+                    clone.* = .{
                         .og = try self.og.alloc(gpa),
                         .context = self.context,
                     };
-                    return &c.interface;
+                    return &clone.interface;
                 }
 
                 fn implFree(iter: *Iter(T), gpa: Allocator) void {
@@ -540,14 +540,14 @@ pub fn Iter(comptime T: type) type {
 
                 fn implAlloc(iter: *Iter(TOther), gpa: Allocator) Allocator.Error!*Iter(TOther) {
                     const self: *Self = @fieldParentPtr("interface", iter);
-                    const c: *Self = try gpa.create(Self);
-                    errdefer gpa.destroy(c);
+                    const clone: *Self = try gpa.create(Self);
+                    errdefer gpa.destroy(clone);
 
-                    c.* = .{
+                    clone.* = .{
                         .og = try self.og.alloc(gpa),
                         .context = self.context,
                     };
-                    return &c.interface;
+                    return &clone.interface;
                 }
 
                 fn implFree(iter: *Iter(TOther), gpa: Allocator) void {
@@ -612,8 +612,8 @@ pub fn Iter(comptime T: type) type {
 
             fn implAlloc(iter: *Iter(T), gpa: Allocator) Allocator.Error!*Iter(T) {
                 const self: *ConcatIterable = @fieldParentPtr("interface", iter);
-                const c: *ConcatIterable = try gpa.create(ConcatIterable);
-                errdefer gpa.destroy(c);
+                const clone: *ConcatIterable = try gpa.create(ConcatIterable);
+                errdefer gpa.destroy(clone);
 
                 var succeses: usize = 0;
                 const c_sources: []*Iter(T) = try gpa.alloc(*Iter(T), self.sources.len);
@@ -627,11 +627,11 @@ pub fn Iter(comptime T: type) type {
                     succeses += 1;
                 }
 
-                c.* = .{
+                clone.* = .{
                     .sources = c_sources,
                     .idx = self.idx,
                 };
-                return &c.interface;
+                return &clone.interface;
             }
 
             fn implFree(iter: *Iter(T), gpa: Allocator) void {
@@ -713,13 +713,13 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) error{NoSpaceLeft}![]T {
-            const s: []T = try self.toBuffer(buf);
+            const sorted: []T = try self.toBuffer(buf);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
                 .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sortUnstable(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return s;
+            mem.sortUnstable(T, sorted, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
+            return sorted;
         }
 
         /// Enumerates into sorted buffer, using a stable sorting algorithm.
@@ -734,13 +734,13 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) error{NoSpaceLeft}![]T {
-            const s: []T = try self.toBuffer(buf);
+            const sorted: []T = try self.toBuffer(buf);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
                 .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sort(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return s;
+            mem.sort(T, sorted, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
+            return sorted;
         }
 
         /// Enumerates into a new slice.
@@ -750,7 +750,7 @@ pub fn Iter(comptime T: type) type {
         /// Caller owns the resulting slice.
         pub fn toOwnedSlice(self: *Iter(T), gpa: Allocator) Allocator.Error![]T {
             var list: ArrayList(T) = try .initCapacity(gpa, 16);
-            errdefer list.deinit(gpa);
+            defer list.deinit(gpa);
 
             while (self.next()) |x| {
                 errdefer self.missed = x;
@@ -772,13 +772,13 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            const s: []T = try self.toOwnedSlice(gpa);
+            const sorted: []T = try self.toOwnedSlice(gpa);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
                 .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sortUnstable(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return s;
+            mem.sortUnstable(T, sorted, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
+            return sorted;
         }
 
         /// Enumerates into new sorted slice, using a stable sorting algorithm.
@@ -793,13 +793,13 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error![]T {
-            const s: []T = try self.toOwnedSlice(gpa);
+            const sorted: []T = try self.toOwnedSlice(gpa);
             const sort_ctx: SortContext(T, @TypeOf(compare_context)) = .{
                 .ctx = compare_context,
                 .ordering = ordering,
             };
-            std.mem.sort(T, s, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
-            return s;
+            mem.sort(T, sorted, sort_ctx, SortContext(T, @TypeOf(compare_context)).lessThan);
+            return sorted;
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
@@ -813,8 +813,8 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error!OwnedSliceIterable {
-            const s: []T = try self.toOwnedSliceSorted(gpa, compare_context, ordering);
-            return ownedSlice(s, null);
+            const sorted: []T = try self.toOwnedSliceSorted(gpa, compare_context, ordering);
+            return ownedSlice(sorted, null);
         }
 
         /// Rebuilds the iterator into an ordered slice and returns an iterator that owns said slice.
@@ -827,8 +827,8 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) Allocator.Error!OwnedSliceIterable {
-            const s: []T = try self.toOwnedSliceSortedStable(gpa, compare_context, ordering);
-            return ownedSlice(s, null);
+            const sorted: []T = try self.toOwnedSliceSortedStable(gpa, compare_context, ordering);
+            return ownedSlice(sorted, null);
         }
 
         /// Enumerates the iterator to the buffer, sorts the buffer with an unstable sorting algorithm, and then returns a new `SliceIterable` over the sorted buffer.
@@ -842,8 +842,8 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) error{NoSpaceLeft}!SliceIterable {
-            const s: []T = try self.toBufferSorted(buf, compare_context, ordering);
-            return slice(s);
+            const sorted: []T = try self.toBufferSorted(buf, compare_context, ordering);
+            return slice(sorted);
         }
 
         /// Enumerates the iterator to the buffer, sorts the buffer with a stable sorting algorithm, and then returns a new `SliceIterable` over the sorted buffer.
@@ -856,8 +856,8 @@ pub fn Iter(comptime T: type) type {
             compare_context: anytype,
             ordering: Ordering,
         ) error{NoSpaceLeft}!SliceIterable {
-            const s: []T = try self.toBufferSortedStable(buf, compare_context, ordering);
-            return slice(s);
+            const sorted: []T = try self.toBufferSortedStable(buf, compare_context, ordering);
+            return slice(sorted);
         }
 
         /// Peek at the next element with or without a filter (pass in void literal `{}` for no filter).
@@ -1008,7 +1008,7 @@ pub fn Iter(comptime T: type) type {
         /// Resulting iterator owns the slice, so be sure to call `free()`.
         pub fn reverse(self: *Iter(T), gpa: Allocator) Allocator.Error!OwnedSliceIterable {
             const items: []T = try self.toOwnedSlice(gpa);
-            std.mem.reverse(T, items);
+            mem.reverse(T, items);
             return ownedSlice(items, null);
         }
 
@@ -1300,9 +1300,9 @@ pub fn range(comptime T: type, start: T, comptime len: usize) [len]T {
 }
 
 const std = @import("std");
-pub const iter_deprecated = @import("iter_deprecated.zig");
+const mem = std.mem;
 const Io = std.Io;
-const Allocator = std.mem.Allocator;
+const Allocator = mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 const DoublyLinkedList = std.DoublyLinkedList;
 const ArrayList = std.ArrayListUnmanaged;
