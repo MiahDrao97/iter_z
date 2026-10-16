@@ -6,11 +6,12 @@ Obviously, this isn't a direct one-to-one, but `iter_z` aims to provide useful q
 
 The interface is `Iter(T)`, which comes with several methods, queries, and out-of-the-box implementations.
 
-The latest release is `v0.4.0`, which leverages Zig 0.15.1.
+The latest release is `v0.4.1`, which can leverages Zig 0.15.1 and Zig 0.16.0 since this library does not use Io.
 
 - [Use This Package](#use-this-package)
 - [Other Releases](#other-releases)
     - [Main Branch](#main)
+    - [v0.4.1](#v041)
     - [v0.3.0](#v030)
     - [v0.2.1](#v021)
     - [v0.1.1](#v011)
@@ -64,7 +65,7 @@ In your build.zig.zon, add the following dependency:
     .name = .my_awesome_app,
     .dependencies = .{
         .iter_z = .{
-            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.4.0.tar.gz",
+            .url = "https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.4.1.tar.gz",
             .hash = "", // get hash
         },
     },
@@ -73,7 +74,7 @@ In your build.zig.zon, add the following dependency:
 
 Get your hash from the following:
 ```
-zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.4.0.tar.gz
+zig fetch https://github.com/MiahDrao97/iter_z/archive/refs/tags/v0.4.1.tar.gz
 ```
 
 Finally, in your build.zig, import this module in your root module:
@@ -118,6 +119,9 @@ Breaking API changes may be merged into the main branch before a new release is 
 ```
 zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
+
+### v0.4.1
+This version repesents the releases that functions with both Zig 0.15.1, 0.15.2, and 0.16.0.
 
 ### v0.3.0
 This version represents the tagged version for Zig 0.14.1.
