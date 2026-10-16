@@ -1107,7 +1107,7 @@ pub fn AutoMinContext(comptime T: type) type {
         },
         .@"enum" => struct {
             pub fn accumulate(_: @This(), a: T, b: T) T {
-                return if (@intFromEnum(a) < @intFromEnum(b)) a else b;
+                return if (@backingInt(a) < @backingInt(b)) a else b;
             }
         },
         else => @compileError("Cannot auto-min non-numeric element type '" ++ @typeName(T) ++ "'."),
@@ -1128,7 +1128,7 @@ pub fn AutoMaxContext(comptime T: type) type {
         },
         .@"enum" => struct {
             pub fn accumulate(_: @This(), a: T, b: T) T {
-                return if (@intFromEnum(a) > @intFromEnum(b)) a else b;
+                return if (@backingInt(a) > @backingInt(b)) a else b;
             }
         },
         else => @compileError("Cannot auto-max non-numeric element type '" ++ @typeName(T) ++ "'."),
@@ -1154,9 +1154,9 @@ pub fn AutoCompareContext(comptime T: type) type {
         },
         .@"enum" => struct {
             pub fn compare(_: @This(), a: T, b: T) std.math.Order {
-                return if (@intFromEnum(a) < @intFromEnum(b))
+                return if (@backingInt(a) < @backingInt(b))
                     .lt
-                else if (@intFromEnum(a) > @intFromEnum(b))
+                else if (@backingInt(a) > @backingInt(b))
                     .gt
                 else
                     .eq;
