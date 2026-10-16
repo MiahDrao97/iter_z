@@ -1305,4 +1305,4 @@ const Io = std.Io;
 const Allocator = mem.Allocator;
 const SinglyLinkedList = std.SinglyLinkedList;
 const DoublyLinkedList = std.DoublyLinkedList;
-const ArrayList = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
