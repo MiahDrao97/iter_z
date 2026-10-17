@@ -121,7 +121,7 @@ zig fetch https://github.com/MiahDrao97/iter_z/archive/main.tar.gz
 ```
 
 ### v0.4.1
-This version repesents the releases that functions with both Zig 0.15.1, 0.15.2, and 0.16.0.
+This version repesents the release that functions with Zig 0.15.1, 0.15.2, and 0.16.0.
 
 ### v0.3.0
 This version represents the tagged version for Zig 0.14.1.
