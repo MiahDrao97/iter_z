@@ -919,18 +919,17 @@ test "join" {
 
     var iter = Iter(u8).slice("abc");
     try iter.interface.joinCustom(
-        &stream.writer,
         "{c} ({d})",
         ", ",
         join,
         @Tuple(&.{ u8, u8 }),
         @TypeOf(join).extractArgs,
-    );
+    ).format(&stream.writer);
     try testing.expectEqualStrings("a (97), b (98), c (99)", stream.written());
 
     stream.clearRetainingCapacity();
 
-    try iter.interface.reset().join(&stream.writer, "{c}", ", ");
+    try iter.interface.reset().join("{c}", ", ").format(&stream.writer);
     try testing.expectEqualStrings("a, b, c", stream.written());
 }
 
