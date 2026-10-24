@@ -729,13 +729,8 @@ var stream: std.Io.Writer.Allocating = .init(std.testing.allocator);
 defer stream.deinit();
 
 var iter = Iter(u8).slice("abc");
-
-try iter.interface.join(
-    &stream.writer, // writer
-    "{c}", // format
-    ", ", // separator
-);
-try std.testing.expectEqualStrings("a, b, c", stream.written());
+try stream.writer.print("[{f}]", .{iter.interface.join("{c}", ", ")});
+try std.testing.expectEqualStrings("[a, b, c]", stream.written());
 
 // If you want a custom format that's not as simple as the example above, you can leverage `joinCustom()`:
 
@@ -746,17 +741,15 @@ const join_ctx: struct {
 } = .{};
 
 stream.clearRetainingCapacity();
-
-try iter.interface.reset().joinCustom(
-    &stream.writer, // writer
+try stream.writer.print("[ {f} ]", .{iter.reset().joinCustom(
     "{c} ({d})", // custom format for each element
     ", ", // separator
     join_ctx, // context
     @Tuple(&.{ u8, u8 }), // args type
     @TypeOf(join_ctx).extractArgs, // function that extracts the args from the element
-);
+)});
 
-try testing.expectEqualStrings("a (97), b (98), c (99)", stream.written());
+try testing.expectEqualStrings("[ a (97), b (98), c (99) ]", stream.written());
 ```
 
 ## Auto Contexts

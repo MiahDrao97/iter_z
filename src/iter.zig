@@ -1016,39 +1016,69 @@ pub fn Iter(comptime T: type) type {
         /// Each element is written, formated as specified by `element_fmt`.
         pub fn join(
             self: *Iter(T),
-            writer: *Io.Writer,
             comptime element_fmt: []const u8,
             separator: []const u8,
-        ) Io.Writer.Error!void {
-            var first: bool = true;
-            while (self.next()) |x| {
-                if (!first)
-                    try writer.writeAll(separator)
-                else
-                    first = false;
-                try writer.print(element_fmt, .{x});
-            }
+        ) DefaultJoinFormatter(element_fmt) {
+            return .{
+                .iter = self,
+                .separator = separator,
+                .ctx = {},
+            };
         }
 
         /// If `T` is a complex type that does not define a `format()` method, you're still in luck.
         /// You may pass in a context, args type, and function to extract the args from each element.
         pub fn joinCustom(
             self: *Iter(T),
-            writer: *Io.Writer,
             comptime element_fmt: []const u8,
             separator: []const u8,
             ctx: anytype,
             comptime TArgs: type,
             extractArgs: fn (@TypeOf(ctx), T) TArgs,
-        ) Io.Writer.Error!void {
-            var first: bool = true;
-            while (self.next()) |x| {
-                if (!first)
-                    try writer.writeAll(separator)
-                else
-                    first = false;
-                try writer.print(element_fmt, extractArgs(ctx, x));
-            }
+        ) JoinFormatter(element_fmt, TArgs, @TypeOf(ctx), extractArgs) {
+            return .{
+                .iter = self,
+                .separator = separator,
+                .ctx = ctx,
+            };
+        }
+
+        /// `JoinFormatter`, where the format args is simply the element itself.
+        pub fn DefaultJoinFormatter(comptime element_fmt: []const u8) type {
+            const DefaultArgs = @Tuple(&.{T});
+            return JoinFormatter(element_fmt, DefaultArgs, void, struct {
+                fn extract(_: void, elem: T) DefaultArgs {
+                    return .{elem};
+                }
+            }.extract);
+        }
+
+        /// Used for formatting each element.
+        /// `TArgs` represents the args that would be passed to a print function with `element_fmt` as the print template.
+        /// `TContext` is used for the `extractArgs` closure, if any data should be captured.
+        /// `extractArgs` should take in an instance of `TContext` and `T` to produce the args used in a print function (`TArgs`).
+        pub fn JoinFormatter(
+            comptime element_fmt: []const u8,
+            comptime TArgs: type,
+            comptime TContext: type,
+            comptime extractArgs: fn (TContext, T) TArgs,
+        ) type {
+            return struct {
+                iter: *Iter(T),
+                separator: []const u8,
+                ctx: TContext,
+
+                pub fn format(this: @This(), writer: *Io.Writer) Io.Writer.Error!void {
+                    var first: bool = true;
+                    while (this.iter.next()) |x| {
+                        if (!first)
+                            try writer.writeAll(this.separator)
+                        else
+                            first = false;
+                        try writer.print(element_fmt, extractArgs(this.ctx, x));
+                    }
+                }
+            };
         }
     };
 }
