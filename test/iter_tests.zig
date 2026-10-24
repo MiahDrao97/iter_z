@@ -908,29 +908,31 @@ test "empty linked lists" {
     }
 }
 test "join" {
-    const join: struct {
+    var stream: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer stream.deinit();
+
+    var iter = Iter(u8).slice("abc");
+    try stream.writer.print("[{f}]", .{iter.interface.join("{c}", ", ")});
+    try std.testing.expectEqualStrings("[a, b, c]", stream.written());
+
+    // If you want a custom format that's not as simple as the example above, you can leverage `joinCustom()`:
+
+    const join_ctx: struct {
         fn extractArgs(_: @This(), x: u8) @Tuple(&.{ u8, u8 }) {
             return .{ x, x };
         }
     } = .{};
 
-    var stream: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer stream.deinit();
-
-    var iter = Iter(u8).slice("abc");
-    try iter.interface.joinCustom(
-        "{c} ({d})",
-        ", ",
-        join,
-        @Tuple(&.{ u8, u8 }),
-        @TypeOf(join).extractArgs,
-    ).format(&stream.writer);
-    try testing.expectEqualStrings("a (97), b (98), c (99)", stream.written());
-
     stream.clearRetainingCapacity();
+    try stream.writer.print("[ {f} ]", .{iter.reset().joinCustom(
+        "{c} ({d})", // custom format for each element
+        ", ", // separator
+        join_ctx, // context
+        @Tuple(&.{ u8, u8 }), // args type
+        @TypeOf(join_ctx).extractArgs, // function that extracts the args from the element
+    )});
 
-    try iter.interface.reset().join("{c}", ", ").format(&stream.writer);
-    try testing.expectEqualStrings("a, b, c", stream.written());
+    try testing.expectEqualStrings("[ a (97), b (98), c (99) ]", stream.written());
 }
 
 const std = @import("std");

@@ -1043,15 +1043,20 @@ pub fn Iter(comptime T: type) type {
             };
         }
 
+        /// `JoinFormatter`, where the format args is simply the element itself.
         pub fn DefaultJoinFormatter(comptime element_fmt: []const u8) type {
-            const DefaultArgs = struct { x: T };
+            const DefaultArgs = @Tuple(&.{T});
             return JoinFormatter(element_fmt, DefaultArgs, void, struct {
-                fn extract(_: void, x: T) DefaultArgs {
-                    return .{ .x = x };
+                fn extract(_: void, elem: T) DefaultArgs {
+                    return .{elem};
                 }
             }.extract);
         }
 
+        /// Used for formatting each element.
+        /// `TArgs` represents the args that would be passed to a print function with `element_fmt` as the print template.
+        /// `TContext` is used for the `extractArgs` closure, if any data should be captured.
+        /// `extractArgs` should take in an instance of `TContext` and `T` to produce the args used in a print function (`TArgs`).
         pub fn JoinFormatter(
             comptime element_fmt: []const u8,
             comptime TArgs: type,
