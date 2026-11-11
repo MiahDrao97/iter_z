@@ -368,7 +368,7 @@ const digit_to_str: struct {
     threadlocal var buffer: [4]u8 = undefined;
 
     pub fn transform(_: @This(), byte: u8) []const u8 {
-        return std.fmt.bufPrint(&buffer, "{d}", .{byte}) catch unreachable,
+        return std.mem.print(&buffer, "{d}", .{byte}) catch unreachable,
     }
 } = .{};
 
