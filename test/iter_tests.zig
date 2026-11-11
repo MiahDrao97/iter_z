@@ -27,7 +27,7 @@ const NumToString = struct {
     buf: []u8,
 
     pub fn transform(this: @This(), val: u8) []const u8 {
-        return std.fmt.bufPrint(this.buf, "{d}", .{val}) catch this.buf;
+        return std.mem.print(this.buf, "{d}", .{val}) catch this.buf;
     }
 };
 
@@ -360,8 +360,8 @@ test "clone with select" {
 
         pub fn transform(_: @This(), byte: u8) []const u8 {
             return switch (representation) {
-                .decimal => std.fmt.bufPrint(&buffer, "{d}", .{byte}) catch unreachable,
-                .hex => std.fmt.bufPrint(&buffer, "0x{x:0>2}", .{byte}) catch unreachable,
+                .decimal => std.mem.print(&buffer, "{d}", .{byte}) catch unreachable,
+                .hex => std.mem.print(&buffer, "0x{x:0>2}", .{byte}) catch unreachable,
             };
         }
     } = .{};
